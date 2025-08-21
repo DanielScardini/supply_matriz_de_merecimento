@@ -1,0 +1,74 @@
+---
+description: Commit on git
+globs: 
+alwaysApply: false
+---
+# Git Commit Rules - Healthcare Data Analysis Project
+
+## Commit Message Format
+```
+<type>(<scope>): <description>
+
+[optional body]
+
+[optional footer]
+```
+
+## Required Commit Types
+- **feat**: New feature or analysis capability
+- **fix**: Bug fix or data processing correction
+- **docs**: Documentation updates
+- **style**: Code formatting, missing semicolons, etc.
+- **refactor**: Code restructuring without changing functionality
+- **perf**: Performance improvements
+- **test**: Adding or updating tests
+- **chore**: Maintenance tasks, dependency updates
+
+## Scope Examples (Optional)
+- **data**: Data loading, processing, or validation changes
+- **analysis**: Analysis logic or calculations
+- **viz**: Visualization or plotting changes
+- **config**: Configuration file changes
+- **scripts**: Analysis script modifications
+
+## Good Examples
+```
+feat(analysis): add churn rate calculation for 2024 data
+fix(data): correct date parsing in parquet loader
+docs: update README with new analysis methodology
+refactor(viz): extract plot themes to separate module
+perf(data): optimize polars query for large datasets
+test: add unit tests for customer segmentation
+chore: update polars to version 0.20.0
+```
+
+## Bad Examples
+```
+update code
+fixed bug
+added stuff
+```
+
+## Breaking Changes
+Use `!` after type/scope or add `BREAKING CHANGE:` in footer:
+```
+feat(analysis)!: change churn calculation method
+fix(data)!: modify column names in output
+```
+
+## Body Guidelines
+- Start with blank line after description
+- Explain WHY the change was made
+- Include any important context
+- Reference related issues if applicable
+
+## Footer Guidelines
+- Use for breaking changes: `BREAKING CHANGE: <description>`
+- Reference issues: `Closes #123`
+- Co-authored commits: `Co-authored-by: Name <email>`
+
+## Project-Specific Rules
+- Always test data processing changes with sample data
+- Include date ranges in analysis-related commits
+- Reference specific analysis types (churn, retention, segmentation)
+- Mention if plots or outputs are affected

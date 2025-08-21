@@ -1,0 +1,10 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+## Building a repo
+
+- When building a repo, you'll check for gamma-config best practices and best formats
+- Do pip install gamma-config
+- Ask me for the project scope to check what applies from the gamma-config

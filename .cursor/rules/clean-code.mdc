@@ -1,0 +1,109 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Clean Code Rules - MANDATORY DIRECTIVES
+
+## NAMING - ALWAYS DO THIS
+- Variables: `user_count`, `monthly_revenue`, `is_valid`
+- Functions: `calculate_discount()`, `validate_input()`, `process_data()`
+- Classes: `UserManager`, `DataProcessor`
+- Constants: `MAX_RETRIES`, `DEFAULT_TIMEOUT`
+
+## FUNCTIONS - STRICT RULES
+- MAX 20 lines per function
+- ONE responsibility only
+- Return early, avoid deep nesting
+- Use descriptive names starting with verbs
+
+## CONSTANTS - NO MAGIC NUMBERS
+```python
+# DO THIS
+DISCOUNT_RATE = 0.1
+MAX_ATTEMPTS = 3
+TIMEOUT_SECONDS = 30
+
+# NOT THIS
+return price * 0.1  # Magic number
+if attempts > 3:    # Magic number
+```
+
+## COMMENTS - ONLY WHEN NEEDED
+- Explain WHY, not WHAT
+- Use docstrings for public functions
+- No obvious code comments
+- Document complex business logic only
+
+## CODE STRUCTURE - MANDATORY
+- NO code duplication (DRY principle)
+- MAX 3 levels of nesting
+- Separate concerns (validation, calculation, output)
+- Use early returns to reduce complexity
+
+## LANGUAGE RULES
+
+### Python
+- snake_case for variables/functions
+- PascalCase for classes
+- 4 spaces indentation
+- PEP 8 compliance
+
+### JavaScript/TypeScript
+- camelCase for variables/functions
+- PascalCase for classes
+- 2 spaces indentation
+- Use const/let, never var
+
+## REFACTORING TRIGGERS - ACT IMMEDIATELY
+1. Function > 20 lines → Split it
+2. Repeated code → Extract function
+3. Magic numbers → Define constants
+4. Deep nesting → Use early returns
+5. Generic names → Use descriptive names
+6. Multiple responsibilities → Split functions
+
+## CODE REVIEW CHECKLIST
+- [ ] Functions ≤ 20 lines
+- [ ] No magic numbers
+- [ ] Descriptive names
+- [ ] No code duplication
+- [ ] Single responsibility
+- [ ] Error handling present
+- [ ] Nesting ≤ 3 levels
+- [ ] Comments explain WHY
+
+## EXAMPLES
+
+### ❌ BAD - NEVER DO
+```python
+def process(d):
+    if d['type'] == 'user':
+        if d['status'] == 'active':
+            if d['age'] > 18:
+                if d['balance'] > 0:
+                    return d['balance'] * 0.1
+    return 0
+```
+
+### ✅ GOOD - ALWAYS DO
+```python
+def calculate_user_discount(user_data):
+    if not is_eligible_for_discount(user_data):
+        return 0
+    return user_data['balance'] * DISCOUNT_RATE
+
+def is_eligible_for_discount(user_data):
+    return (user_data['type'] == 'user' and
+            user_data['status'] == 'active' and
+            user_data['age'] > MINIMUM_AGE and
+            user_data['balance'] > 0)
+```
+
+## ENFORCEMENT
+- Review code against this checklist before committing
+- Refactor immediately when violations are found
+- Use linters to catch style violations
+- Pair program to enforce standards
+
+**REMEMBER: Write for humans first, computers second.**

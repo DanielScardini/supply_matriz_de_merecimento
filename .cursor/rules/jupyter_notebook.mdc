@@ -1,0 +1,244 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Jupyter Notebook Directives for Python Files
+
+## Overview
+This file contains directives and objective rules for working with plain Python files as if they were Jupyter notebooks using the Jupyter extension in Cursor.
+
+## Cell Delimiters
+
+### Code Cells
+Use `#%%` to create code cells that can be executed individually:
+
+```python
+#%%
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+print("✅ Libraries imported successfully!")
+```
+
+### Markdown Cells
+Use `#%% [markdown]` to create markdown cells for documentation:
+
+```python
+#%% [markdown]
+# 📊 Data Exploration Project
+
+This notebook demonstrates a complete data exploration workflow with organized structure and detailed documentation.
+
+<details>
+<summary><b>🎯 Project Objectives</b></summary>
+
+- Perform complete exploratory data analysis
+- Identify relevant patterns and insights
+- Prepare data for modeling
+- Document findings and recommendations
+
+</details>
+
+---
+```
+
+## Best Practices
+
+### 1. Cell Organization
+- Always start with a markdown cell containing project title and objectives
+- Use descriptive markdown headers for each section
+- Group related code cells together
+- End with a conclusions markdown cell
+
+### 2. Markdown Structure
+- Use emojis for visual appeal and quick identification
+- Implement collapsible sections with `<details>` and `<summary>`
+- Use hierarchical headers (#, ##, ###)
+- Include checklists and progress indicators
+
+### 3. Code Cell Structure
+- Keep cells focused on single tasks
+- Add descriptive comments within cells
+- Use print statements for progress tracking
+- Include error handling where appropriate
+
+### 4. Execution Guidelines
+- **ALWAYS** run cells after creation
+- Test each cell individually before proceeding
+- Verify outputs match expectations
+- Handle any import or dependency issues immediately
+
+## Example Structure
+
+```python
+#%% [markdown]
+# 📊 Project Title
+# 
+# Brief description of the project
+# 
+# <details>
+# <summary><b>🎯 Objectives</b></summary>
+# - Objective 1
+# - Objective 2
+# - Objective 3
+# </details>
+
+#%% [markdown]
+## 1. Setup and Imports
+# 
+# <details>
+# <summary><b>📦 Libraries Used</b></summary>
+# - pandas: Data manipulation
+# - numpy: Numerical operations
+# - matplotlib/seaborn: Visualizations
+# </details>
+
+#%%
+# Import necessary libraries
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Visualization settings
+plt.style.use('seaborn-v0_8')
+sns.set_palette("husl")
+pd.set_option('display.max_columns', None)
+
+print("✅ Libraries imported successfully!")
+
+#%% [markdown]
+## 2. Data Loading and Overview
+# 
+# <details>
+# <summary><b>🔍 Initial Analysis</b></summary>
+# 
+# In this section we will:
+# - Load the dataset
+# - Examine basic structure
+# - Identify data types
+# - Check for missing values
+# 
+# </details>
+
+#%%
+# Load and examine data
+df = pd.read_csv('data.csv')
+print("📊 Dataset loaded!")
+print(f"Dimensions: {df.shape}")
+df.head()
+
+#%% [markdown]
+## 3. Data Analysis
+# 
+# Perform statistical analysis and visualizations
+
+#%%
+# Statistical summary
+print("📈 Statistical Summary:")
+df.describe()
+
+#%%
+# Create visualizations
+fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+# ... visualization code ...
+plt.tight_layout()
+plt.show()
+
+#%% [markdown]
+## 4. Conclusions
+# 
+# <details>
+# <summary><b>🔍 Key Findings</b></summary>
+# 
+# ### Patterns Identified
+# - Pattern 1
+# - Pattern 2
+# 
+# ### Next Steps
+# - Deep correlation analysis
+# - Predictive modeling
+# - Data segmentation
+# 
+# </details>
+# 
+# ---
+# 
+# ### 📝 Executive Summary
+# 
+# This notebook demonstrated a complete data exploration workflow including:
+# - ✅ Data loading and preparation
+# - ✅ Descriptive statistical analysis
+# - ✅ Exploratory visualizations
+# - ✅ Pattern identification and insights
+```
+
+## Execution Commands
+
+### Running Cells
+- **Run Current Cell**: `Shift + Enter`
+- **Run Cell and Move Down**: `Alt + Enter`
+- **Run All Cells**: `Ctrl + Shift + Enter`
+
+### Navigation
+- **Next Cell**: `Ctrl + Down`
+- **Previous Cell**: `Ctrl + Up`
+- **Add Cell Above**: `Ctrl + Shift + A`
+- **Add Cell Below**: `Ctrl + Shift + B`
+
+## Quality Standards
+
+### Code Quality
+- Follow PEP 8 style guidelines
+- Use descriptive variable names
+- Keep functions under 20 lines
+- Add type hints where appropriate
+- Include error handling
+
+### Documentation Quality
+- Use clear, concise language
+- Include context and purpose
+- Explain complex business logic
+- Document assumptions and limitations
+- Provide actionable insights
+
+### Visualization Quality
+- Use professional color schemes
+- Include proper labels and titles
+- Ensure readability and clarity
+- Use appropriate chart types
+- Include legends where needed
+
+## Troubleshooting
+
+### Common Issues
+1. **Import Errors**: Install missing packages with `pip install package_name`
+2. **Kernel Issues**: Restart kernel if cells don't execute properly
+3. **Memory Issues**: Clear variables with `del variable_name` or restart kernel
+4. **Display Issues**: Use `plt.show()` for matplotlib plots
+
+### Debugging Tips
+- Run cells individually to isolate issues
+- Use `print()` statements for debugging
+- Check data types with `df.dtypes`
+- Verify data shape with `df.shape`
+- Use `df.info()` for comprehensive overview
+
+## File Naming Convention
+- Use descriptive names: `data_exploration_analysis.py`
+- Include date if needed: `customer_analysis_2024.py`
+- Use underscores for spaces
+- Keep names concise but informative
+
+## Version Control
+- Commit frequently with descriptive messages
+- Include requirements.txt for dependencies
+- Document any environment-specific configurations
+- Use .gitignore for large data files and outputs
+
+---
+
+**Remember**: Always run cells after creation and ensure all outputs are as expected before proceeding to the next section.

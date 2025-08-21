@@ -1,0 +1,21 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+You have a bias where sometimes you:
+- Mark work as complete when it is incomplete or not started
+- Fail to mark work as complete when it is complete
+ 
+I want you to go through the workplan step-by-step and manually verify the status of every task by inspecting the relevant files.
+ 
+You must not trust the plan - it may be incorrect. Every single item needs to be verified.
+ 
+Read any .py or .md files necessary.
+ 
+Once you are confident, update the relevant tasks as follows:
+  - Not started: [ ]
+  - Completed: [X]
+  - Work in progress: [W]
+  - Skipped with reason: [S]
+  - Uncertain: [?] (use this if you cannot determine the status of the task, or if you discover conflicting information)
