@@ -96,7 +96,9 @@ A nova ferramenta traz **maior robustez e melhor governança** através de:
 ## Tecnologias
 
 - **Databricks**: Plataforma principal para processamento e automação
-- **Python/SQL**: Linguagens para implementação dos algoritmos
+- **PySpark**: Framework para processamento distribuído de dados
+- **Python**: Linguagem principal para implementação dos algoritmos
+- **SQL**: Consultas para extração e transformação de dados
 - **Agendamento**: Automação de rodadas de cálculo
 - **Alertas**: Sistema de notificações para anomalias
 
@@ -105,17 +107,92 @@ A nova ferramenta traz **maior robustez e melhor governança** através de:
 ```
 supply_matriz_de_merecimento/
 ├── README.md
-├── notebooks/          # Notebooks Databricks
-├── src/               # Código fonte Python
-├── config/            # Configurações e parâmetros
-├── data/              # Dados de entrada e saída
-└── docs/              # Documentação técnica
+├── src/                           # Código fonte Python
+│   └── Preparação de tabelas - Matriz de merecimento.py
+├── .cursor/                       # Regras e configurações do Cursor
+│   └── rules/
+│       ├── python.mdc            # Regras para Python
+│       ├── typescript.mdc        # Regras para TypeScript
+│       └── pyspark.mdc           # Regras para PySpark
+└── docs/                         # Documentação técnica
 ```
+
+## Arquitetura do Código
+
+### 🔧 **Módulos Principais**
+
+O código está organizado em funções modulares e bem documentadas:
+
+#### **1. Carregamento de Dados**
+- `load_estoque_loja_data()`: Dados de estoque das lojas ativas
+- `load_mercadoria_data()`: Dados de mercadorias e classificações
+- `build_sales_view()`: Visão unificada e agregada de vendas
+
+#### **2. Processamento de Dados**
+- `create_base_merecimento()`: União de estoque, vendas e mercadorias
+- `add_rolling_90_metrics()`: Cálculo de métricas de média móvel de 90 dias
+- `create_analysis_with_rupture_flags()`: Análise com flags de ruptura
+
+#### **3. Mapeamento de Abastecimento**
+- `load_cd_characteristics()`: Características dos Centros de Distribuição
+- `load_store_characteristics()`: Características das lojas ativas
+- `load_supply_plan_mapping()`: Mapeamento de plano de abastecimento
+- `create_complete_supply_mapping()`: Mapeamento completo de abastecimento
+
+#### **4. Finalização e Persistência**
+- `create_final_merecimento_base()`: Base final de merecimento
+- `save_merecimento_table()`: Salvamento como tabela Delta
+
+### 📚 **Padrões de Qualidade**
+
+- **Type Hints**: Tipagem completa para todos os parâmetros e retornos
+- **Docstrings**: Documentação detalhada seguindo padrão Google
+- **Funções Modulares**: Cada função com responsabilidade única
+- **Nomenclatura Consistente**: Padrões de nomenclatura Python
+- **Tratamento de Erros**: Validações e verificações robustas
+
+### 🚀 **Funcionalidades Principais**
+
+1. **Cálculo de Médias Móveis**: Métricas de 90 dias para receita e quantidade
+2. **Análise de Ruptura**: Identificação e cálculo de impacto de rupturas
+3. **Mapeamento de Supply Chain**: Relacionamento entre CDs, lojas e rotas
+4. **Normalização de Dados**: Padronização de IDs e formatos
+5. **Persistência Delta**: Salvamento otimizado para análise posterior
+
+## Como Usar
+
+### **Pré-requisitos**
+- Databricks workspace configurado
+- Acesso às tabelas de dados necessárias
+- Permissões para criação de tabelas Delta
+
+### **Execução**
+```python
+# O código está estruturado para execução direta no Databricks
+# Cada seção pode ser executada independentemente
+# A tabela final será salva em: databox.bcg_comum.supply_base_merecimento_diario
+```
+
+### **Configuração**
+- Ajustar datas de início e fim conforme necessário
+- Configurar parâmetros de filtro para diferentes categorias
+- Personalizar regras de negócio específicas
 
 ## Status do Projeto
 
+✅ **Código Refatorado e Documentado** - Estrutura modular implementada
 🚧 **Em Desenvolvimento** - Ferramenta para discussão e implementação
+
+### **Últimas Atualizações**
+- **Refatoração completa** do código para funções modulares
+- **Documentação completa** com docstrings e type hints
+- **Organização estrutural** seguindo melhores práticas Python/PySpark
+- **Padrões de qualidade** implementados para manutenibilidade
 
 ---
 
 *Desenvolvido para o time de Supply do Grupo Casas Bahia*
+
+**Autor**: Scardini  
+**Data**: 2025  
+**Versão**: 2.0 - Refatorado e Documentado
