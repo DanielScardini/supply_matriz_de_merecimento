@@ -1,10 +1,10 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # Matriz de Merecimento - Preparação de Tabelas
-# MAGIC 
+# MAGIC
 # MAGIC Este notebook implementa a preparação de tabelas para análise de matriz de merecimento
 # MAGIC em sistema de supply chain, utilizando PySpark para processamento de dados.
-# MAGIC 
+# MAGIC
 # MAGIC **Author**: Scardini  
 # MAGIC **Date**: 2025  
 # MAGIC **Purpose**: Preparar tabelas para análise de matriz de merecimento e estoque
@@ -362,7 +362,9 @@ def create_analysis_with_rupture_flags(df: DataFrame) -> DataFrame:
     return (
         df
         .withColumn("FlagRuptura",
-                    F.when(F.col("Media90_Qt_venda_estq") > F.col("EstoqueLoja"), F.lit(1))
+                    F.when(
+                        (F.col("Media90_Qt_venda_estq") > F.col("EstoqueLoja")) &
+                        (F.col('DsObrigatorio') == 'S'), F.lit(1))
                     .otherwise(F.lit(0)))
         .withColumn("deltaRuptura",
                     F.when(
@@ -385,7 +387,7 @@ df_analise_r90 = create_analysis_with_rupture_flags(df_merecimento_base_r90)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Funções de Normalização e Carregamento de Dados
+# MAGIC ##Funções de Normalização e Carregamento de Dados
 
 # COMMAND ----------
 
@@ -652,11 +654,11 @@ save_merecimento_table(
 
 # MAGIC %md
 # MAGIC ## ✅ Processo Concluído
-# MAGIC 
+# MAGIC
 # MAGIC A tabela de matriz de merecimento foi criada e salva com sucesso!
-# MAGIC 
+# MAGIC
 # MAGIC **Tabela de destino**: `databox.bcg_comum.supply_base_merecimento_diario`
-# MAGIC 
+# MAGIC
 # MAGIC **Conteúdo**:
 # MAGIC - Dados de estoque das lojas
 # MAGIC - Histórico de vendas com médias móveis de 90 dias
