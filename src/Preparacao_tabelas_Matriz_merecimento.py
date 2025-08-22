@@ -1,15 +1,21 @@
-"""
-Matriz de Merecimento - Preparação de Tabelas
-
-Este módulo implementa a preparação de tabelas para análise de matriz de merecimento
-em sistema de supply chain, utilizando PySpark para processamento de dados.
-
-Author: Scardini
-Date: 2025
-Purpose: Preparar tabelas para análise de matriz de merecimento e estoque
-"""
-
 # Databricks notebook source
+# MAGIC %md
+# MAGIC # Matriz de Merecimento - Preparação de Tabelas
+# MAGIC 
+# MAGIC Este notebook implementa a preparação de tabelas para análise de matriz de merecimento
+# MAGIC em sistema de supply chain, utilizando PySpark para processamento de dados.
+# MAGIC 
+# MAGIC **Author**: Scardini  
+# MAGIC **Date**: 2025  
+# MAGIC **Purpose**: Preparar tabelas para análise de matriz de merecimento e estoque
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Imports e Configuração Inicial
+
+# COMMAND ----------
+
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F, Window
 from datetime import datetime, timedelta
@@ -23,7 +29,7 @@ hoje_str = hoje.strftime("%Y-%m-%d")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # Base de estoque lojas
+# MAGIC ## Base de Estoque Lojas
 
 # COMMAND ----------
 
@@ -71,7 +77,7 @@ df_estoque_loja = load_estoque_loja_data(spark, hoje.year)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # Base de mercadoria
+# MAGIC ## Base de Mercadoria
 
 # COMMAND ----------
 
@@ -105,13 +111,9 @@ df_mercadoria = load_mercadoria_data(spark)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # Base de vendas
+# MAGIC ## Base de Vendas
 
 # COMMAND ----------
-
-# sales_view.py
-# Author: Scardini
-# Purpose: Build unified, aggregated and enriched sales view in one straightforward function.
 
 from datetime import date
 
@@ -225,14 +227,13 @@ def build_sales_view(
 
     return result
 
-if __name__ == "__main__":
-    spark = SparkSession.builder.getOrCreate()
-    sales_df = build_sales_view(spark)
+# Executar a função de vendas
+sales_df = build_sales_view(spark)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # Join para chegar em estoque e tabelas
+# MAGIC ## Join para Chegar em Estoque e Tabelas
 
 # COMMAND ----------
 
@@ -259,6 +260,11 @@ def create_base_merecimento(
     )
 
 df_merecimento_base = create_base_merecimento(df_estoque_loja, sales_df, df_mercadoria)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Cálculo de Métricas de Média Móvel de 90 Dias
 
 # COMMAND ----------
 
@@ -334,6 +340,11 @@ def add_rolling_90_metrics(df: DataFrame) -> DataFrame:
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Análise com Flags de Ruptura
+
+# COMMAND ----------
+
 def create_analysis_with_rupture_flags(df: DataFrame) -> DataFrame:
     """
     Cria análise com flags de ruptura e métricas calculadas.
@@ -373,6 +384,11 @@ df_analise_r90 = create_analysis_with_rupture_flags(df_merecimento_base_r90)
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Funções de Normalização e Carregamento de Dados
+
+# COMMAND ----------
+
 def normalize_ids(df: DataFrame, cols: List[str]) -> DataFrame:
     """
     Normaliza IDs removendo zeros à esquerda e fazendo trim.
@@ -397,6 +413,11 @@ def normalize_ids(df: DataFrame, cols: List[str]) -> DataFrame:
              )
         )
     return df
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Carregamento de Características de CDs e Lojas
 
 # COMMAND ----------
 
@@ -491,6 +512,13 @@ def load_supply_plan_mapping(spark: SparkSession, current_date: datetime) -> Dat
         )
     )
 
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Criação do Mapeamento Completo de Abastecimento
+
+# COMMAND ----------
+
 def create_complete_supply_mapping(
     spark: SparkSession, 
     current_date: datetime
@@ -552,7 +580,7 @@ def create_complete_supply_mapping(
         .select(
             "CdFilial", "BandeiraLoja", "NmLoja", "NmCidadeLoja", "NmUFLoja", "CEPLoja",
             "NmPorteLoja", "TipoLoja", "LatitudeLoja", "LongitudeLoja",
-            "CD_primario", *[F.col(c).alias(f"{c}_primario") for c in ["NmFilial", "NmCidade_UF", "NmTipoFilial"]],
+            "CdFilial", *[F.col(c).alias(f"{c}_primario") for c in ["NmFilial", "NmCidade_UF", "NmTipoFilial"]],
             "CD_secundario", *[F.col(c).alias(f"{c}_secundario") for c in ["NmFilial", "NmCidade_UF", "NmTipoFilial"]],
             "LeadTime", "QtdCargasDia", "DsCubagemCaminhao", "DsGrupoHorario",
             "QtdSegunda", "QtdTerca", "QtdQuarta", "QtdQuinta",
@@ -562,6 +590,11 @@ def create_complete_supply_mapping(
 
 # Carregar mapeamento completo
 de_para_filial_CD = create_complete_supply_mapping(spark, hoje)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Criação da Base Final e Salvamento
 
 # COMMAND ----------
 
@@ -588,6 +621,11 @@ df_merecimento_base_cd_loja = create_final_merecimento_base(df_merecimento_base,
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Salvamento da Tabela Final
+
+# COMMAND ----------
+
 def save_merecimento_table(df: DataFrame, table_name: str) -> None:
     """
     Salva DataFrame de merecimento como tabela Delta.
@@ -609,3 +647,19 @@ save_merecimento_table(
     df_merecimento_base_cd_loja, 
     "databox.bcg_comum.supply_base_merecimento_diario"
 )
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## ✅ Processo Concluído
+# MAGIC 
+# MAGIC A tabela de matriz de merecimento foi criada e salva com sucesso!
+# MAGIC 
+# MAGIC **Tabela de destino**: `databox.bcg_comum.supply_base_merecimento_diario`
+# MAGIC 
+# MAGIC **Conteúdo**:
+# MAGIC - Dados de estoque das lojas
+# MAGIC - Histórico de vendas com médias móveis de 90 dias
+# MAGIC - Análise de ruptura e receita perdida
+# MAGIC - Mapeamento completo de abastecimento (CDs e lojas)
+# MAGIC - Características geográficas e operacionais
