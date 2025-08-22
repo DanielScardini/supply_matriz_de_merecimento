@@ -321,22 +321,9 @@ def add_rolling_90_metrics(df: DataFrame) -> DataFrame:
         "Media90_Qt_venda_estq": 0.0
     })
 
-    # Reordenar colunas conforme lista original + novas métricas
-    cols_base = [
-        'DtAtual','CdSku','CdFilial','DsSku','DsSetor','DsCurva','DsCurvaAbcLoja',
-        'StLinha','TipoEntrega','QtdEstoqueCDVinculado','DDE','EstoqueLoja', 'DsObrigatorio',
-        'ClassificacaoDDE','data_ingestao','Ate_30D_Etq_Disp_Qt','Ate_45D_Etq_Disp_Qt',
-        'Ate_60D_Etq_Disp_Qt','Ate_75D_Etq_Disp_Qt','Ate_90D_Etq_Disp_Qt',
-        'Ate_180D_Etq_Disp_Qt','Ate_270D_Etq_Disp_Qt','Ate_1Ano_Etq_Disp_Qt',
-        'Maior_1Ano_Etq_Disp_Qt','classificacao_aposta','year_month',
-        'Receita','QtMercadoria','TeveVenda'
-    ]
-
-    novas = ["Media90_Receita_venda_estq", "Media90_Qt_venda_estq"]
-
-    # Manter colunas existentes que não estejam na lista (evita erros caso haja extras)
-    existentes = [c for c in cols_base if c in df3.columns]
-    return df3.select(*existentes, *novas)
+    # Manter TODAS as colunas existentes + novas métricas
+    # Não filtrar por lista específica para evitar perda de dados
+    return df3
 
 # COMMAND ----------
 
@@ -383,6 +370,9 @@ def create_analysis_with_rupture_flags(df: DataFrame) -> DataFrame:
 
 df_merecimento_base_r90 = add_rolling_90_metrics(df_merecimento_base)
 df_merecimento_base_r90 = create_analysis_with_rupture_flags(df_merecimento_base_r90)
+
+# Debug após transformações
+debug_dataframe_info(df_merecimento_base_r90, "Base Merecimento com Médias Móveis e Flags")
 
 # COMMAND ----------
 
@@ -593,6 +583,9 @@ def create_complete_supply_mapping(
 # Carregar mapeamento completo
 de_para_filial_CD = create_complete_supply_mapping(spark, hoje)
 
+# Debug do mapeamento de abastecimento
+debug_dataframe_info(de_para_filial_CD, "Mapeamento de Abastecimento (CDs e Lojas)")
+
 # COMMAND ----------
 
 # MAGIC %md
@@ -620,6 +613,9 @@ def create_final_merecimento_base(
     )
 
 df_merecimento_base_cd_loja = create_final_merecimento_base(df_merecimento_base_r90, de_para_filial_CD)
+
+# Debug da base final
+debug_dataframe_info(df_merecimento_base_cd_loja, "Base Final de Merecimento (antes do salvamento)")
 
 # COMMAND ----------
 
@@ -665,3 +661,33 @@ save_merecimento_table(
 # MAGIC - Análise de ruptura e receita perdida
 # MAGIC - Mapeamento completo de abastecimento (CDs e lojas)
 # MAGIC - Características geográficas e operacionais
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Debug: Verificação de Colunas
+
+# COMMAND ----------
+
+def debug_dataframe_info(df: DataFrame, stage_name: str):
+    """
+    Função de debug para verificar informações do DataFrame em cada etapa.
+    
+    Args:
+        df: DataFrame para verificar
+        stage_name: Nome da etapa para identificação
+    """
+    print(f"\n🔍 DEBUG - {stage_name}")
+    print("=" * 60)
+    print(f"📊 Total de registros: {df.count():,}")
+    print(f"📋 Total de colunas: {len(df.columns)}")
+    print(f"📋 Colunas disponíveis:")
+    for i, col in enumerate(df.columns, 1):
+        print(f"  {i:2d}. {col}")
+    print("-" * 60)
+
+# Verificar colunas em cada etapa
+debug_dataframe_info(df_estoque_loja, "Estoque Lojas")
+debug_dataframe_info(sales_df, "Vendas")
+debug_dataframe_info(df_mercadoria, "Mercadoria")
+debug_dataframe_info(df_merecimento_base, "Base Merecimento (após joins)")
