@@ -382,7 +382,7 @@ def create_analysis_with_rupture_flags(df: DataFrame) -> DataFrame:
     )
 
 df_merecimento_base_r90 = add_rolling_90_metrics(df_merecimento_base)
-df_analise_r90 = create_analysis_with_rupture_flags(df_merecimento_base_r90)
+df_merecimento_base_r90 = create_analysis_with_rupture_flags(df_merecimento_base_r90)
 
 # COMMAND ----------
 
@@ -582,7 +582,7 @@ def create_complete_supply_mapping(
         .select(
             "CdFilial", "BandeiraLoja", "NmLoja", "NmCidadeLoja", "NmUFLoja", "CEPLoja",
             "NmPorteLoja", "TipoLoja", "LatitudeLoja", "LongitudeLoja",
-            "CdFilial", *[F.col(c).alias(f"{c}_primario") for c in ["NmFilial", "NmCidade_UF", "NmTipoFilial"]],
+            "CdFilial", "Cd_primario", *[F.col(c).alias(f"{c}_primario") for c in ["NmFilial", "NmCidade_UF", "NmTipoFilial"]],
             "CD_secundario", *[F.col(c).alias(f"{c}_secundario") for c in ["NmFilial", "NmCidade_UF", "NmTipoFilial"]],
             "LeadTime", "QtdCargasDia", "DsCubagemCaminhao", "DsGrupoHorario",
             "QtdSegunda", "QtdTerca", "QtdQuarta", "QtdQuinta",
@@ -619,7 +619,7 @@ def create_final_merecimento_base(
         .join(supply_mapping, on="CdFilial", how="left")
     )
 
-df_merecimento_base_cd_loja = create_final_merecimento_base(df_merecimento_base, de_para_filial_CD)
+df_merecimento_base_cd_loja = create_final_merecimento_base(df_merecimento_base_r90, de_para_filial_CD)
 
 # COMMAND ----------
 
