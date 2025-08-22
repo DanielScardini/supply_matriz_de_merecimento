@@ -1,9 +1,21 @@
+"""
+Matriz de Merecimento - Preparação de Tabelas
+
+Este módulo implementa a preparação de tabelas para análise de matriz de merecimento
+em sistema de supply chain, utilizando PySpark para processamento de dados.
+
+Author: Scardini
+Date: 2025
+Purpose: Preparar tabelas para análise de matriz de merecimento e estoque
+"""
+
 # Databricks notebook source
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F, Window
-
 from datetime import datetime, timedelta
+from typing import List, Optional
 
+# Inicialização do Spark
 spark = SparkSession.builder.appName("impacto_apostas").getOrCreate()
 hoje = datetime.now()
 hoje_str = hoje.strftime("%Y-%m-%d")
@@ -15,30 +27,46 @@ hoje_str = hoje.strftime("%Y-%m-%d")
 
 # COMMAND ----------
 
-df_estoque_loja = (
-    spark.read.table("data_engineering_prd.app_logistica.gi_boss_qualidade_estoque")
-    .filter(F.col("year_partition") == hoje.year)
-    .filter(F.col("StLoja") == "ATIVA")
-    .filter(F.col("DsEstoqueLojaDeposito") == "L")
-    .select(
-        "CdFilial", 
-        "CdSku",
-        "DsSku",
-        "DsSetor",
-        "DsCurva",
-        "DsCurvaAbcLoja",
-        "StLinha",
-        "DsObrigatorio",
-        F.col("DsTipoEntrega").alias("TipoEntrega"),
-        F.col("CdEstoqueFilialAbastecimento").alias("QtdEstoqueCDVinculado"),
-        (F.col("VrTotalVv")/F.col("VrVndCmv")).alias("DDE"),
-        F.col("QtEstoqueBoaOff").alias("EstoqueLoja"),
-        F.col("DsFaixaDde").alias("ClassificacaoDDE"),
-        F.col("data_ingestao"),
-        F.date_format(F.col("data_ingestao"), "yyyy-MM-dd").alias("DtAtual")    
+def load_estoque_loja_data(spark: SparkSession, current_year: int) -> DataFrame:
+    """
+    Carrega dados de estoque das lojas ativas.
+    
+    Args:
+        spark: Sessão do Spark
+        current_year: Ano atual para filtro de partição
+        
+    Returns:
+        DataFrame com dados de estoque das lojas, incluindo:
+        - Informações da filial e SKU
+        - Dados de estoque e classificação
+        - Métricas de DDE e faixas
+    """
+    return (
+        spark.read.table("data_engineering_prd.app_logistica.gi_boss_qualidade_estoque")
+        .filter(F.col("year_partition") == current_year)
+        .filter(F.col("StLoja") == "ATIVA")
+        .filter(F.col("DsEstoqueLojaDeposito") == "L")
+        .select(
+            "CdFilial", 
+            "CdSku",
+            "DsSku",
+            "DsSetor",
+            "DsCurva",
+            "DsCurvaAbcLoja",
+            "StLinha",
+            "DsObrigatorio",
+            F.col("DsTipoEntrega").alias("TipoEntrega"),
+            F.col("CdEstoqueFilialAbastecimento").alias("QtdEstoqueCDVinculado"),
+            (F.col("VrTotalVv")/F.col("VrVndCmv")).alias("DDE"),
+            F.col("QtEstoqueBoaOff").alias("EstoqueLoja"),
+            F.col("DsFaixaDde").alias("ClassificacaoDDE"),
+            F.col("data_ingestao"),
+            F.date_format(F.col("data_ingestao"), "yyyy-MM-dd").alias("DtAtual")    
+        )
+        .dropDuplicates(["DtAtual", "CdSku", "CdFilial"])
     )
-    .dropDuplicates(["DtAtual", "CdSku", "CdFilial"])
-)
+
+df_estoque_loja = load_estoque_loja_data(spark, hoje.year)
 
 # COMMAND ----------
 
@@ -47,18 +75,32 @@ df_estoque_loja = (
 
 # COMMAND ----------
 
-df_mercadoria = (
-    spark.table('data_engineering_prd.app_venda.mercadoria')
-    .filter(F.col("StUltimaVersaoMercadoria") == "Y")
-    .select(
-        "CdSkuLoja",
-        "NmAgrupamentoDiretoriaSetor",
-        "NmSetorGerencial",
-        "NmClasseGerencial",
-        "NmEspecieGerencial"
+def load_mercadoria_data(spark: SparkSession) -> DataFrame:
+    """
+    Carrega dados de mercadorias com suas classificações gerenciais.
+    
+    Args:
+        spark: Sessão do Spark
+        
+    Returns:
+        DataFrame com dados de mercadorias incluindo:
+        - SKU da loja
+        - Agrupamentos por diretoria, setor, classe e espécie
+    """
+    return (
+        spark.table('data_engineering_prd.app_venda.mercadoria')
+        .filter(F.col("StUltimaVersaoMercadoria") == "Y")
+        .select(
+            "CdSkuLoja",
+            "NmAgrupamentoDiretoriaSetor",
+            "NmSetorGerencial",
+            "NmClasseGerencial",
+            "NmEspecieGerencial"
+        )
+        .withColumnRenamed("CdSkuLoja", "CdSku")
     )
-    .withColumnRenamed("CdSkuLoja", "CdSku")
-)
+
+df_mercadoria = load_mercadoria_data(spark)
 
 # COMMAND ----------
 
@@ -75,25 +117,31 @@ from datetime import date
 
 today_int = int(date.today().strftime("%Y%m%d"))
 
-from pyspark.sql import SparkSession, functions as F
-
 def build_sales_view(
     spark: SparkSession,
     start_date: int = 20250101,
     end_date: int = today_int,
-):
+) -> DataFrame:
     """
-    Returns a DataFrame with:
-      - year_month (YYYYMM)
-      - NmUF, NmRegiaoGeografica
-      - CdSkuLoja, NmTipoNegocio
-      - Receita (sum of VrOperacao)
-      - QtMercadoria (sum of QtMercadoria)
-      - merchandising attributes from mercadoria table
+    Constrói uma visão unificada e agregada de vendas.
+    
+    Args:
+        spark: Sessão do Spark
+        start_date: Data de início no formato YYYYMMDD
+        end_date: Data de fim no formato YYYYMMDD
+        
+    Returns:
+        DataFrame com:
+        - year_month (YYYYMM)
+        - NmUF, NmRegiaoGeografica
+        - CdSkuLoja, NmTipoNegocio
+        - Receita (sum of VrOperacao)
+        - QtMercadoria (sum of QtMercadoria)
+        - merchandising attributes from mercadoria table
     """
     # load tables
-    df_rateada    = spark.table("app_venda.vendafaturadarateada")
-    df_nao_rateada= spark.table("app_venda.vendafaturadanaorateada")
+    df_rateada = spark.table("app_venda.vendafaturadarateada")
+    df_nao_rateada = spark.table("app_venda.vendafaturadanaorateada")
 
     # unify and filter
     df = (
@@ -129,7 +177,6 @@ def build_sales_view(
             F.sum("VrCustoContabilFilialSku").alias("Custo")
         )
     )
-
 
     # 1) Calendário diário (DateType)
     cal = (
@@ -182,7 +229,6 @@ if __name__ == "__main__":
     spark = SparkSession.builder.getOrCreate()
     sales_df = build_sales_view(spark)
 
-
 # COMMAND ----------
 
 # MAGIC %md
@@ -190,22 +236,47 @@ if __name__ == "__main__":
 
 # COMMAND ----------
 
-df_merecimento_base = (
-    df_estoque_loja
-    .join(sales_df, on=["DtAtual", "CdFilial", "CdSku"], how="left")
-    .join(df_mercadoria, on="CdSku", how="left")
-)
+def create_base_merecimento(
+    df_estoque: DataFrame, 
+    sales_df: DataFrame, 
+    df_mercadoria: DataFrame
+) -> DataFrame:
+    """
+    Cria a base de merecimento unindo estoque, vendas e mercadorias.
+    
+    Args:
+        df_estoque: DataFrame com dados de estoque
+        sales_df: DataFrame com dados de vendas
+        df_mercadoria: DataFrame com dados de mercadorias
+        
+    Returns:
+        DataFrame unificado com todas as informações base
+    """
+    return (
+        df_estoque
+        .join(sales_df, on=["DtAtual", "CdFilial", "CdSku"], how="left")
+        .join(df_mercadoria, on="CdSku", how="left")
+    )
+
+df_merecimento_base = create_base_merecimento(df_estoque_loja, sales_df, df_mercadoria)
 
 # COMMAND ----------
 
-
-def add_rolling_90_metrics(df):
+def add_rolling_90_metrics(df: DataFrame) -> DataFrame:
     """
-    Adiciona médias móveis de 90 dias (tempo real, não por linhas) para:
-      - Media90_Receita_venda_estq
-      - Media90_Qt_venda_estq
-    Considerando apenas dias com TeveVenda=1 e EstoqueLoja>1.
-    Janela por (CdFilial, CdSku), ordenada por dia.
+    Adiciona médias móveis de 90 dias para métricas de receita e quantidade.
+    
+    Args:
+        df: DataFrame com dados de estoque e vendas
+        
+    Returns:
+        DataFrame com métricas de média móvel de 90 dias:
+        - Media90_Receita_venda_estq: Média de receita dos últimos 90 dias
+        - Media90_Qt_venda_estq: Média de quantidade vendida dos últimos 90 dias
+        
+    Note:
+        Considera apenas dias com EstoqueLoja >= 1 para o cálculo.
+        Janela calculada por (CdFilial, CdSku) ordenada por dia.
     """
     # Garantir coluna de data e índice numérico de dias para janela por tempo
     df2 = (
@@ -215,7 +286,7 @@ def add_rolling_90_metrics(df):
     )
 
     # Condição de inclusão no cálculo da média
-    cond = (F.col("EstoqueLoja") >= 1) #| (F.col("TeveVenda") == 1) | 
+    cond = (F.col("EstoqueLoja") >= 1)
 
     # Janela de 90 dias (inclui o dia corrente): range em DIAS usando DayIdx
     w90 = (
@@ -238,13 +309,13 @@ def add_rolling_90_metrics(df):
         )
     )
 
-    # (Opcional) Preencher ausência de histórico válido com 0.0
+    # Preencher ausência de histórico válido com 0.0
     df3 = df3.fillna({
         "Media90_Receita_venda_estq": 0.0,
         "Media90_Qt_venda_estq": 0.0
     })
 
-    # Reordenar colunas conforme sua lista original + novas métricas
+    # Reordenar colunas conforme lista original + novas métricas
     cols_base = [
         'DtAtual','CdSku','CdFilial','DsSku','DsSetor','DsCurva','DsCurvaAbcLoja',
         'StLinha','TipoEntrega','QtdEstoqueCDVinculado','DDE','EstoqueLoja', 'DsObrigatorio',
@@ -263,32 +334,56 @@ def add_rolling_90_metrics(df):
 
 # COMMAND ----------
 
-df_merecimento_base_r90 = add_rolling_90_metrics(df_merecimento_base)
-
-df_analise_r90 = (
-    df_merecimento_base_r90
-    .withColumn("FlagRuptura",
-                F.when(F.col("Media90_Qt_venda_estq") > F.col("EstoqueLoja"), F.lit(1))
-                .otherwise(F.lit(0)))
-    .withColumn("deltaRuptura",
-                F.when(
-                    F.col("FlagRuptura") == 1,
-                    F.col("Media90_Qt_venda_estq") - F.col("EstoqueLoja")
-                ))
-    .withColumn("PrecoMedio90",
-                F.col("Media90_Receita_venda_estq")/F.col("Media90_Qt_venda_estq"))
-    .withColumn("ReceitaPerdidaRuptura",
-            F.when(F.col('DsObrigatorio') == 'S',
-               F.col("deltaRuptura") * F.col("PrecoMedio90")
-               )
-    .otherwise(F.lit(0))
+def create_analysis_with_rupture_flags(df: DataFrame) -> DataFrame:
+    """
+    Cria análise com flags de ruptura e métricas calculadas.
+    
+    Args:
+        df: DataFrame com métricas de média móvel de 90 dias
+        
+    Returns:
+        DataFrame com flags e métricas de ruptura:
+        - FlagRuptura: Indica se há ruptura (1) ou não (0)
+        - deltaRuptura: Diferença entre demanda média e estoque
+        - PrecoMedio90: Preço médio dos últimos 90 dias
+        - ReceitaPerdidaRuptura: Receita perdida devido à ruptura
+    """
+    return (
+        df
+        .withColumn("FlagRuptura",
+                    F.when(F.col("Media90_Qt_venda_estq") > F.col("EstoqueLoja"), F.lit(1))
+                    .otherwise(F.lit(0)))
+        .withColumn("deltaRuptura",
+                    F.when(
+                        F.col("FlagRuptura") == 1,
+                        F.col("Media90_Qt_venda_estq") - F.col("EstoqueLoja")
+                    ))
+        .withColumn("PrecoMedio90",
+                    F.col("Media90_Receita_venda_estq")/F.col("Media90_Qt_venda_estq"))
+        .withColumn("ReceitaPerdidaRuptura",
+                F.when(F.col('DsObrigatorio') == 'S',
+                   F.col("deltaRuptura") * F.col("PrecoMedio90")
+                   )
+        .otherwise(F.lit(0))
+        )
     )
-)
+
+df_merecimento_base_r90 = add_rolling_90_metrics(df_merecimento_base)
+df_analise_r90 = create_analysis_with_rupture_flags(df_merecimento_base_r90)
 
 # COMMAND ----------
 
-# 1) Helper para normalizar IDs (string, trim e sem zeros à esquerda)
-def normalize_ids(df, cols):
+def normalize_ids(df: DataFrame, cols: List[str]) -> DataFrame:
+    """
+    Normaliza IDs removendo zeros à esquerda e fazendo trim.
+    
+    Args:
+        df: DataFrame a ser processado
+        cols: Lista de colunas de ID para normalizar
+        
+    Returns:
+        DataFrame com IDs normalizados
+    """
     for c in cols:
         df = df.withColumn(
             c,
@@ -305,125 +400,212 @@ def normalize_ids(df, cols):
 
 # COMMAND ----------
 
-# Características de CD
-caracteristicas_cd = (
-    spark.table("data_engineering_prd.app_operacoesloja.roteirizacaocentrodistribuicao")
-    .select(
-        F.col("CdFilial"),
-        "NmFilial",
-        F.concat_ws("/", F.col("NmCidade"), F.col("NmUF")).alias("NmCidade_UF"),
-        "NmTipoFilial"
-    )
-    .distinct()
-)
-caracteristicas_cd = normalize_ids(caracteristicas_cd, ["CdFilial"])
-
-
-
-caracteristicas_loja = (
-    spark.table("data_engineering_prd.app_operacoesloja.roteirizacaolojaativa")
-    .select(
-        F.col("NmBandeira").alias("BandeiraLoja"),
-        F.col("CdFilial"),
-        F.col("NmFilial").alias("NmLoja"),
-        F.col("NmCidade").alias("NmCidadeLoja"),
-        F.col("NmUF").alias("NmUFLoja"),
-        F.col("NrCEP").alias("CEPLoja"),
-        F.col("NmPorteLoja"),
-        F.col("NmTipoLoja").alias("TipoLoja"),
-        F.col("CdLatitude").alias("LatitudeLoja"),
-        F.col("CdLongitude").alias("LongitudeLoja"),
-    )
-)
-
-caracteristicas_loja = normalize_ids(caracteristicas_loja, ["CdFilial"])
-
-de_para_filial_CD = (
-    spark.table("context_abastecimento_inteligente.PlanoAbastecimento")
-    .filter(
-        (F.col("AaIngestao") == hoje.year) &
-        (F.col("MmIngestao") == hoje.month) &
-        (F.col("DdIngestao") == hoje.day)
-    )
-    .select(
-        F.col("CdFilialAtende").alias("CD_primario"),
-        F.col("CdFilialEntrega").alias("CD_secundario"),
-        F.col("CdLoja").alias("CdFilial"),
-        F.col("QtdDiasViagem").alias("LeadTime"),
-        F.col("QtdCargasDia").alias("QtdCargasDia"),
-        F.col("DsCubagemCaminhao").alias("DsCubagemCaminhao"),
-        F.col("DsGrupoHorario").alias("DsGrupoHorario"),
-        F.col("QtdSegunda"),
-        F.col("QtdTerca"),
-        F.col("QtdQuarta"),
-        F.col("QtdQuinta"),
-        F.col("QtdSexta"),
-        F.col("QtdSabado"),
-        F.col("QtdDomingo"),
-    )
-)
-
-de_para_filial_CD = normalize_ids(de_para_filial_CD, ["CdFilial", "CD_primario", "CD_secundario"])
-
-de_para_filial_CD = (
-    de_para_filial_CD
-    # Características da loja
-    .join(F.broadcast(caracteristicas_loja), on="CdFilial", how="inner")
-    .select(
-        "CdFilial",
-        "BandeiraLoja", "NmLoja", "NmCidadeLoja", "NmUFLoja", "CEPLoja",
-        "NmPorteLoja", "TipoLoja", "LatitudeLoja", "LongitudeLoja",
-        "CD_primario", "CD_secundario", "LeadTime", "QtdCargasDia",
-        "DsCubagemCaminhao", "DsGrupoHorario",
-        "QtdSegunda", "QtdTerca", "QtdQuarta", "QtdQuinta",
-        "QtdSexta", "QtdSabado", "QtdDomingo"
-    )
-    # Características CD primário
-    .join(F.broadcast(
-        caracteristicas_cd.withColumnRenamed("CdFilial", "CD_primario")),
-        on="CD_primario",
-        how="left"
+def load_cd_characteristics(spark: SparkSession) -> DataFrame:
+    """
+    Carrega características dos Centros de Distribuição.
+    
+    Args:
+        spark: Sessão do Spark
         
+    Returns:
+        DataFrame com características dos CDs:
+        - Código e nome da filial
+        - Cidade/UF
+        - Tipo de filial
+    """
+    return (
+        spark.table("data_engineering_prd.app_operacoesloja.roteirizacaocentrodistribuicao")
+        .select(
+            F.col("CdFilial"),
+            "NmFilial",
+            F.concat_ws("/", F.col("NmCidade"), F.col("NmUF")).alias("NmCidade_UF"),
+            "NmTipoFilial"
+        )
+        .distinct()
     )
-    .select(
-        "CdFilial", "BandeiraLoja", "NmLoja", "NmCidadeLoja", "NmUFLoja", "CEPLoja",
-        "NmPorteLoja", "TipoLoja", "LatitudeLoja", "LongitudeLoja",
-        "CD_primario", *[F.col(c).alias(f"{c}_primario") for c in ["NmFilial", "NmCidade_UF", "NmTipoFilial"]],
-        "CD_secundario", "LeadTime", "QtdCargasDia", "DsCubagemCaminhao", "DsGrupoHorario",
-        "QtdSegunda", "QtdTerca", "QtdQuarta", "QtdQuinta",
-        "QtdSexta", "QtdSabado", "QtdDomingo"
-    )
-    # Características CD secundário
-    .join(
-        F.broadcast(caracteristicas_cd.withColumnRenamed("CdFilial", "CD_secundario")),
-        on="CD_secundario",
-        how="left"
+
+def load_store_characteristics(spark: SparkSession) -> DataFrame:
+    """
+    Carrega características das lojas ativas.
+    
+    Args:
+        spark: Sessão do Spark
         
+    Returns:
+        DataFrame com características das lojas:
+        - Informações de bandeira, localização, porte e tipo
+        - Coordenadas geográficas
+    """
+    return (
+        spark.table("data_engineering_prd.app_operacoesloja.roteirizacaolojaativa")
+        .select(
+            F.col("NmBandeira").alias("BandeiraLoja"),
+            F.col("CdFilial"),
+            F.col("NmFilial").alias("NmLoja"),
+            F.col("NmCidade").alias("NmCidadeLoja"),
+            F.col("NmUF").alias("NmUFLoja"),
+            F.col("NrCEP").alias("CEPLoja"),
+            F.col("NmPorteLoja"),
+            F.col("NmTipoLoja").alias("TipoLoja"),
+            F.col("CdLatitude").alias("LatitudeLoja"),
+            F.col("CdLongitude").alias("LongitudeLoja"),
+        )
     )
-    .select(
-        "CdFilial", "BandeiraLoja", "NmLoja", "NmCidadeLoja", "NmUFLoja", "CEPLoja",
-        "NmPorteLoja", "TipoLoja", "LatitudeLoja", "LongitudeLoja",
-        "CD_primario", *[F.col(c).alias(f"{c}_primario") for c in ["NmFilial", "NmCidade_UF", "NmTipoFilial"]],
-        "CD_secundario", *[F.col(c).alias(f"{c}_secundario") for c in ["NmFilial", "NmCidade_UF", "NmTipoFilial"]],
-        "LeadTime", "QtdCargasDia", "DsCubagemCaminhao", "DsGrupoHorario",
-        "QtdSegunda", "QtdTerca", "QtdQuarta", "QtdQuinta",
-        "QtdSexta", "QtdSabado", "QtdDomingo"
+
+def load_supply_plan_mapping(spark: SparkSession, current_date: datetime) -> DataFrame:
+    """
+    Carrega mapeamento de plano de abastecimento.
+    
+    Args:
+        spark: Sessão do Spark
+        current_date: Data atual para filtro de ingestão
+        
+    Returns:
+        DataFrame com mapeamento de abastecimento:
+        - Relacionamento entre CDs e lojas
+        - Lead time e características de entrega
+        - Capacidade de carga e horários
+    """
+    return (
+        spark.table("context_abastecimento_inteligente.PlanoAbastecimento")
+        .filter(
+            (F.col("AaIngestao") == current_date.year) &
+            (F.col("MmIngestao") == current_date.month) &
+            (F.col("DdIngestao") == current_date.day)
+        )
+        .select(
+            F.col("CdFilialAtende").alias("CD_primario"),
+            F.col("CdFilialEntrega").alias("CD_secundario"),
+            F.col("CdLoja").alias("CdFilial"),
+            F.col("QtdDiasViagem").alias("LeadTime"),
+            F.col("QtdCargasDia").alias("QtdCargasDia"),
+            F.col("DsCubagemCaminhao").alias("DsCubagemCaminhao"),
+            F.col("DsGrupoHorario").alias("DsGrupoHorario"),
+            F.col("QtdSegunda"),
+            F.col("QtdTerca"),
+            F.col("QtdQuarta"),
+            F.col("QtdQuinta"),
+            F.col("QtdSexta"),
+            F.col("QtdSabado"),
+            F.col("QtdDomingo"),
+        )
     )
-)
+
+def create_complete_supply_mapping(
+    spark: SparkSession, 
+    current_date: datetime
+) -> DataFrame:
+    """
+    Cria mapeamento completo de abastecimento com características de CDs e lojas.
+    
+    Args:
+        spark: Sessão do Spark
+        current_date: Data atual para filtro
+        
+    Returns:
+        DataFrame completo com mapeamento de abastecimento e características
+    """
+    # Carregar dados base
+    caracteristicas_cd = load_cd_characteristics(spark)
+    caracteristicas_loja = load_store_characteristics(spark)
+    de_para_filial_CD = load_supply_plan_mapping(spark, current_date)
+    
+    # Normalizar IDs
+    caracteristicas_cd = normalize_ids(caracteristicas_cd, ["CdFilial"])
+    caracteristicas_loja = normalize_ids(caracteristicas_loja, ["CdFilial"])
+    de_para_filial_CD = normalize_ids(de_para_filial_CD, ["CdFilial", "CD_primario", "CD_secundario"])
+    
+    # Construir mapeamento completo
+    return (
+        de_para_filial_CD
+        # Características da loja
+        .join(F.broadcast(caracteristicas_loja), on="CdFilial", how="inner")
+        .select(
+            "CdFilial",
+            "BandeiraLoja", "NmLoja", "NmCidadeLoja", "NmUFLoja", "CEPLoja",
+            "NmPorteLoja", "TipoLoja", "LatitudeLoja", "LongitudeLoja",
+            "CD_primario", "CD_secundario", "LeadTime", "QtdCargasDia",
+            "DsCubagemCaminhao", "DsGrupoHorario",
+            "QtdSegunda", "QtdTerca", "QtdQuarta", "QtdQuinta",
+            "QtdSexta", "QtdSabado", "QtdDomingo"
+        )
+        # Características CD primário
+        .join(F.broadcast(
+            caracteristicas_cd.withColumnRenamed("CdFilial", "CD_primario")),
+            on="CD_primario",
+            how="left"
+        )
+        .select(
+            "CdFilial", "BandeiraLoja", "NmLoja", "NmCidadeLoja", "NmUFLoja", "CEPLoja",
+            "NmPorteLoja", "TipoLoja", "LatitudeLoja", "LongitudeLoja",
+            "CD_primario", *[F.col(c).alias(f"{c}_primario") for c in ["NmFilial", "NmCidade_UF", "NmTipoFilial"]],
+            "CD_secundario", "LeadTime", "QtdCargasDia", "DsCubagemCaminhao", "DsGrupoHorario",
+            "QtdSegunda", "QtdTerca", "QtdQuarta", "QtdQuinta",
+            "QtdSexta", "QtdSabado", "QtdDomingo"
+        )
+        # Características CD secundário
+        .join(
+            F.broadcast(caracteristicas_cd.withColumnRenamed("CdFilial", "CD_secundario")),
+            on="CD_secundario",
+            how="left"
+        )
+        .select(
+            "CdFilial", "BandeiraLoja", "NmLoja", "NmCidadeLoja", "NmUFLoja", "CEPLoja",
+            "NmPorteLoja", "TipoLoja", "LatitudeLoja", "LongitudeLoja",
+            "CD_primario", *[F.col(c).alias(f"{c}_primario") for c in ["NmFilial", "NmCidade_UF", "NmTipoFilial"]],
+            "CD_secundario", *[F.col(c).alias(f"{c}_secundario") for c in ["NmFilial", "NmCidade_UF", "NmTipoFilial"]],
+            "LeadTime", "QtdCargasDia", "DsCubagemCaminhao", "DsGrupoHorario",
+            "QtdSegunda", "QtdTerca", "QtdQuarta", "QtdQuinta",
+            "QtdSexta", "QtdSabado", "QtdDomingo"
+        )
+    )
+
+# Carregar mapeamento completo
+de_para_filial_CD = create_complete_supply_mapping(spark, hoje)
 
 # COMMAND ----------
 
-df_merecimento_base_cd_loja = (
-    df_merecimento_base
-    .join(de_para_filial_CD, on="CdFilial", how="left")
-)
+def create_final_merecimento_base(
+    df_merecimento: DataFrame, 
+    supply_mapping: DataFrame
+) -> DataFrame:
+    """
+    Cria base final de merecimento unindo dados de estoque com mapeamento de abastecimento.
+    
+    Args:
+        df_merecimento: DataFrame base de merecimento
+        supply_mapping: DataFrame com mapeamento de abastecimento
+        
+    Returns:
+        DataFrame final com todas as informações de merecimento e abastecimento
+    """
+    return (
+        df_merecimento
+        .join(supply_mapping, on="CdFilial", how="left")
+    )
+
+df_merecimento_base_cd_loja = create_final_merecimento_base(df_merecimento_base, de_para_filial_CD)
 
 # COMMAND ----------
 
-(
-    df_merecimento_base_cd_loja.write
-    .mode("overwrite")
-    .option("overwriteSchema", "true")
-    .format("delta")
-    .saveAsTable("databox.bcg_comum.supply_base_merecimento_diario")
+def save_merecimento_table(df: DataFrame, table_name: str) -> None:
+    """
+    Salva DataFrame de merecimento como tabela Delta.
+    
+    Args:
+        df: DataFrame a ser salvo
+        table_name: Nome da tabela de destino
+    """
+    (
+        df.write
+        .mode("overwrite")
+        .option("overwriteSchema", "true")
+        .format("delta")
+        .saveAsTable(table_name)
+    )
+
+# Salvar tabela final
+save_merecimento_table(
+    df_merecimento_base_cd_loja, 
+    "databox.bcg_comum.supply_base_merecimento_diario"
 )
