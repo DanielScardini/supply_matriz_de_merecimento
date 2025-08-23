@@ -1,0 +1,152 @@
+# Gitignore para projeto de Matriz de Merecimento
+# Exclui planilhas Excel e outros arquivos desnecessários
+
+# =============================================================================
+# PLANILHAS EXCEL
+# =============================================================================
+
+# Arquivos Excel (.xlsx, .xls)
+*.xlsx
+*.xls
+*.xlsm
+*.xlsb
+
+# Arquivos Excel temporários
+~$*.xlsx
+~$*.xls
+~$*.xlsm
+~$*.xlsb
+
+# Arquivos Excel com backup
+*.xlsx~
+*.xls~
+*.xlsm~
+*.xlsb~
+
+# =============================================================================
+# ARQUIVOS DE DADOS E RELATÓRIOS
+# =============================================================================
+
+# Arquivos CSV
+*.csv
+
+# Arquivos de texto com dados
+*.txt
+*.dat
+
+# Arquivos de relatório
+*.pdf
+*.doc
+*.docx
+
+# =============================================================================
+# ARQUIVOS TEMPORÁRIOS E CACHE
+# =============================================================================
+
+# Arquivos temporários do sistema
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# Cache do Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Cache do PySpark
+.metastore/
+derby.log
+
+# =============================================================================
+# ARQUIVOS DE CONFIGURAÇÃO LOCAL
+# =============================================================================
+
+# Variáveis de ambiente
+.env
+.env.local
+.env.production
+
+# Configurações locais
+config.local.ini
+settings.local.py
+
+# =============================================================================
+# ARQUIVOS DE LOG
+# =============================================================================
+
+# Logs do sistema
+*.log
+*.log.*
+logs/
+
+# Logs de erro
+error.log
+error_*.log
+
+# =============================================================================
+# ARQUIVOS DE DESENVOLVIMENTO
+# =============================================================================
+
+# IDEs e editores
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Arquivos do macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# =============================================================================
+# ARQUIVOS DE TESTE E VALIDAÇÃO
+# =============================================================================
+
+# Relatórios de validação
+validation_report_*.json
+test_results_*.json
+
+# Arquivos de teste temporários
+test_*.tmp
+temp_*.csv
+
+# =============================================================================
+# ARQUIVOS DE DADOS SENSÍVEIS
+# =============================================================================
+
+# Arquivos com dados sensíveis
+*_sensitive.xlsx
+*_confidential.xlsx
+*_private.xlsx
+
+# Arquivos de credenciais
+credentials.xlsx
+passwords.xlsx
+secrets.xlsx
+
+# =============================================================================
+# OUTROS ARQUIVOS
+# =============================================================================
+
+# Arquivos compactados
+*.zip
+*.rar
+*.7z
+*.tar.gz
+
+# Arquivos de backup
+backup/
+backups/
+*.backup
+
+# Arquivos de staging
+staging/
+temp/
+tmp/
