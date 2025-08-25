@@ -407,6 +407,7 @@ df_matriz_telefonia_metricas.limit(1).display()
 # MAGIC ### 10.1 Métricas Linha a Linha
 # MAGIC 
 # MAGIC Calculamos métricas para cada linha individual para análise detalhada.
+# MAGIC **Nota**: Usamos percentuais da matriz (Percentual_matriz_fixa) vs. percentuais reais da demanda (pct_demanda_perc).
 
 # COMMAND ----------
 # Janela para cálculo de shares (sobre todo o dataframe)
@@ -419,31 +420,31 @@ EPSILON = 1e-12
 df_with_metrics = (
     df_matriz_telefonia_metricas
     # Totais globais para cálculo de shares
-    .withColumn("total_mercadoria", F.sum("QtMercadoria").over(w_total))
-    .withColumn("total_demanda", F.sum("QtdDemanda").over(w_total))
+    .withColumn("total_matriz", F.sum("Percentual_matriz_fixa").over(w_total))
+    .withColumn("total_demanda_real", F.sum("pct_demanda_perc").over(w_total))
     
     # Shares com proteção para divisões por zero
     .withColumn(
         "p", 
-        F.when(F.col("total_demanda") > 0, 
-               F.col("QtdDemanda") / F.col("total_demanda"))
+        F.when(F.col("total_demanda_real") > 0, 
+               F.col("pct_demanda_perc") / F.col("total_demanda_real"))
          .otherwise(F.lit(0.0))
     )
     .withColumn(
         "phat", 
-        F.when(F.col("total_mercadoria") > 0, 
-               F.col("QtMercadoria") / F.col("total_mercadoria"))
+        F.when(F.col("total_matriz") > 0, 
+               F.col("Percentual_matriz_fixa") / F.col("total_matriz"))
          .otherwise(F.lit(0.0))
     )
     
-    # Métricas linha a linha
-    .withColumn("abs_err", F.abs(F.col("QtdDemanda") - F.col("QtMercadoria")))
-    .withColumn("under", F.greatest(F.lit(0.0), F.col("QtdDemanda") - F.col("QtMercadoria")))
+    # Métricas linha a linha - usando percentuais da matriz vs. demanda real
+    .withColumn("abs_err", F.abs(F.col("pct_demanda_perc") - F.col("Percentual_matriz_fixa")))
+    .withColumn("under", F.greatest(F.lit(0.0), F.col("pct_demanda_perc") - F.col("Percentual_matriz_fixa")))
     .withColumn(
         "weight", 
-        F.when(F.col("QtMercadoria") < F.col("QtdDemanda"), 
-               F.lit(GAMMA) * F.col("QtdDemanda"))
-         .otherwise(F.col("QtdDemanda"))
+        F.when(F.col("Percentual_matriz_fixa") < F.col("pct_demanda_perc"), 
+               F.lit(GAMMA) * F.col("pct_demanda_perc"))
+         .otherwise(F.col("pct_demanda_perc"))
     )
     .withColumn("w_abs", F.col("weight") * F.col("abs_err"))
     
@@ -475,13 +476,14 @@ df_with_metrics.limit(1).display()
 # MAGIC 
 # MAGIC Calculamos as métricas agregadas para o dataframe inteiro usando a função
 # MAGIC `add_allocation_metrics` que criamos no início.
+# MAGIC **Nota**: Métricas calculadas comparando percentuais da matriz vs. percentuais reais da demanda.
 
 # COMMAND ----------
 # Métricas agregadas usando a função
 df_agg_metrics = add_allocation_metrics(
     df=df_matriz_telefonia_metricas,
-    y_col="QtdDemanda",           # Valor real (demanda)
-    yhat_col="QtMercadoria",      # Valor previsto/alocado
+    y_col="pct_demanda_perc",     # Valor real (percentual da demanda)
+    yhat_col="Percentual_matriz_fixa",  # Valor previsto (percentual da matriz)
     group_cols=None               # Agregação global
 )
 
