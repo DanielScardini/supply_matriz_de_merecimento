@@ -98,15 +98,21 @@ def load_mercadoria_data(spark: SparkSession) -> DataFrame:
         .filter(F.col("StUltimaVersaoMercadoria") == "Y")
         .select(
             "CdSkuLoja",
-            "NmAgrupamentoDiretoriaSetor",
-            "NmSetorGerencial",
-            "NmClasseGerencial",
-            "NmEspecieGerencial"
+            "NmSku"
+            # "NmAgrupamentoDiretoriaSetor",
+            # "NmSetorGerencial",
+            # "NmClasseGerencial",
+            # "NmEspecieGerencial"
         )
         .withColumnRenamed("CdSkuLoja", "CdSku")
+        .filter(F.col("CdSkuLoja") != -1)
     )
 
 df_mercadoria = load_mercadoria_data(spark)
+
+# COMMAND ----------
+
+df_mercadoria.display()
 
 # COMMAND ----------
 
