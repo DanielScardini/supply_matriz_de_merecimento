@@ -382,7 +382,7 @@ df_matriz_telefonia_metricas = (
         on=["gemeos", "modelos", "CdFilial"]
     )
     .select(
-        "gemeos", "modelos", "CdFilial",
+        "year_month", "gemeos", "modelos", "CdFilial",
         F.round(F.col("PERCENTUAL_MATRIZ"), 2).alias("Percentual_matriz_fixa"),
         "pct_vendas_perc",
         "pct_demanda_perc",
