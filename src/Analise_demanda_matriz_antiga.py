@@ -1,20 +1,20 @@
 # Databricks notebook source
-
-# COMMAND ----------
 # MAGIC %md
 # MAGIC # Análise de Efetividade da Matriz de Merecimento - Telefonia
-# MAGIC 
+# MAGIC
 # MAGIC Este notebook analisa a efetividade da matriz de merecimento atual comparando as alocações previstas 
 # MAGIC com o comportamento real de vendas e demanda para produtos de telefonia celular.
-# MAGIC 
+# MAGIC
 # MAGIC **Objetivo**: Identificar gaps entre alocações previstas e realidade para otimização da matriz futura.
 # MAGIC **Escopo**: Apenas produtos de telefonia celular no nível de filial (loja).
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 1. Imports e Configurações Iniciais
 
 # COMMAND ----------
+
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F, Window
 from datetime import datetime, timedelta
@@ -22,9 +22,10 @@ import pandas as pd
 from typing import List, Optional
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 2. Função para Cálculo de Métricas de Alocação
-# MAGIC 
+# MAGIC
 # MAGIC Esta função calcula métricas sofisticadas para avaliar a qualidade das alocações:
 # MAGIC - **wMAPE**: Erro percentual absoluto médio ponderado
 # MAGIC - **SE (Share Error)**: Erro na distribuição de participações
@@ -33,118 +34,117 @@ from typing import List, Optional
 # MAGIC - **KL Divergence**: Medida de divergência entre distribuições reais e previstas
 
 # COMMAND ----------
+
+from pyspark.sql import functions as F, Window
+from typing import List, Optional
+
 def add_allocation_metrics(
     df,
-    y_col: str,                  # coluna real (y)
-    yhat_col: str,               # coluna previsto/alocado (ŷ)
-    group_cols: Optional[List[str]] = None,  # ex.: ["year_month","modelos","gemeos"]
-    gamma: float = 2.0,          # penalização extra para under no wMAPE assimétrico
-    epsilon: float = 1e-12       # proteção numérica para KL
+    y_col: str,                             # real (y)
+    yhat_col: str,                          # previsto (ŷ)
+    group_cols: Optional[List[str]] = None, # ex.: ["year_month","modelo","gemeo"]
+    gamma: float = 1.5,                     # >1 penaliza under (share e volume)
+    epsilon: float = 1e-12
 ):
-    """
-    Retorna um DataFrame agregado por group_cols contendo:
-      - wMAPE
-      - SE (Share Error)
-      - UAPE (Underallocation Penalty)
-      - wMAPE_asym (assimétrico com fator gamma)
-      - KL_divergence (Kullback-Leibler entre shares)
-    """
     if group_cols is None:
         group_cols = []
 
     w = Window.partitionBy(*group_cols) if group_cols else Window.partitionBy(F.lit(1))
 
-    y      = F.col(y_col).cast("double")
-    yhat   = F.col(yhat_col).cast("double")
+    y, yhat = F.col(y_col).cast("double"), F.col(yhat_col).cast("double")
 
-    # Totais por grupo
+    # Totais por grupo (para shares)
     Y_tot    = F.sum(y).over(w)
     Yhat_tot = F.sum(yhat).over(w)
 
-    # Shares com proteção para divisões por zero
-    p    = F.when(Y_tot > 0,  y / Y_tot).otherwise(F.lit(0.0))
+    # Shares (fração)
+    p    = F.when(Y_tot    > 0, y    / Y_tot   ).otherwise(F.lit(0.0))
     phat = F.when(Yhat_tot > 0, yhat / Yhat_tot).otherwise(F.lit(0.0))
 
-    # Termos linha-a-linha
-    abs_err   = F.abs(y - yhat)
-    under     = F.greatest(F.lit(0.0), y - yhat)
-    weight    = F.when(yhat < y, F.lit(gamma) * y).otherwise(y)
-    w_abs     = weight * abs_err
+    # Termos (volume)
+    abs_err = F.abs(y - yhat)
+    under   = F.greatest(F.lit(0.0), y - yhat)
 
-    # KL: p * log(p/phat) com eps
-    p_eps    = F.when(p > 0, p).otherwise(F.lit(0.0)) + F.lit(0.0)
-    phat_eps = F.when(phat > 0, phat).otherwise(F.lit(0.0)) + F.lit(epsilon)
-    kl_term  = F.when(p_eps > 0, p_eps * F.log(p_eps / phat_eps)).otherwise(F.lit(0.0))
+    # Peso escalar assimétrico (volume)
+    weight_scalar = F.when(yhat < y, F.lit(gamma)).otherwise(F.lit(1.0))
+    w_abs = weight_scalar * abs_err
 
-    # Agregações por grupo
-    agg = (
-        df
-        .withColumn("__Y_tot__", Y_tot)
-        .withColumn("__Yhat_tot__", Yhat_tot)
-        .withColumn("__p__", p)
-        .withColumn("__phat__", phat)
-        .withColumn("__abs_err__", abs_err)
-        .withColumn("__under__", under)
-        .withColumn("__w_abs__", w_abs)
+    # KL em shares
+    kl_term = F.when(p > 0, p * F.log((p + F.lit(epsilon)) / (phat + F.lit(epsilon)))).otherwise(F.lit(0.0))
+
+    # Termos (share ponderado por volume)
+    abs_err_share   = F.abs(p - phat)
+    under_err_share = F.when(phat < p, p - phat).otherwise(F.lit(0.0))
+    w_abs_share     = abs_err_share * y
+    w_abs_share_as  = F.when(phat < p, F.lit(gamma) * abs_err_share * y).otherwise(abs_err_share * y)
+    w_under_share   = under_err_share * y
+
+    base = (df
+        .withColumn("__y__", y).withColumn("__yhat__", yhat)
+        .withColumn("__p__", p).withColumn("__phat__", phat)
+        .withColumn("__abs_err__", abs_err).withColumn("__under__", under).withColumn("__w_abs__", w_abs)
         .withColumn("__kl_term__", kl_term)
-        .groupBy(*group_cols) if group_cols else
-        df
-        .withColumn("__Y_tot__", Y_tot)
-        .withColumn("__Yhat_tot__", Yhat_tot)
-        .withColumn("__p__", p)
-        .withColumn("__phat__", phat)
-        .withColumn("__abs_err__", abs_err)
-        .withColumn("__under__", under)
-        .withColumn("__w_abs__", w_abs)
-        .withColumn("__kl_term__", kl_term)
-        .groupBy()
+        .withColumn("__abs_err_share__", abs_err_share)
+        .withColumn("__w_abs_share__", w_abs_share)
+        .withColumn("__w_abs_share_as__", w_abs_share_as)
+        .withColumn("__w_under_share__", w_under_share)
     )
+
+    agg = base.groupBy(*group_cols) if group_cols else base.groupBy()
 
     res = agg.agg(
+        # volume
         F.sum("__abs_err__").alias("_sum_abs_err"),
-        F.sum(F.col(y_col).cast("double")).alias("_sum_y"),
-        F.sum(F.col(yhat_col).cast("double")).alias("_sum_yhat"),
         F.sum("__under__").alias("_sum_under"),
         F.sum("__w_abs__").alias("_sum_w_abs"),
-        F.sum(F.abs(F.col("__p__") - F.col("__phat__"))).alias("SE"),
-        F.sum("__kl_term__").alias("_kl_sum")
-    )
-
-    # Métricas finais com salvaguardas
-    res = (
-        res
-        .withColumn(
-            "wMAPE",
-            F.when(F.col("_sum_y") > 0, F.col("_sum_abs_err") / F.col("_sum_y")).otherwise(F.lit(0.0))
-        )
-        .withColumn(
-            "UAPE",
-            F.when(F.col("_sum_y") > 0, F.col("_sum_under") / F.col("_sum_y")).otherwise(F.lit(0.0))
-        )
-        .withColumn(
-            "wMAPE_asym",
-            F.when(F.col("_sum_y") > 0, F.col("_sum_w_abs") / F.col("_sum_y")).otherwise(F.lit(0.0))
-        )
-        .withColumn(
-            "KL_divergence",
-            F.when((F.col("_sum_y") > 0) & (F.col("_sum_yhat") > 0), F.col("_kl_sum")).otherwise(F.lit(0.0))
-        )
-        .select(
-            *(group_cols if group_cols else []),
-            "wMAPE", "SE", "UAPE", "wMAPE_asym", "KL_divergence"
-        )
+        F.sum("__y__").alias("_sum_y"),
+        F.sum("__yhat__").alias("_sum_yhat"),
+        # shares
+        F.sum(F.abs(F.col("__p__") - F.col("__phat__"))).alias("_SE"),
+        F.sum("__kl_term__").alias("_KL"),
+        F.sum("__w_abs_share__").alias("_num_wmape_share"),
+        F.sum("__w_abs_share_as__").alias("_num_wmape_share_as"),
+        F.sum("__w_under_share__").alias("_num_uape_share")
+    ).withColumn(
+        # volume (%)
+        "wMAPE_perc", F.round(F.when(F.col("_sum_y") > 0, F.col("_sum_abs_err")/F.col("_sum_y")).otherwise(0.0) * 100, 4)
+    ).withColumn(
+        "UAPE_perc",  F.round(F.when(F.col("_sum_y") > 0, F.col("_sum_under") /F.col("_sum_y")).otherwise(0.0) * 100, 4)
+    ).withColumn(
+        "wMAPE_asym_perc", F.round(F.when(F.col("_sum_y") > 0, F.col("_sum_w_abs")/F.col("_sum_y")).otherwise(0.0) * 100, 4)
+    ).withColumn(
+        # shares (% e pp)
+        "SE_pp", F.round(F.col("_SE") * 100, 4)  # 0–200 p.p.
+    ).withColumn(
+        "wMAPE_share_perc", F.round(F.when(F.col("_sum_y") > 0, F.col("_num_wmape_share")/F.col("_sum_y")).otherwise(0.0) * 100, 4)
+    ).withColumn(
+        "wMAPE_share_asym_perc", F.round(F.when(F.col("_sum_y") > 0, F.col("_num_wmape_share_as")/F.col("_sum_y")).otherwise(0.0) * 100, 4)
+    ).withColumn(
+        "UAPE_share_perc", F.round(F.when(F.col("_sum_y") > 0, F.col("_num_uape_share")/F.col("_sum_y")).otherwise(0.0) * 100, 4)
+    ).withColumn(
+        "KL_divergence", F.when((F.col("_sum_y") > 0) & (F.col("_sum_yhat") > 0), F.col("_KL")).otherwise(F.lit(0.0))
+    ).select(
+        *(group_cols if group_cols else []),
+        # volume
+        #"wMAPE_perc","UAPE_perc","wMAPE_asym_perc",
+        # shares ponderados por volume
+        "SE_pp","wMAPE_share_perc","wMAPE_share_asym_perc","UAPE_share_perc",
+        # distância de distribuição
+        "KL_divergence"
     )
 
     return res
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 3. Leitura e Preparação dos Dados de Telefonia
-# MAGIC 
+# MAGIC
 # MAGIC Carregamos a base de dados de vendas e estoque para produtos de telefonia celular,
 # MAGIC filtrando apenas a diretoria específica e período relevante.
 
 # COMMAND ----------
+
 df_vendas_estoque_telefonia = (
     spark.table('databox.bcg_comum.supply_base_merecimento_diario')
     .filter(F.col("NmAgrupamentoDiretoriaSetor") == 'DIRETORIA TELEFONIA CELULAR')
@@ -161,16 +161,18 @@ print("Dados de vendas e estoque de telefonia carregados:")
 df_vendas_estoque_telefonia.limit(1).display()
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 4. Carregamento dos Mapeamentos de Produtos
-# MAGIC 
+# MAGIC
 # MAGIC Carregamos os arquivos de mapeamento que relacionam SKUs com modelos, 
 # MAGIC espécies gerenciais e grupos de produtos similares ("gêmeos").
 
 # COMMAND ----------
+
 # Mapeamento de modelos e tecnologia
 de_para_modelos_tecnologia = (
-    pd.read_csv('/Workspace/Users/daniel.scardini-ext@viavarejo.com.br/supply/supply_matriz_de_merecimento/src/dados_analise/MODELOS_AJUSTE (1).csv', 
+    pd.read_csv('dados_analise/MODELOS_AJUSTE (1).csv', 
                 delimiter=';')
     .drop_duplicates()
 )
@@ -186,7 +188,7 @@ de_para_modelos_tecnologia.columns = (
 
 # Mapeamento de produtos similares (gêmeos)
 de_para_gemeos_tecnologia = (
-    pd.read_csv('/Workspace/Users/daniel.scardini-ext@viavarejo.com.br/supply/supply_matriz_de_merecimento/src/dados_analise/ITENS_GEMEOS 2.csv',
+    pd.read_csv('dados_analise/ITENS_GEMEOS 2.csv',
                 delimiter=";",
                 encoding='iso-8859-1')
     .drop_duplicates()
@@ -224,13 +226,15 @@ print("Mapeamentos de produtos carregados:")
 de_para_modelos_gemeos_tecnologia.limit(1).display()
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 5. Agregação dos Dados de Telefonia por Filial
-# MAGIC 
+# MAGIC
 # MAGIC Agregamos os dados por mês, modelo, gêmeos e filial para análise no nível de loja.
 # MAGIC Excluímos produtos de chip e filtramos apenas o período de análise.
 
 # COMMAND ----------
+
 df_vendas_estoque_telefonia_agg = (
     df_vendas_estoque_telefonia
     .filter(F.col("year_month") < 202508)  # Filtro de período
@@ -254,13 +258,15 @@ print("Dados agregados por filial:")
 df_vendas_estoque_telefonia_agg.limit(1).display()
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 6. Cálculo de Percentuais de Vendas e Demanda
-# MAGIC 
+# MAGIC
 # MAGIC Calculamos os percentuais de participação nas vendas e demanda por mês, 
 # MAGIC modelo e grupo de produtos similares.
 
 # COMMAND ----------
+
 # Janela por mês, modelo e gêmeos
 w = Window.partitionBy("year_month", "modelos", "gemeos")
 
@@ -308,16 +314,20 @@ print("Percentuais calculados por filial:")
 df_pct_telefonia.limit(1).display()
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 7. Carregamento da Matriz de Merecimento Atual
-# MAGIC 
+# MAGIC
 # MAGIC Carregamos a matriz de merecimento atual para comparar com os dados reais.
 # MAGIC Filtramos apenas lojas offline (não CDs) e aplicamos os mapeamentos de produtos.
 
 # COMMAND ----------
+
+!pip install openpyxl
+
 # Leitura da matriz de merecimento
 df_matriz_telefonia_pd = pd.read_excel(
-    "/Workspace/Users/daniel.scardini-ext@viavarejo.com.br/supply/supply_matriz_de_merecimento/src/dados_analise/(DRP)_MATRIZ_20250825174952.csv.xlsx", 
+    "dados_analise/(DRP)_MATRIZ_20250825174952.csv.xlsx", 
     sheet_name="(DRP)_MATRIZ_20250825174952"
 )
 
@@ -348,13 +358,15 @@ print("Matriz de merecimento carregada:")
 df_matriz_telefonia.limit(1).display()
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 8. Validação da Matriz por Tipo de Filial
-# MAGIC 
+# MAGIC
 # MAGIC Verificamos a distribuição da matriz por tipo de filial para garantir 
 # MAGIC que estamos analisando apenas lojas.
 
 # COMMAND ----------
+
 print("Distribuição da matriz por tipo de filial:")
 (
     df_matriz_telefonia
@@ -367,13 +379,15 @@ print("Distribuição da matriz por tipo de filial:")
 ).display()
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 9. Join entre Matriz e Dados Reais
-# MAGIC 
+# MAGIC
 # MAGIC Realizamos o join entre a matriz de merecimento e os dados reais de vendas/demanda
 # MAGIC para comparar alocações previstas vs. realidade.
 
 # COMMAND ----------
+
 df_matriz_telefonia_metricas = (
     df_matriz_telefonia
     .join(
@@ -395,49 +409,58 @@ print("Dados consolidados para análise de métricas:")
 df_matriz_telefonia_metricas.limit(1).display()
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 10. Cálculo das Métricas de Avaliação
-# MAGIC 
+# MAGIC
 # MAGIC Calculamos as métricas linha a linha e agregadas para avaliar a qualidade
 # MAGIC das alocações da matriz de merecimento.
 
 # COMMAND ----------
-# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ### 10.1 Métricas Linha a Linha
-# MAGIC 
+# MAGIC
 # MAGIC Calculamos métricas para cada linha individual para análise detalhada.
 # MAGIC **Nota**: Usamos percentuais da matriz (Percentual_matriz_fixa) vs. percentuais reais da demanda (pct_demanda_perc).
 
 # COMMAND ----------
-# Janela para cálculo de shares (sobre todo o dataframe)
-w_total = Window.partitionBy(F.lit(1))
 
 # Parâmetros das métricas
-GAMMA = 2.0
+GAMMA = 1.5
 EPSILON = 1e-12
 
-df_with_metrics = (
+# APLICA FILTROS PRIMEIRO
+df_filtered = (
     df_matriz_telefonia_metricas
-    # Totais globais para cálculo de shares
-    .withColumn("total_matriz", F.sum("Percentual_matriz_fixa").over(w_total))
-    .withColumn("total_demanda_real", F.sum("pct_demanda_perc").over(w_total))
+    .filter(F.col("Demanda_total_mes_especie") > 50)  # Seu filtro aqui
+    # Adicione outros filtros conforme necessário
+)
+
+# DEPOIS calcula métricas sobre os dados filtrados
+w_filtered = Window.partitionBy(F.lit(1))  # Janela sobre dados filtrados
+
+df_with_metrics = (
+    df_filtered
+    # Totais sobre dados FILTRADOS (não globais)
+    .withColumn("total_matriz_filtrado", F.sum("Percentual_matriz_fixa").over(w_filtered))
+    .withColumn("total_demanda_real_filtrado", F.sum("pct_demanda_perc").over(w_filtered))
     
-    # Shares com proteção para divisões por zero
+    # Shares sobre dados filtrados
     .withColumn(
         "p", 
-        F.when(F.col("total_demanda_real") > 0, 
-               F.col("pct_demanda_perc") / F.col("total_demanda_real"))
+        F.when(F.col("total_demanda_real_filtrado") > 0, 
+               F.col("pct_demanda_perc") / F.col("total_demanda_real_filtrado"))
          .otherwise(F.lit(0.0))
     )
     .withColumn(
         "phat", 
-        F.when(F.col("total_matriz") > 0, 
-               F.col("Percentual_matriz_fixa") / F.col("total_matriz"))
+        F.when(F.col("total_matriz_filtrado") > 0, 
+               F.col("Percentual_matriz_fixa") / F.col("total_matriz_filtrado"))
          .otherwise(F.lit(0.0))
     )
     
-    # Métricas linha a linha - usando percentuais da matriz vs. demanda real
+    # Métricas linha a linha
     .withColumn("abs_err", F.abs(F.col("pct_demanda_perc") - F.col("Percentual_matriz_fixa")))
     .withColumn("under", F.greatest(F.lit(0.0), F.col("pct_demanda_perc") - F.col("Percentual_matriz_fixa")))
     .withColumn(
@@ -467,41 +490,82 @@ df_with_metrics = (
     )
 )
 
-print("Métricas linha a linha calculadas:")
+print("Métricas linha a linha calculadas (sobre dados filtrados):")
 df_with_metrics.limit(1).display()
 
+
 # COMMAND ----------
+
+de_para_filial_cd = (
+  spark.table('databox.bcg_comum.supply_base_merecimento_diario')
+  .select('CdFilial', 'Cd_primario')
+  .distinct()
+  .dropna()
+)
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ### 10.2 Métricas Agregadas
-# MAGIC 
+# MAGIC
 # MAGIC Calculamos as métricas agregadas para o dataframe inteiro usando a função
 # MAGIC `add_allocation_metrics` que criamos no início.
 # MAGIC **Nota**: Métricas calculadas comparando percentuais da matriz vs. percentuais reais da demanda.
 
 # COMMAND ----------
-# Métricas agregadas usando a função
+
+# Métricas agregadas sobre dados FILTRADOS
 df_agg_metrics = add_allocation_metrics(
-    df=df_matriz_telefonia_metricas,
-    y_col="pct_demanda_perc",     # Valor real (percentual da demanda)
-    yhat_col="Percentual_matriz_fixa",  # Valor previsto (percentual da matriz)
-    group_cols=None               # Agregação global
+    df=df_filtered,  # Usa dados filtrados
+    y_col="pct_demanda_perc",     
+    yhat_col="Percentual_matriz_fixa",  
+    group_cols=None               
 )
 
-print("Métricas agregadas calculadas:")
+print("Métricas agregadas calculadas (sobre dados filtrados):")
 df_agg_metrics.display()
 
 # COMMAND ----------
+
+# Métricas agregadas sobre dados FILTRADOS
+df_agg_metrics = add_allocation_metrics(
+    df=df_filtered.join(de_para_filial_cd, how="left", on="CdFilial"),  # Usa dados filtrados
+    y_col="pct_demanda_perc",     
+    yhat_col="Percentual_matriz_fixa",  
+    group_cols=["Cd_primario"]            
+).dropna(subset=["Cd_primario"])
+
+print("Métricas agregadas calculadas (sobre dados filtrados):")
+df_agg_metrics.display()
+
+# COMMAND ----------
+
+# Métricas agregadas sobre dados FILTRADOS
+df_agg_metrics = add_allocation_metrics(
+    df=df_filtered.join(de_para_filial_cd, how="left", on="CdFilial"),  # Usa dados filtrados
+    y_col="pct_demanda_perc",     
+    yhat_col="Percentual_matriz_fixa",  
+    group_cols=["CdFilial"]            
+).dropna(subset=["CdFilial"])
+
+print("Métricas agregadas calculadas (sobre dados filtrados):")
+df_agg_metrics.display()
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 11. Análise de Telas (Incompleto - Mantido por Referência)
-# MAGIC 
+# MAGIC
 # MAGIC Esta seção está incompleta e é mantida apenas para referência futura.
 # MAGIC Foca na análise de produtos de tela (eletrodomésticos e eletrônicos).
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ### 11.1 Mapeamento de Produtos de Tela
 
 # COMMAND ----------
+
 de_para_gemeos_telas = (
     pd.read_excel('/Workspace/Users/daniel.scardini-ext@viavarejo.com.br/supply/supply_matriz_de_merecimento/src/dados_analise/Base analise- Telas.xlsx', sheet_name='Base')
     [['ITEM', 'VOLTAGEM_ITEM', 'ESPECIE ( GEF)', 'FAIXA DE PREÇO', 'MODELO ', 'GEMEOS']]
@@ -527,10 +591,12 @@ de_para_gemeos_telas.columns = (
 )
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ### 11.2 Dados de Vendas e Estoque de Telas
 
 # COMMAND ----------
+
 df_vendas_estoque_telas = (
     spark.table('databox.bcg_comum.supply_base_merecimento_diario')
     .filter(F.col("NmAgrupamentoDiretoriaSetor") == 'DIRETORIA DE TELAS')
@@ -547,10 +613,12 @@ print("Dados de vendas e estoque de telas carregados:")
 df_vendas_estoque_telas.limit(1).display()
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ### 11.3 Agregação de Dados de Telas por CD (Incompleto)
 
 # COMMAND ----------
+
 df_vendas_estoque_telas_agg_CD = (
     df_vendas_estoque_telas
     .filter(F.col("year_month") < 202508)
@@ -574,9 +642,10 @@ print("Dados de telas agregados por CD (incompleto):")
 df_vendas_estoque_telas_agg_CD.limit(1).display()
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 12. Resumo da Análise
-# MAGIC 
+# MAGIC
 # MAGIC **Análise Concluída:**
 # MAGIC - ✅ Dados de telefonia carregados e processados
 # MAGIC - ✅ Mapeamentos de produtos aplicados
@@ -584,7 +653,7 @@ df_vendas_estoque_telas_agg_CD.limit(1).display()
 # MAGIC - ✅ Matriz de merecimento carregada e validada
 # MAGIC - ✅ Métricas linha a linha calculadas
 # MAGIC - ✅ Métricas agregadas calculadas
-# MAGIC 
+# MAGIC
 # MAGIC **Próximos Passos Recomendados:**
 # MAGIC 1. Análise detalhada das métricas por modelo/gêmeos
 # MAGIC 2. Identificação de padrões de sub/super alocação
