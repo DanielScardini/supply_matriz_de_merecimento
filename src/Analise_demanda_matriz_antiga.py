@@ -554,18 +554,323 @@ df_agg_metrics.display()
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 11. Análise de Telas (Incompleto - Mantido por Referência)
-# MAGIC
-# MAGIC Esta seção está incompleta e é mantida apenas para referência futura.
-# MAGIC Foca na análise de produtos de tela (eletrodomésticos e eletrônicos).
+# MAGIC ## 11. Visualização e Análise por CD Primário
+# MAGIC 
+# MAGIC Criamos visualizações para analisar a distribuição de erros por filial,
+# MAGIC mostrando como os erros se distribuem entre diferentes CDs primários
+# MAGIC e permitindo identificar padrões de sub/super alocação.
 
 # COMMAND ----------
-
 # MAGIC %md
-# MAGIC ### 11.1 Mapeamento de Produtos de Tela
+# MAGIC ### 11.1 Preparação dos Dados para Visualização
+# MAGIC 
+# MAGIC Preparamos os dados com métricas de erro calculadas por filial,
+# MAGIC incluindo informações de CD primário para análise geográfica.
 
 # COMMAND ----------
+# Carregar dados de mapeamento de filial para CD primário
+df_filial_cd = (
+    spark.table('databox.bcg_comum.supply_base_merecimento_diario')
+    .select("CdFilial", "Cd_primario", "NmCidade_UF_primario")
+    .distinct()
+    .filter(F.col("Cd_primario").isNotNull())
+)
 
+# Join com as métricas calculadas para obter informações de CD primário
+df_metricas_completo = (
+    df_with_metrics
+    .join(
+        df_filial_cd,
+        on="CdFilial",
+        how="left"
+    )
+    .withColumn(
+        "erro_percentual", 
+        F.col("pct_demanda_perc") - F.col("Percentual_matriz_fixa")
+    )
+    .withColumn(
+        "tipo_erro",
+        F.when(F.col("erro_percentual") < 0, "Underallocation")
+         .when(F.col("erro_percentual") > 0, "Overallocation")
+         .otherwise("Perfeito")
+    )
+    .withColumn(
+        "abs_erro_percentual",
+        F.abs(F.col("erro_percentual"))
+    )
+)
+
+print("Dados preparados para visualização:")
+df_metricas_completo.limit(1).display()
+
+# COMMAND ----------
+# MAGIC %md
+# MAGIC ### 11.2 Análise de Erros por CD Primário
+# MAGIC 
+# MAGIC Analisamos a distribuição de erros por centro de distribuição primário,
+# MAGIC ordenando por métrica de erro para identificar padrões.
+
+# COMMAND ----------
+# Análise agregada por CD primário
+df_erros_por_cd = (
+    df_metricas_completo
+    .groupBy("Cd_primario", "NmCidade_UF_primario")
+    .agg(
+        F.count("*").alias("total_filiais"),
+        F.avg("erro_percentual").alias("erro_medio"),
+        F.stddev("erro_percentual").alias("desvio_padrao_erro"),
+        F.avg("abs_erro_percentual").alias("erro_absoluto_medio"),
+        F.sum(F.when(F.col("tipo_erro") == "Underallocation", 1).otherwise(0)).alias("filiais_under"),
+        F.sum(F.when(F.col("tipo_erro") == "Overallocation", 1).otherwise(0)).alias("filiais_over"),
+        F.sum(F.when(F.col("tipo_erro") == "Perfeito", 1).otherwise(0)).alias("filiais_perfeitas")
+    )
+    .withColumn(
+        "pct_under", 
+        F.round(F.col("filiais_under") / F.col("total_filiais") * 100, 2)
+    )
+    .withColumn(
+        "pct_over", 
+        F.round(F.col("filiais_over") / F.col("total_filiais") * 100, 2)
+    )
+    .withColumn(
+        "pct_perfeitas", 
+        F.round(F.col("filiais_perfeitas") / F.col("total_filiais") * 100, 2)
+    )
+    .orderBy(F.desc("erro_absoluto_medio"))
+)
+
+print("Análise de erros por CD primário (ordenado por erro absoluto médio):")
+df_erros_por_cd.display()
+
+# COMMAND ----------
+# MAGIC %md
+# MAGIC ### 11.3 Visualização Scatter Plot por CD Primário
+# MAGIC 
+# MAGIC Criamos um scatter plot mostrando a distribuição de erros por filial,
+# MAGIC com foco na análise por CD primário e visualização da nuvem de pontos
+# MAGIC em torno do eixo y = 0.
+
+# COMMAND ----------
+# Converter para pandas para visualização
+df_metricas_pd = df_metricas_completo.toPandas()
+
+# Instalar plotly se necessário
+try:
+    import plotly.express as px
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+    print("Plotly já está disponível")
+except ImportError:
+    print("Instalando plotly...")
+    import subprocess
+    subprocess.check_call(["pip", "install", "plotly"])
+    import plotly.express as px
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+# COMMAND ----------
+# MAGIC %md
+# MAGIC #### 11.3.1 Scatter Plot Principal - Distribuição de Erros por Filial
+
+# COMMAND ----------
+# Scatter plot principal mostrando erro percentual vs. filial
+fig_scatter = px.scatter(
+    df_metricas_pd,
+    x="CdFilial",
+    y="erro_percentual",
+    color="Cd_primario",
+    hover_data=["modelos", "gemeos", "NmCidade_UF_primario"],
+    title="Distribuição de Erros de Alocação por Filial - Análise por CD Primário",
+    labels={
+        "CdFilial": "Código da Filial",
+        "erro_percentual": "Erro Percentual (Demanda Real - Matriz)",
+        "Cd_primario": "CD Primário"
+    },
+    color_discrete_sequence=px.colors.qualitative.Set3
+)
+
+# Adicionar linha horizontal em y = 0
+fig_scatter.add_hline(
+    y=0, 
+    line_dash="dash", 
+    line_color="red",
+    annotation_text="Linha de Referência (Sem Erro)"
+)
+
+# Adicionar linhas horizontais para zonas de tolerância
+fig_scatter.add_hline(y=5, line_dash="dot", line_color="orange", annotation_text="Tolerância +5%")
+fig_scatter.add_hline(y=-5, line_dash="dot", line_color="orange", annotation_text="Tolerância -5%")
+
+# Configurar layout
+fig_scatter.update_layout(
+    height=600,
+    showlegend=True,
+    legend_title="CD Primário",
+    xaxis_title="Código da Filial",
+    yaxis_title="Erro Percentual (%)",
+    hovermode="closest"
+)
+
+# Mostrar o gráfico
+fig_scatter.show()
+
+# COMMAND ----------
+# MAGIC %md
+# MAGIC #### 11.3.2 Scatter Plot por CD Primário - Análise Detalhada
+
+# COMMAND ----------
+# Criar subplots para cada CD primário
+cds_unicos = df_metricas_pd["Cd_primario"].unique()
+n_cds = len(cds_unicos)
+
+# Determinar layout de subplots
+if n_cds <= 4:
+    cols = 2
+    rows = (n_cds + 1) // 2
+else:
+    cols = 3
+    rows = (n_cds + 2) // 3
+
+fig_subplots = make_subplots(
+    rows=rows, 
+    cols=cols,
+    subplot_titles=[f"CD {cd}" for cd in cds_unicos],
+    vertical_spacing=0.1,
+    horizontal_spacing=0.1
+)
+
+# Adicionar scatter plots para cada CD
+for i, cd in enumerate(cds_unicos):
+    df_cd = df_metricas_pd[df_metricas_pd["Cd_primario"] == cd]
+    
+    row = (i // cols) + 1
+    col = (i % cols) + 1
+    
+    fig_subplots.add_trace(
+        go.Scatter(
+            x=df_cd["CdFilial"],
+            y=df_cd["erro_percentual"],
+            mode="markers",
+            name=f"CD {cd}",
+            marker=dict(
+                size=8,
+                color=df_cd["erro_percentual"],
+                colorscale="RdBu",
+                colorscale_reverse=True,
+                showscale=True,
+                colorbar=dict(title="Erro %")
+            ),
+            text=df_cd["CdFilial"].astype(str),
+            hovertemplate="<b>Filial: %{text}</b><br>" +
+                         "Erro: %{y:.2f}%<br>" +
+                         "Modelo: " + df_cd["modelos"] + "<br>" +
+                         "Gêmeos: " + df_cd["gemeos"] + "<br>" +
+                         "<extra></extra>"
+        ),
+        row=row, col=col
+    )
+    
+    # Adicionar linha horizontal em y = 0 para cada subplot
+    fig_subplots.add_hline(
+        y=0, 
+        line_dash="dash", 
+        line_color="red",
+        row=row, col=col
+    )
+
+# Configurar layout
+fig_subplots.update_layout(
+    height=300 * rows,
+    title_text="Distribuição de Erros por CD Primário - Análise Detalhada",
+    showlegend=False
+)
+
+# Atualizar eixos
+fig_subplots.update_xaxes(title_text="Código da Filial")
+fig_subplots.update_yaxes(title_text="Erro Percentual (%)")
+
+fig_subplots.show()
+
+# COMMAND ----------
+# MAGIC %md
+# MAGIC #### 11.3.3 Box Plot - Distribuição de Erros por CD Primário
+
+# COMMAND ----------
+# Box plot mostrando distribuição de erros por CD primário
+fig_box = px.box(
+    df_metricas_pd,
+    x="Cd_primario",
+    y="erro_percentual",
+    color="Cd_primario",
+    title="Distribuição de Erros de Alocação por CD Primário",
+    title_x=0.5,
+    labels={
+        "Cd_primario": "CD Primário",
+        "erro_percentual": "Erro Percentual (%)"
+    }
+)
+
+# Adicionar linha horizontal em y = 0
+fig_box.add_hline(
+    y=0, 
+    line_dash="dash", 
+    line_color="red",
+    annotation_text="Linha de Referência (Sem Erro)"
+)
+
+# Configurar layout
+fig_box.update_layout(
+    height=500,
+    showlegend=False,
+    xaxis_title="CD Primário",
+    yaxis_title="Erro Percentual (%)"
+)
+
+fig_box.show()
+
+# COMMAND ----------
+# MAGIC %md
+# MAGIC ### 11.4 Resumo da Análise Visual
+
+# COMMAND ----------
+print("=== RESUMO DA ANÁLISE VISUAL ===")
+print()
+
+# Estatísticas gerais
+total_filiais = len(df_metricas_pd)
+filiais_under = len(df_metricas_pd[df_metricas_pd["erro_percentual"] < 0])
+filiais_over = len(df_metricas_pd[df_metricas_pd["erro_percentual"] > 0])
+filiais_perfeitas = len(df_metricas_pd[df_metricas_pd["erro_percentual"] == 0])
+
+print(f"📊 ESTATÍSTICAS GERAIS:")
+print(f"   • Total de Filiais: {total_filiais}")
+print(f"   • Filiais com Underallocation: {filiais_under} ({filiais_under/total_filiais*100:.1f}%)")
+print(f"   • Filiais com Overallocation: {filiais_over} ({filiais_over/total_filiais*100:.1f}%)")
+print(f"   • Filiais Perfeitas: {filiais_perfeitas} ({filiais_perfeitas/total_filiais*100:.1f}%)")
+print()
+
+# Análise por CD primário
+print(f"🏢 ANÁLISE POR CD PRIMÁRIO:")
+for _, row in df_erros_por_cd.toPandas().iterrows():
+    cd = row["Cd_primario"]
+    cidade = row["NmCidade_UF_primario"]
+    erro_medio = row["erro_medio"]
+    erro_abs = row["erro_absoluto_medio"]
+    pct_under = row["pct_under"]
+    pct_over = row["pct_over"]
+    
+    print(f"   • CD {cd} ({cidade}):")
+    print(f"     - Erro Médio: {erro_medio:.2f}%")
+    print(f"     - Erro Absoluto Médio: {erro_abs:.2f}%")
+    print(f"     - Underallocation: {pct_under:.1f}% das filiais")
+    print(f"     - Overallocation: {pct_over:.1f}% das filiais")
+    print()
+
+# COMMAND ----------
+# MAGIC %md
+# MAGIC ### 12.1 Mapeamento de Produtos de Tela
+
+# COMMAND ----------
 de_para_gemeos_telas = (
     pd.read_excel('/Workspace/Users/daniel.scardini-ext@viavarejo.com.br/supply/supply_matriz_de_merecimento/src/dados_analise/Base analise- Telas.xlsx', sheet_name='Base')
     [['ITEM', 'VOLTAGEM_ITEM', 'ESPECIE ( GEF)', 'FAIXA DE PREÇO', 'MODELO ', 'GEMEOS']]
@@ -591,12 +896,10 @@ de_para_gemeos_telas.columns = (
 )
 
 # COMMAND ----------
-
 # MAGIC %md
-# MAGIC ### 11.2 Dados de Vendas e Estoque de Telas
+# MAGIC ### 12.2 Dados de Vendas e Estoque de Telas
 
 # COMMAND ----------
-
 df_vendas_estoque_telas = (
     spark.table('databox.bcg_comum.supply_base_merecimento_diario')
     .filter(F.col("NmAgrupamentoDiretoriaSetor") == 'DIRETORIA DE TELAS')
@@ -613,12 +916,10 @@ print("Dados de vendas e estoque de telas carregados:")
 df_vendas_estoque_telas.limit(1).display()
 
 # COMMAND ----------
-
 # MAGIC %md
-# MAGIC ### 11.3 Agregação de Dados de Telas por CD (Incompleto)
+# MAGIC ### 12.3 Agregação de Dados de Telas por CD (Incompleto)
 
 # COMMAND ----------
-
 df_vendas_estoque_telas_agg_CD = (
     df_vendas_estoque_telas
     .filter(F.col("year_month") < 202508)
@@ -642,9 +943,8 @@ print("Dados de telas agregados por CD (incompleto):")
 df_vendas_estoque_telas_agg_CD.limit(1).display()
 
 # COMMAND ----------
-
 # MAGIC %md
-# MAGIC ## 12. Resumo da Análise
+# MAGIC ## 13. Resumo da Análise
 # MAGIC
 # MAGIC **Análise Concluída:**
 # MAGIC - ✅ Dados de telefonia carregados e processados
@@ -653,9 +953,10 @@ df_vendas_estoque_telas_agg_CD.limit(1).display()
 # MAGIC - ✅ Matriz de merecimento carregada e validada
 # MAGIC - ✅ Métricas linha a linha calculadas
 # MAGIC - ✅ Métricas agregadas calculadas
+# MAGIC - ✅ Visualizações por CD primário criadas
 # MAGIC
 # MAGIC **Próximos Passos Recomendados:**
 # MAGIC 1. Análise detalhada das métricas por modelo/gêmeos
-# MAGIC 2. Identificação de padrões de sub/super alocação
-# MAGIC 3. Recomendações para otimização da matriz
+# MAGIC 2. Identificação de padrões de sub/super alocação por região
+# MAGIC 3. Recomendações para otimização da matriz por CD primário
 # MAGIC 4. Completar análise de telas se necessário
