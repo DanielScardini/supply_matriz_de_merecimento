@@ -716,11 +716,11 @@ fig_scatter.show()
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC #### 11.3.2 Scatter Plot por CD Primário - Análise Detalhada (Ordenado por Erro)
+# MAGIC #### 11.3.2 Scatter Plot por CD Primário - Análise Detalhada (Ordenado por CD e Erro)
 
 # COMMAND ----------
 # Criar subplots para cada CD primário
-cds_unicos = df_metricas_pd["Cd_primario"].unique()
+cds_unicos = sorted(df_metricas_pd["Cd_primario"].unique())
 n_cds = len(cds_unicos)
 
 # Determinar layout de subplots
@@ -743,10 +743,10 @@ fig_subplots = make_subplots(
 for i, cd in enumerate(cds_unicos):
     df_cd = df_metricas_pd[df_metricas_pd["Cd_primario"] == cd].copy()
     
-    # Ordenar filiais por erro percentual (do menor para o maior)
-    df_cd = df_cd.sort_values("erro_percentual")
+    # Ordenar filiais por desvio de alocação decrescente (maior erro absoluto primeiro)
+    df_cd = df_cd.sort_values("abs_erro_percentual", ascending=False)
     
-    # Criar índice ordenado para o eixo X
+    # Criar índice arbitrário para o eixo X (valores não importam)
     df_cd["indice_ordenado"] = range(len(df_cd))
     
     row = (i // cols) + 1
@@ -778,7 +778,6 @@ for i, cd in enumerate(cds_unicos):
                          "Erro: %{y:.2f}%<br>" +
                          "Modelo: " + df_cd["modelos"] + "<br>" +
                          "Gêmeos: " + df_cd["gemeos"] + "<br>" +
-                         "Posição: %{x}<br>" +
                          "<extra></extra>"
         ),
         row=row, col=col
@@ -800,12 +799,16 @@ for i, cd in enumerate(cds_unicos):
 # Configurar layout
 fig_subplots.update_layout(
     height=300 * rows,
-    title_text="Distribuição de Erros por CD Primário - Filiais Ordenadas por Erro",
+    title_text="Distribuição de Erros por CD Primário - Filiais Ordenadas por Desvio Decrescente",
     showlegend=False
 )
 
-# Atualizar eixos
-fig_subplots.update_xaxes(title_text="Posição da Filial (Ordenada por Erro)")
+# Atualizar eixos - omitir valores do eixo X
+fig_subplots.update_xaxes(
+    title_text="",  # Sem título
+    showticklabels=False,  # Omitir valores
+    showgrid=False  # Sem grid no eixo X
+)
 fig_subplots.update_yaxes(title_text="Erro Percentual (%)")
 
 fig_subplots.show()
@@ -824,7 +827,8 @@ posicao_atual = 0
 
 for cd in sorted(df_metricas_ordenado["Cd_primario"].unique()):
     df_cd = df_metricas_ordenado[df_metricas_ordenado["Cd_primario"] == cd].copy()
-    df_cd = df_cd.sort_values("erro_percentual")
+    # Ordenar por desvio decrescente (maior erro absoluto primeiro)
+    df_cd = df_cd.sort_values("abs_erro_percentual", ascending=False)
     
     # Atribuir posições ordenadas
     for idx, row in df_cd.iterrows():
@@ -848,7 +852,7 @@ fig_ordenado = px.scatter(
     y="erro_percentual",
     color="Cd_primario",
     hover_data=["CdFilial", "modelos", "gemeos", "NmCidade_UF_primario"],
-    title="Distribuição de Erros por Filial - Ordenadas por CD Primário e Erro Percentual",
+    title="Distribuição de Erros por Filial - Ordenadas por CD Primário e Desvio Decrescente",
     labels={
         "indice_ordenado": "Posição da Filial (Ordenada)",
         "erro_percentual": "Erro Percentual (Demanda Real - Matriz)",
@@ -884,9 +888,15 @@ fig_ordenado.update_layout(
     height=600,
     showlegend=True,
     legend_title="CD Primário",
-    xaxis_title="Posição da Filial (Ordenada por CD e Erro)",
+    xaxis_title="",  # Sem título no eixo X
     yaxis_title="Erro Percentual (%)",
     hovermode="closest"
+)
+
+# Omitir valores do eixo X
+fig_ordenado.update_xaxes(
+    showticklabels=False,  # Omitir valores
+    showgrid=False  # Sem grid no eixo X
 )
 
 # Mostrar o gráfico
