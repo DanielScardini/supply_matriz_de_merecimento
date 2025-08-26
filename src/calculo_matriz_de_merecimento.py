@@ -1,18 +1,19 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Cálculo da Matriz de Merecimento - Arquitetura em Duas Camadas com Múltiplas Médias Móveis
+# MAGIC # Cálculo da Matriz de Merecimento - Arquitetura em Duas Camadas com Remoção de Outliers Históricos
 # MAGIC
 # MAGIC Este notebook implementa o cálculo da matriz de merecimento em duas camadas com detecção automática
-# MAGIC de meses atípicos e múltiplas abordagens de médias móveis para demanda robusta à ruptura.
+# MAGIC de meses atípicos, remoção de outliers históricos e múltiplas abordagens de médias móveis para demanda robusta à ruptura.
 # MAGIC
 # MAGIC **Objetivo**: Calcular a matriz de merecimento otimizada em duas camadas:
 # MAGIC 1. **Primeira camada**: Matriz a nível CD (gêmeo)
 # MAGIC 2. **Segunda camada**: Distribuição interna ao CD para as lojas
 # MAGIC
 # MAGIC **Metodologia de Detecção de Outliers**:
-# MAGIC - **Regra dos n Desvios**: Remove meses com QtMercadoria > nσ da média APENAS do gêmeo específico
-# MAGIC - **Cálculo por Gêmeo**: Estatísticas calculadas individualmente para cada grupo de produtos similares
-# MAGIC - **Validação Automática**: Identifica e reporta meses removidos com justificativa estatística por gêmeo
+# MAGIC - **Meses Atípicos**: Remove meses com QtMercadoria > nσ da média APENAS do gêmeo específico
+# MAGIC - **Outliers Históricos CD**: Remove registros > 3σ da média por gêmeo (configurável)
+# MAGIC - **Outliers Históricos Loja**: Remove registros > 3σ da média por gêmeo-loja (configurável)
+# MAGIC - **Flag de Atacado**: Parâmetros diferenciados para lojas de atacado vs. varejo
 # MAGIC
 # MAGIC **Múltiplas Médias Móveis**:
 # MAGIC - **Médias Móveis Normais**: 90, 180, 270, 360 dias
@@ -210,7 +211,8 @@ df_stats_por_gemeo_mes.limit(5).display()
 
 # COMMAND ----------
 
-n_desvios = 2
+# Uso dos parâmetros configuráveis para meses atípicos
+n_desvios = PARAMETROS_OUTLIERS["desvios_meses_atipicos"]
 
 # Janela para cálculo de estatísticas por gêmeo
 w_stats_gemeo = Window.partitionBy("gemeos")
@@ -343,7 +345,44 @@ de_para_filial_cd.limit(5).display()
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 6. Filtragem de Meses Atípicos por Gêmeo Específico
+# MAGIC ## 6. Configuração de Parâmetros para Detecção de Outliers
+# MAGIC
+# MAGIC %md
+# MAGIC Configuramos os parâmetros para detecção de outliers em diferentes níveis:
+# MAGIC - **Meses atípicos**: Por gêmeo específico
+# MAGIC - **Outliers históricos**: Por gêmeo-CD e gêmeo-loja com parâmetros configuráveis
+# MAGIC - **Flag de atacado**: Lojas com vendas atacado recebem tratamento diferenciado
+
+# COMMAND ----------
+
+# Configuração de parâmetros para detecção de outliers
+PARAMETROS_OUTLIERS = {
+    "desvios_meses_atipicos": 2,  # Desvios para meses atípicos
+    "desvios_historico_cd": 3,     # Desvios para outliers históricos a nível CD
+    "desvios_historico_loja": 3,   # Desvios para outliers históricos a nível loja
+    "desvios_atacado_cd": 2.5,     # Desvios para outliers CD em lojas de atacado
+    "desvios_atacado_loja": 2.5    # Desvios para outliers loja em lojas de atacado
+}
+
+# Flag para identificar lojas de atacado (pode ser carregado de uma tabela)
+lojas_atacado = (
+    spark.table('databox.bcg_comum.supply_base_merecimento_diario')
+    .select("CdFilial")
+    .distinct()
+    .withColumn("flag_atacado", F.lit(1))  # Por enquanto, todas as lojas são consideradas
+    .cache()
+)
+
+print("✅ Parâmetros de outliers configurados:")
+for param, valor in PARAMETROS_OUTLIERS.items():
+    print(f"  • {param}: {valor} desvios padrão")
+
+print(f"\n🏪 Lojas de atacado identificadas: {lojas_atacado.count():,}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 7. Filtragem de Meses Atípicos por Gêmeo Específico
 # MAGIC
 # MAGIC %md
 # MAGIC Aplicamos o filtro para remover os meses identificados como atípicos,
@@ -384,9 +423,9 @@ print("ℹ️  Nota: Apenas meses atípicos do gêmeo específico foram removido
 
 # COMMAND ----------
 
-# Agregação por gêmeo e mês para matriz a nível CD
+# Agregação por gêmeo e mês para matriz a nível CD (usando dados sem outliers)
 df_matriz_cd_gemeo = (
-    df_vendas_estoque_telefonia_filtrado
+    df_vendas_estoque_sem_outliers
     .filter(~F.col("NmEspecieGerencial").contains("CHIP"))  # Excluir chips
     .groupBy("year_month", "gemeos")
     .agg(
@@ -530,7 +569,247 @@ print(f"  • Distribuição proporcional entre filiais do mesmo CD")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 11. Cálculo de Demanda por Múltiplas Médias Móveis (Robusta à Ruptura)
+# MAGIC ## 8. Detecção e Remoção de Outliers Históricos por Gêmeo-CD e Gêmeo-Loja
+# MAGIC
+# MAGIC %md
+# MAGIC Antes de calcular as médias móveis, removemos outliers históricos em dois níveis:
+# MAGIC - **Nível CD (gêmeo)**: Outliers por grupo de produtos similares
+# MAGIC - **Nível Loja**: Outliers por filial específica
+# MAGIC - **Parâmetros configuráveis**: Diferentes desvios para lojas normais vs. atacado
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 8.1 Detecção de Outliers Históricos a Nível CD (Gêmeo)
+# MAGIC
+# MAGIC %md
+# MAGIC Calculamos estatísticas históricas por gêmeo para identificar outliers
+# MAGIC que podem distorcer o cálculo das médias móveis.
+
+# COMMAND ----------
+
+# Agregação histórica por gêmeo para detecção de outliers
+df_stats_historico_gemeo = (
+    df_vendas_estoque_telefonia_filtrado
+    .filter(~F.col("NmEspecieGerencial").contains("CHIP"))  # Excluir chips
+    .groupBy("gemeos")
+    .agg(
+        F.count("*").alias("total_registros_historico"),
+        F.sum("QtMercadoria").alias("qt_total_historico"),
+        F.round(F.avg("QtMercadoria"), 2).alias("media_qt_historico"),
+        F.round(F.stddev("QtMercadoria"), 2).alias("desvio_padrao_qt_historico"),
+        F.round(F.avg("Receita"), 2).alias("media_receita_historico"),
+        F.round(F.stddev("Receita"), 2).alias("desvio_padrao_receita_historico")
+    )
+    .filter(F.col("total_registros_historico") >= 10)  # Mínimo de registros para estatísticas válidas
+)
+
+# Cálculo de limites para outliers a nível CD
+df_limites_outliers_cd = (
+    df_stats_historico_gemeo
+    .withColumn(
+        "limite_superior_qt_cd",
+        F.col("media_qt_historico") + (F.lit(PARAMETROS_OUTLIERS["desvios_historico_cd"]) * F.col("desvio_padrao_qt_historico"))
+    )
+    .withColumn(
+        "limite_inferior_qt_cd",
+        F.greatest(
+            F.col("media_qt_historico") - (F.lit(PARAMETROS_OUTLIERS["desvios_historico_cd"]) * F.col("desvio_padrao_qt_historico")),
+            F.lit(0)
+        )
+    )
+    .withColumn(
+        "limite_superior_receita_cd",
+        F.col("media_receita_historico") + (F.lit(PARAMETROS_OUTLIERS["desvios_historico_cd"]) * F.col("desvio_padrao_receita_historico"))
+    )
+    .withColumn(
+        "limite_inferior_receita_cd",
+        F.greatest(
+            F.col("media_receita_historico") - (F.lit(PARAMETROS_OUTLIERS["desvios_historico_cd"]) * F.col("desvio_padrao_receita_historico")),
+            F.lit(0)
+        )
+    )
+)
+
+print("✅ Limites de outliers a nível CD calculados:")
+print(f"📊 Total de gêmeos analisados: {df_limites_outliers_cd.count():,}")
+
+df_limites_outliers_cd.limit(5).display()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 8.2 Detecção de Outliers Históricos a Nível Loja
+# MAGIC
+# MAGIC %md
+# MAGIC Calculamos estatísticas históricas por gêmeo e loja para identificar outliers
+# MAGIC específicos de cada filial, considerando o flag de atacado.
+
+# COMMAND ----------
+
+# Join com flag de atacado
+df_vendas_estoque_com_atacado = (
+    df_vendas_estoque_telefonia_filtrado
+    .join(
+        lojas_atacado,
+        on="CdFilial",
+        how="left"
+    )
+    .fillna(0, subset=["flag_atacado"])
+)
+
+# Agregação histórica por gêmeo e loja para detecção de outliers
+df_stats_historico_gemeo_loja = (
+    df_vendas_estoque_com_atacado
+    .filter(~F.col("NmEspecieGerencial").contains("CHIP"))  # Excluir chips
+    .groupBy("gemeos", "CdFilial", "flag_atacado")
+    .agg(
+        F.count("*").alias("total_registros_historico_loja"),
+        F.sum("QtMercadoria").alias("qt_total_historico_loja"),
+        F.round(F.avg("QtMercadoria"), 2).alias("media_qt_historico_loja"),
+        F.round(F.stddev("QtMercadoria"), 2).alias("desvio_padrao_qt_historico_loja"),
+        F.round(F.avg("Receita"), 2).alias("media_receita_historico_loja"),
+        F.round(F.stddev("Receita"), 2).alias("desvio_padrao_receita_historico_loja")
+    )
+    .filter(F.col("total_registros_historico_loja") >= 5)  # Mínimo de registros para estatísticas válidas
+)
+
+# Cálculo de limites para outliers a nível loja (considerando flag de atacado)
+df_limites_outliers_loja = (
+    df_stats_historico_gemeo_loja
+    .withColumn(
+        "desvios_loja",
+        F.when(F.col("flag_atacado") == 1,
+               F.lit(PARAMETROS_OUTLIERS["desvios_atacado_loja"]))
+         .otherwise(F.lit(PARAMETROS_OUTLIERS["desvios_historico_loja"]))
+    )
+    .withColumn(
+        "limite_superior_qt_loja",
+        F.col("media_qt_historico_loja") + (F.col("desvios_loja") * F.col("desvio_padrao_qt_historico_loja"))
+    )
+    .withColumn(
+        "limite_inferior_qt_loja",
+        F.greatest(
+            F.col("media_qt_historico_loja") - (F.col("desvios_loja") * F.col("desvio_padrao_qt_historico_loja")),
+            F.lit(0)
+        )
+    )
+    .withColumn(
+        "limite_superior_receita_loja",
+        F.col("media_receita_historico_loja") + (F.col("desvios_loja") * F.col("desvio_padrao_receita_historico_loja"))
+    )
+    .withColumn(
+        "limite_inferior_receita_loja",
+        F.greatest(
+            F.col("media_receita_historico_loja") - (F.col("desvios_loja") * F.col("desvio_padrao_receita_historico_loja")),
+            F.lit(0)
+        )
+    )
+)
+
+print("✅ Limites de outliers a nível loja calculados:")
+print(f"📊 Total de combinações gêmeo-loja analisadas: {df_limites_outliers_loja.count():,}")
+
+df_limites_outliers_loja.limit(5).display()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 8.3 Aplicação dos Filtros de Outliers Históricos
+# MAGIC
+# MAGIC %md
+# MAGIC Aplicamos os filtros de outliers históricos para remover registros
+# MAGIC que podem distorcer o cálculo das médias móveis.
+
+# COMMAND ----------
+
+# Aplicação dos filtros de outliers históricos
+df_vendas_estoque_sem_outliers = (
+    df_vendas_estoque_com_atacado
+    .join(
+        df_limites_outliers_cd.select("gemeos", "limite_superior_qt_cd", "limite_inferior_qt_cd", 
+                                     "limite_superior_receita_cd", "limite_inferior_receita_cd"),
+        on="gemeos",
+        how="left"
+    )
+    .join(
+        df_limites_outliers_loja.select("gemeos", "CdFilial", "limite_superior_qt_loja", "limite_inferior_qt_loja",
+                                       "limite_superior_receita_loja", "limite_inferior_receita_loja"),
+        on=["gemeos", "CdFilial"],
+        how="left"
+    )
+    .filter(
+        # Filtro de outliers a nível CD
+        (F.col("QtMercadoria") <= F.col("limite_superior_qt_cd")) &
+        (F.col("QtMercadoria") >= F.col("limite_inferior_qt_cd")) &
+        (F.col("Receita") <= F.col("limite_superior_receita_cd")) &
+        (F.col("Receita") >= F.col("limite_inferior_receita_cd")) &
+        
+        # Filtro de outliers a nível loja
+        (F.col("QtMercadoria") <= F.col("limite_superior_qt_loja")) &
+        (F.col("QtMercadoria") >= F.col("limite_inferior_qt_loja")) &
+        (F.col("Receita") <= F.col("limite_superior_receita_loja")) &
+        (F.col("Receita") >= F.col("limite_inferior_receita_loja"))
+    )
+    .drop("limite_superior_qt_cd", "limite_inferior_qt_cd", "limite_superior_receita_cd", "limite_inferior_receita_cd",
+          "limite_superior_qt_loja", "limite_inferior_qt_loja", "limite_superior_receita_loja", "limite_inferior_receita_loja")
+)
+
+print("✅ Filtros de outliers históricos aplicados:")
+print(f"📊 Total de registros ANTES dos filtros: {df_vendas_estoque_com_atacado.count():,}")
+print(f"📊 Total de registros DEPOIS dos filtros: {df_vendas_estoque_sem_outliers.count():,}")
+print(f"📊 Registros removidos por outliers: {df_vendas_estoque_com_atacado.count() - df_vendas_estoque_sem_outliers.count():,}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 8.4 Resumo da Remoção de Outliers Históricos
+# MAGIC
+# MAGIC %md
+# MAGIC Apresentamos um resumo da remoção de outliers históricos por nível
+# MAGIC e tipo de loja (normal vs. atacado).
+
+# COMMAND ----------
+
+# Resumo da remoção de outliers por tipo de loja
+df_resumo_outliers_por_tipo = (
+    df_vendas_estoque_com_atacado
+    .join(
+        df_vendas_estoque_sem_outliers.select("DtAtual", "CdSku", "CdFilial", "gemeos"),
+        on=["DtAtual", "CdSku", "CdFilial", "gemeos"],
+        how="left"
+    )
+    .withColumn(
+        "flag_outlier_removido",
+        F.when(F.col("gemeos").isNotNull(), F.lit(1)).otherwise(F.lit(0))
+    )
+    .groupBy("flag_atacado")
+    .agg(
+        F.count("*").alias("total_registros"),
+        F.sum("flag_outlier_removido").alias("registros_mantidos"),
+        F.count("*").alias("registros_removidos")
+    )
+    .withColumn(
+        "percentual_removido",
+        F.round((F.col("registros_removidos") / F.col("total_registros")) * 100, 2)
+    )
+)
+
+print("📋 RESUMO DA REMOÇÃO DE OUTLIERS HISTÓRICOS:")
+print("=" * 80)
+
+for row in df_resumo_outliers_por_tipo.collect():
+    tipo_loja = "ATACADO" if row["flag_atacado"] == 1 else "VAREJO"
+    print(f"\n🏪 {tipo_loja}:")
+    print(f"  • Total de registros: {row['total_registros']:,}")
+    print(f"  • Registros mantidos: {row['registros_mantidos']:,}")
+    print(f"  • Registros removidos: {row['registros_removidos']:,}")
+    print(f"  • Percentual removido: {row['percentual_removido']}%")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 9. Cálculo da Matriz de Merecimento a Nível CD (Gêmeo)
 # MAGIC
 # MAGIC %md
 # MAGIC Calculamos a demanda usando múltiplas abordagens de médias móveis:
@@ -555,9 +834,9 @@ print(f"  • Distribuição proporcional entre filiais do mesmo CD")
 
 # COMMAND ----------
 
-# Preparação dos dados para cálculo de médias móveis
+# Preparação dos dados para cálculo de médias móveis (usando dados sem outliers)
 df_dados_medias_moveis = (
-    df_vendas_estoque_telefonia_filtrado
+    df_vendas_estoque_sem_outliers
     .filter(F.col("EstoqueLoja") > 0)  # Apenas dias sem ruptura (com estoque)
     .select(
         "DtAtual",
@@ -1148,11 +1427,14 @@ print(f"  • Médias Móveis Aparadas (10%): 90, 180, 270, 360 dias")
 
 print(f"\n✅ CARACTERÍSTICAS DA IMPLEMENTAÇÃO:")
 print(f"  • Filtro de ruptura aplicado (demanda robusta à ruptura)")
+print(f"  • Remoção de outliers históricos por gêmeo-CD e gêmeo-loja")
+print(f"  • Parâmetros configuráveis para diferentes tipos de loja (normal vs. atacado)")
 print(f"  • Cálculo por SKU-Loja individual")
 print(f"  • Agregação por gêmeo para percentuais")
 print(f"  • Múltiplos tipos e períodos de análise")
 print(f"  • Matriz em duas camadas: CD → Lojas")
 print(f"  • Remoção de meses atípicos por gêmeo específico")
+print(f"  • Remoção de outliers históricos antes do cálculo de médias móveis")
 
 print(f"\n🎯 PRÓXIMOS PASSOS:")
 print(f"  • Validação dos percentuais calculados")
