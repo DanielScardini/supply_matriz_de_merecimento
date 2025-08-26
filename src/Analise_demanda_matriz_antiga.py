@@ -71,10 +71,11 @@ def add_allocation_metrics(
 
     # Erros
     abs_err = F.abs(y - yhat)
-
-    # >>> WMAPE correto (não ponha peso extra de y_i no numerador)
-    # MAE ponderado por y_i (métrica adicional, em unidades de volume)
     mae_weighted_by_y = abs_err * y
+
+    # sMAPE componentes
+    smape_num = 2.0 * abs_err
+    smape_den = F.when((y + yhat) > 0, y + yhat).otherwise(F.lit(0.0))
 
     # Distribuição
     cross_entropy_term = F.when((p > 0) & (phat > 0), -p * F.log(phat + F.lit(epsilon))).otherwise(F.lit(0.0))
@@ -82,13 +83,15 @@ def add_allocation_metrics(
 
     # Share
     abs_err_share = F.abs(p - phat)
-    wmape_share   = abs_err_share * y  # ok: ponderado por volume real
+    wmape_share   = abs_err_share * y  # ponderado por volume real
 
     base = (df
         .withColumn("__y__", y).withColumn("__yhat__", yhat)
         .withColumn("__p__", p).withColumn("__phat__", phat)
         .withColumn("__abs_err__", abs_err)
         .withColumn("__mae_w_by_y__", mae_weighted_by_y)
+        .withColumn("__smape_num__", smape_num)
+        .withColumn("__smape_den__", smape_den)
         .withColumn("__kl_term__", kl_term)
         .withColumn("__cross_entropy_term__", cross_entropy_term)
         .withColumn("__abs_err_share__", abs_err_share)
@@ -101,14 +104,18 @@ def add_allocation_metrics(
             F.sum("__mae_w_by_y__").alias("_sum_mae_w_by_y"),
             F.sum("__y__").alias("_sum_y"),
             F.sum("__yhat__").alias("_sum_yhat"),
+            F.sum("__smape_num__").alias("_sum_smape_num"),
+            F.sum("__smape_den__").alias("_sum_smape_den"),
             F.sum(F.abs(F.col("__p__") - F.col("__phat__"))).alias("_SE"),
             F.sum("__kl_term__").alias("_KL"),
             F.sum("__cross_entropy_term__").alias("_cross_entropy"),
             F.sum("__wmape_share__").alias("_num_wmape_share")
         )
-        # WMAPE correto (%)
+        # WMAPE (%)
         .withColumn("wMAPE_perc", F.round(F.when(F.col("_sum_y") > 0, F.col("_sum_abs_err")/F.col("_sum_y")*100).otherwise(0.0), 4))
-        # MAE ponderado por y_i (unidades de volume, sem %)
+        # sMAPE (%)
+        .withColumn("sMAPE_perc", F.round(F.when(F.col("_sum_smape_den") > 0, F.col("_sum_smape_num")/F.col("_sum_smape_den")*100).otherwise(0.0), 4))
+        # MAE ponderado
         .withColumn("MAE_weighted_by_y", F.round(F.when(F.col("_sum_y") > 0, F.col("_sum_mae_w_by_y")/F.col("_sum_y")).otherwise(0.0), 4))
         # Shares
         .withColumn("SE_pp", F.round(F.col("_SE") * 100, 4))
@@ -117,9 +124,9 @@ def add_allocation_metrics(
         .withColumn("Cross_entropy", F.when(F.col("_sum_y") > 0, F.col("_cross_entropy")).otherwise(F.lit(0.0)))
         .withColumn("KL_divergence", F.when((F.col("_sum_y") > 0) & (F.col("_sum_yhat") > 0), F.col("_KL")).otherwise(F.lit(0.0)))
         .select(*(group_cols if group_cols else []),
-                "wMAPE_perc", "MAE_weighted_by_y",
-                "SE_pp", "wMAPE_share_perc",
-                "Cross_entropy", "KL_divergence")
+                "wMAPE_perc","sMAPE_perc","MAE_weighted_by_y",
+                "SE_pp","wMAPE_share_perc",
+                "Cross_entropy","KL_divergence")
     )
     return res
 
@@ -609,6 +616,10 @@ df_agg_metrics = add_allocation_metrics(
 
 print("Métricas agregadas calculadas (sobre dados filtrados):")
 df_agg_metrics.display()
+
+# COMMAND ----------
+
+df_agg_metrics.agg(F.mean("sMAPE_perc")).display()
 
 # COMMAND ----------
 
