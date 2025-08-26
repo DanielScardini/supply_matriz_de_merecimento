@@ -762,3 +762,286 @@ df_resumo_erro = df_resumo_erro.reset_index()
 
 print("Resumo por faixa de erro:")
 display(df_resumo_erro)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 12. Análise de Heterocedasticidade: Erros ao Nível de Loja vs. Agregação por CD
+# MAGIC
+# MAGIC **Problema identificado**: A agregação por CD pode mascarar problemas reais ao nível de loja individual.
+# MAGIC **Objetivo**: Demonstrar que embora os wMAPEs agregados por CD pareçam "aceitáveis", 
+# MAGIC ao nível de loja existem erros significativos em todas as direções (heterocedasticidade).
+# MAGIC
+# MAGIC **Hipótese**: Os erros se "cancelam" na agregação, mas individualmente são problemáticos.
+
+# COMMAND ----------
+
+# Cálculo de métricas ao nível de loja individual (sem agregação por CD)
+df_metricas_loja_individual = add_allocation_metrics(
+    df=df_filtered.join(de_para_filial_cd, how="left", on="CdFilial"),
+    y_col="pct_demanda_perc",     
+    yhat_col="Percentual_matriz_fixa",  
+    group_cols=["CdFilial", "Cd_primario"]  # Agrupa por loja individual
+).dropna(subset=["CdFilial", "Cd_primario"])
+
+print("Métricas calculadas ao nível de loja individual:")
+df_metricas_loja_individual.display()
+
+# COMMAND ----------
+
+# Comparação: Métricas agregadas por CD vs. Distribuição das métricas ao nível de loja
+df_comparacao_agregacao = (
+    df_metricas_loja_individual
+    .groupBy("Cd_primario")
+    .agg(
+        F.avg("wMAPE_share_perc").alias("wMAPE_medio_CD"),
+        F.stddev("wMAPE_share_perc").alias("wMAPE_desvio_CD"),
+        F.min("wMAPE_share_perc").alias("wMAPE_min_CD"),
+        F.max("wMAPE_share_perc").alias("wMAPE_max_CD"),
+        F.count("*").alias("qtd_lojas_CD")
+    )
+    .orderBy("wMAPE_medio_CD")
+)
+
+print("Comparação: Agregação por CD vs. Distribuição ao nível de loja:")
+df_comparacao_agregacao.display()
+
+# COMMAND ----------
+
+# Preparação dos dados para visualização da heterocedasticidade
+df_heterocedasticidade = (
+    df_metricas_loja_individual
+    .select(
+        "CdFilial", "Cd_primario", 
+        "wMAPE_share_perc", "SE_pp", "KL_divergence"
+    )
+    .toPandas()
+)
+
+# Criação do gráfico de heterocedasticidade
+fig_hetero = go.Figure()
+
+# Adiciona os pontos de cada loja, coloridos por CD
+for cd_primario in df_heterocedasticidade['Cd_primario'].unique():
+    df_cd = df_heterocedasticidade[df_heterocedasticidade['Cd_primario'] == cd_primario]
+    
+    fig_hetero.add_trace(
+        go.Scatter(
+            x=df_cd['wMAPE_share_perc'],
+            y=df_cd['SE_pp'],
+            mode='markers',
+            marker=dict(
+                size=8,
+                symbol='circle',
+                opacity=0.7
+            ),
+            text=df_cd['CdFilial'].astype(str),
+            hovertemplate=(
+                '<b>Loja:</b> %{text}<br>' +
+                '<b>CD Primário:</b> ' + str(cd_primario) + '<br>' +
+                '<b>wMAPE Share:</b> %{x:.4f}%<br>' +
+                '<b>SE (pp):</b> %{y:.2f}<br>' +
+                '<extra></extra>'
+            ),
+            name=f'CD {cd_primario}',
+            showlegend=True
+        )
+    )
+
+# Adiciona linha de referência para erro médio por CD
+for cd_primario in df_heterocedasticidade['Cd_primario'].unique():
+    df_cd = df_heterocedasticidade[df_heterocedasticidade['Cd_primario'] == cd_primario]
+    wmape_medio = df_cd['wMAPE_share_perc'].mean()
+    se_medio = df_cd['SE_pp'].mean()
+    
+    fig_hetero.add_trace(
+        go.Scatter(
+            x=[wmape_medio],
+            y=[se_medio],
+            mode='markers',
+            marker=dict(
+                size=15,
+                symbol='diamond',
+                color='red',
+                line=dict(color='black', width=2)
+            ),
+            text=f'CD {cd_primario} - Média',
+            hovertemplate=(
+                '<b>CD {cd_primario} - Média</b><br>' +
+                '<b>wMAPE Share Médio:</b> ' + f'{wmape_medio:.4f}%<br>' +
+                '<b>SE Médio:</b> ' + f'{se_medio:.2f}<br>' +
+                '<extra></extra>'
+            ),
+            name=f'CD {cd_primario} - Média',
+            showlegend=False
+        )
+    )
+
+# Configuração do layout
+fig_hetero.update_layout(
+    title={
+        'text': 'Heterocedasticidade dos Erros: Loja Individual vs. Agregação por CD',
+        'x': 0.5,
+        'xanchor': 'center',
+        'font': {'size': 18}
+    },
+    xaxis_title="wMAPE Share por Loja (%)",
+    yaxis_title="Share Error (SE) por Loja (pp)",
+    plot_bgcolor="#F8F8FF",
+    paper_bgcolor="#F8F8FF",
+    font=dict(size=12),
+    height=700,
+    showlegend=True,
+    legend=dict(
+        yanchor="top",
+        y=0.99,
+        xanchor="left",
+        x=0.01
+    )
+)
+
+# Configuração dos eixos
+fig_hetero.update_xaxes(
+    showgrid=True, 
+    gridwidth=1, 
+    gridcolor='lightgray',
+    zeroline=True,
+    zerolinecolor='black'
+)
+fig_hetero.update_yaxes(
+    showgrid=True, 
+    gridwidth=1, 
+    gridcolor='lightgray',
+    zeroline=True,
+    zerolinecolor='black'
+)
+
+# Exibe o gráfico
+fig_hetero.show()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Análise da Heterocedasticidade
+# MAGIC
+# MAGIC **O que o gráfico revela:**
+# MAGIC
+# MAGIC 1. **Dispersão dos Erros**: Cada CD (cor diferente) mostra lojas espalhadas em diferentes níveis de erro
+# MAGIC 2. **Máscara da Agregação**: Os pontos vermelhos (médias dos CDs) parecem "aceitáveis", mas as lojas individuais têm erros altos
+# MAGIC 3. **Heterocedasticidade**: Variância dos erros não é constante - algumas lojas têm erros muito maiores que outras
+# MAGIC
+# MAGIC **Implicações:**
+# MAGIC - **Nível CD**: wMAPE pode parecer baixo (0.01% a 1.46%)
+# MAGIC - **Nível Loja**: Erros individuais podem ser 10x maiores
+# MAGIC - **Cancelamento**: Erros positivos e negativos se "cancelam" na agregação
+
+# COMMAND ----------
+
+# Estatísticas detalhadas da heterocedasticidade
+df_stats_hetero = (
+    df_metricas_loja_individual
+    .groupBy("Cd_primario")
+    .agg(
+        F.avg("wMAPE_share_perc").alias("wMAPE_medio"),
+        F.stddev("wMAPE_share_perc").alias("wMAPE_desvio"),
+        F.min("wMAPE_share_perc").alias("wMAPE_min"),
+        F.max("wMAPE_share_perc").alias("wMAPE_max"),
+        F.avg("SE_pp").alias("SE_medio"),
+        F.stddev("SE_pp").alias("SE_desvio"),
+        F.count("*").alias("qtd_lojas")
+    )
+    .withColumn(
+        "coeficiente_variacao_wMAPE", 
+        F.round(F.col("wMAPE_desvio") / F.col("wMAPE_medio"), 4)
+    )
+    .withColumn(
+        "coeficiente_variacao_SE", 
+        F.round(F.col("SE_desvio") / F.col("SE_medio"), 4)
+    )
+    .orderBy("wMAPE_medio")
+)
+
+print("Estatísticas detalhadas da heterocedasticidade por CD:")
+df_stats_hetero.display()
+
+# COMMAND ----------
+
+# Gráfico de barras mostrando a variabilidade interna de cada CD
+df_stats_pandas = df_stats_hetero.toPandas()
+
+fig_barras = go.Figure()
+
+# Barras para wMAPE
+fig_barras.add_trace(
+    go.Bar(
+        x=df_stats_pandas['Cd_primario'].astype(str),
+        y=df_stats_pandas['wMAPE_medio'],
+        name='wMAPE Médio',
+        marker_color='lightblue',
+        yaxis='y'
+    )
+)
+
+# Barras para desvio padrão (sobrepostas)
+fig_barras.add_trace(
+    go.Bar(
+        x=df_stats_pandas['Cd_primario'].astype(str),
+        y=df_stats_pandas['wMAPE_desvio'],
+        name='Desvio Padrão',
+        marker_color='red',
+        opacity=0.7,
+        yaxis='y'
+    )
+)
+
+# Configuração do layout
+fig_barras.update_layout(
+    title={
+        'text': 'Variabilidade Interna dos Erros por CD: Média vs. Desvio Padrão',
+        'x': 0.5,
+        'xanchor': 'center',
+        'font': {'size': 18}
+    },
+    xaxis_title="CD Primário",
+    yaxis_title="wMAPE Share (%)",
+    plot_bgcolor="#F8F8FF",
+    paper_bgcolor="#F8F8FF",
+    font=dict(size=12),
+    height=600,
+    barmode='overlay',
+    showlegend=True
+)
+
+# Configuração dos eixos
+fig_barras.update_xaxes(
+    showgrid=True, 
+    gridwidth=1, 
+    gridcolor='lightgray'
+)
+fig_barras.update_yaxes(
+    showgrid=True, 
+    gridwidth=1, 
+    gridcolor='lightgray',
+    zeroline=True,
+    zerolinecolor='black'
+)
+
+# Exibe o gráfico
+fig_barras.show()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Conclusões sobre a Heterocedasticidade
+# MAGIC
+# MAGIC **Evidências encontradas:**
+# MAGIC
+# MAGIC 1. **Máscara da Agregação**: Os wMAPEs agregados por CD (0.01% a 1.46%) não refletem a realidade das lojas individuais
+# MAGIC 2. **Variabilidade Interna**: CDs com wMAPE médio baixo podem ter lojas com erros 10-100x maiores
+# MAGIC 3. **Cancelamento de Erros**: Erros positivos e negativos se compensam na agregação, mascarando problemas reais
+# MAGIC
+# MAGIC **Recomendações:**
+# MAGIC - **Análise Granular**: Sempre analisar erros ao nível de loja individual
+# MAGIC - **Métricas Complementares**: Usar desvio padrão e coeficiente de variação além das médias
+# MAGIC - **Alertas por Loja**: Implementar monitoramento individual, não apenas agregado
+# MAGIC - **Investigações Específicas**: Focar nas lojas com maior variabilidade interna
