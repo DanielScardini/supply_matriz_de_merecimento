@@ -550,3 +550,192 @@ df_agg_metrics = add_allocation_metrics(
 
 print("Métricas agregadas calculadas (sobre dados filtrados):")
 df_agg_metrics.display()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 11. Visualização: Scatter Plot de Erro Percentual por Filial
+# MAGIC
+# MAGIC Criamos um scatter plot onde cada ponto representa uma filial, mostrando:
+# MAGIC - **Eixo X**: Ordenação arbitrária baseada em Cd_primario (não tem significado específico)
+# MAGIC - **Eixo Y**: Erro percentual agregado da filial (agregando todos os produtos)
+# MAGIC
+# MAGIC **Objetivo**: Identificar visualmente quais filiais têm maior discrepância entre matriz prevista e realidade.
+
+# COMMAND ----------
+
+# Cálculo do erro percentual agregado por filial
+df_erro_por_filial = (
+    df_filtered
+    .join(de_para_filial_cd, how="left", on="CdFilial")
+    .dropna(subset=["Cd_primario"])
+    .groupBy("CdFilial", "Cd_primario")
+    .agg(
+        F.sum("pct_demanda_perc").alias("demanda_real_total"),
+        F.sum("Percentual_matriz_fixa").alias("matriz_prevista_total"),
+        F.count("*").alias("qtd_produtos")
+    )
+    .withColumn(
+        "erro_percentual", 
+        F.round(
+            F.abs(F.col("demanda_real_total") - F.col("matriz_prevista_total")) / 
+            F.greatest(F.col("demanda_real_total"), F.lit(0.01)) * 100, 2
+        )
+    )
+    .orderBy("Cd_primario", "erro_percentual")
+)
+
+print("Erro percentual agregado por filial:")
+df_erro_por_filial.display()
+
+# COMMAND ----------
+
+# Preparação dos dados para o scatter plot
+df_scatter_plot = (
+    df_erro_por_filial
+    .withColumn(
+        "indice_ordenacao", 
+        F.monotonically_increasing_id()
+    )
+    .select(
+        "indice_ordenacao",
+        "CdFilial", 
+        "Cd_primario",
+        "erro_percentual",
+        "demanda_real_total",
+        "matriz_prevista_total",
+        "qtd_produtos"
+    )
+    .orderBy("indice_ordenacao")
+)
+
+print("Dados preparados para scatter plot:")
+df_scatter_plot.display()
+
+# COMMAND ----------
+
+# Conversão para pandas para visualização
+df_scatter_pandas = df_scatter_plot.toPandas()
+
+# Criação do scatter plot
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
+
+# Scatter plot principal
+fig = go.Figure()
+
+# Adiciona os pontos (filiais)
+fig.add_trace(
+    go.Scatter(
+        x=df_scatter_pandas['indice_ordenacao'],
+        y=df_scatter_pandas['erro_percentual'],
+        mode='markers',
+        marker=dict(
+            size=8,
+            color=df_scatter_pandas['erro_percentual'],
+            colorscale='Reds',
+            showscale=True,
+            colorbar=dict(title="Erro %")
+        ),
+        text=df_scatter_pandas['CdFilial'].astype(str),
+        hovertemplate=(
+            '<b>Filial:</b> %{text}<br>' +
+            '<b>Cd_primario:</b> ' + df_scatter_pandas['Cd_primario'].astype(str) + '<br>' +
+            '<b>Erro %:</b> %{y:.2f}%<br>' +
+            '<b>Demanda Real:</b> ' + df_scatter_pandas['demanda_real_total'].round(2).astype(str) + '%<br>' +
+            '<b>Matriz Prevista:</b> ' + df_scatter_pandas['matriz_prevista_total'].round(2).astype(str) + '%<br>' +
+            '<b>Qtd Produtos:</b> ' + df_scatter_pandas['qtd_produtos'].astype(str) + '<br>' +
+            '<extra></extra>'
+        ),
+        name="Filiais"
+    )
+)
+
+# Linha de referência para erro médio
+erro_medio = df_scatter_pandas['erro_percentual'].mean()
+fig.add_hline(
+    y=erro_medio, 
+    line_dash="dash", 
+    line_color="gray",
+    annotation_text=f"Erro Médio: {erro_medio:.2f}%",
+    annotation_position="top right"
+)
+
+# Configuração do layout
+fig.update_layout(
+    title={
+        'text': 'Erro Percentual da Matriz de Merecimento por Filial',
+        'x': 0.5,
+        'xanchor': 'center',
+        'font': {'size': 20}
+    },
+    xaxis_title="Índice de Ordenação (Cd_primario + Erro)",
+    yaxis_title="Erro Percentual (%)",
+    plot_bgcolor="#F8F8FF",
+    paper_bgcolor="#F8F8FF",
+    font=dict(size=12),
+    height=600,
+    showlegend=False
+)
+
+# Configuração dos eixos
+fig.update_xaxes(
+    showgrid=True, 
+    gridwidth=1, 
+    gridcolor='lightgray',
+    zeroline=False
+)
+fig.update_yaxes(
+    showgrid=True, 
+    gridwidth=1, 
+    gridcolor='lightgray',
+    zeroline=True,
+    zerolinecolor='black'
+)
+
+# Exibe o gráfico
+fig.show()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Análise do Scatter Plot
+# MAGIC
+# MAGIC **Interpretação dos resultados:**
+# MAGIC - **Pontos altos**: Filiais com maior erro percentual (maior discrepância entre matriz e realidade)
+# MAGIC - **Pontos baixos**: Filiais com menor erro percentual (matriz mais alinhada com realidade)
+# MAGIC - **Linha tracejada**: Erro médio para referência
+# MAGIC - **Cor dos pontos**: Escala de vermelho (mais escuro = maior erro)
+# MAGIC
+# MAGIC **Ações recomendadas:**
+# MAGIC 1. **Filiais com erro > 2x média**: Revisar alocações prioritariamente
+# MAGIC 2. **Filiais com erro < 0.5x média**: Considerar como benchmark
+# MAGIC 3. **Padrões geográficos**: Analisar se erros altos se concentram em regiões específicas
+
+# COMMAND ----------
+
+# Estatísticas resumidas por faixa de erro
+df_resumo_erro = (
+    df_scatter_pandas
+    .assign(
+        faixa_erro=lambda x: pd.cut(
+            x['erro_percentual'], 
+            bins=[0, erro_medio/2, erro_medio, erro_medio*2, float('inf')],
+            labels=['Baixo (<50% média)', 'Médio-Baixo', 'Médio-Alto', 'Alto (>200% média)']
+        )
+    )
+    .groupby('faixa_erro')
+    .agg({
+        'CdFilial': 'count',
+        'erro_percentual': ['mean', 'std'],
+        'qtd_produtos': 'mean'
+    })
+    .round(2)
+)
+
+df_resumo_erro.columns = ['Qtd_Filiais', 'Erro_Medio', 'Erro_Desvio', 'Produtos_Medio']
+df_resumo_erro = df_resumo_erro.reset_index()
+
+print("Resumo por faixa de erro:")
+display(df_resumo_erro)
