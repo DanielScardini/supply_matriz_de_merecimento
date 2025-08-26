@@ -576,13 +576,20 @@ df_erro_por_filial = (
         F.count("*").alias("qtd_produtos")
     )
     .withColumn(
-        "erro_percentual", 
+        "erro_percentual_abs", 
         F.round(
             F.abs(F.col("demanda_real_total") - F.col("matriz_prevista_total")) / 
             F.greatest(F.col("demanda_real_total"), F.lit(0.01)) * 100, 2
         )
     )
-    .orderBy("Cd_primario", "erro_percentual")
+    .withColumn(
+        "erro_percentual_sinal", 
+        F.round(
+            (F.col("demanda_real_total") - F.col("matriz_prevista_total")) / 
+            F.greatest(F.col("demanda_real_total"), F.lit(0.01)) * 100, 2
+        )
+    )
+    .orderBy("Cd_primario", "erro_percentual_abs")
 )
 
 print("Erro percentual agregado por filial:")
@@ -601,7 +608,8 @@ df_scatter_plot = (
         "indice_ordenacao",
         "CdFilial", 
         "Cd_primario",
-        "erro_percentual",
+        "erro_percentual_abs",
+        "erro_percentual_sinal",
         "demanda_real_total",
         "matriz_prevista_total",
         "qtd_produtos"
@@ -625,24 +633,27 @@ from plotly.subplots import make_subplots
 # Scatter plot principal
 fig = go.Figure()
 
-# Adiciona os pontos (filiais)
+# Adiciona os pontos (filiais) com cores baseadas no sinal do erro
 fig.add_trace(
     go.Scatter(
         x=df_scatter_pandas['indice_ordenacao'],
-        y=df_scatter_pandas['erro_percentual'],
+        y=df_scatter_pandas['erro_percentual_sinal'],
         mode='markers',
         marker=dict(
             size=8,
-            color=df_scatter_pandas['erro_percentual'],
-            colorscale='Reds',
+            color=df_scatter_pandas['erro_percentual_sinal'],
+            colorscale='RdBu',  # Vermelho para negativo, Azul para positivo
             showscale=True,
-            colorbar=dict(title="Erro %")
+            colorbar=dict(title="Erro % com Sinal"),
+            cmin=df_scatter_pandas['erro_percentual_sinal'].min(),
+            cmax=df_scatter_pandas['erro_percentual_sinal'].max()
         ),
         text=df_scatter_pandas['CdFilial'].astype(str),
         hovertemplate=(
             '<b>Filial:</b> %{text}<br>' +
             '<b>Cd_primario:</b> ' + df_scatter_pandas['Cd_primario'].astype(str) + '<br>' +
-            '<b>Erro %:</b> %{y:.2f}%<br>' +
+            '<b>Erro % com Sinal:</b> %{y:.2f}%<br>' +
+            '<b>Erro % Absoluto:</b> ' + df_scatter_pandas['erro_percentual_abs'].round(2).astype(str) + '%<br>' +
             '<b>Demanda Real:</b> ' + df_scatter_pandas['demanda_real_total'].round(2).astype(str) + '%<br>' +
             '<b>Matriz Prevista:</b> ' + df_scatter_pandas['matriz_prevista_total'].round(2).astype(str) + '%<br>' +
             '<b>Qtd Produtos:</b> ' + df_scatter_pandas['qtd_produtos'].astype(str) + '<br>' +
@@ -652,26 +663,35 @@ fig.add_trace(
     )
 )
 
-# Linha de referência para erro médio
-erro_medio = df_scatter_pandas['erro_percentual'].mean()
+# Linha de referência para erro médio com sinal
+erro_medio_sinal = df_scatter_pandas['erro_percentual_sinal'].mean()
 fig.add_hline(
-    y=erro_medio, 
+    y=erro_medio_sinal, 
     line_dash="dash", 
     line_color="gray",
-    annotation_text=f"Erro Médio: {erro_medio:.2f}%",
+    annotation_text=f"Erro Médio: {erro_medio_sinal:.2f}%",
     annotation_position="top right"
+)
+
+# Linha de referência para zero (sem erro)
+fig.add_hline(
+    y=0, 
+    line_dash="dot", 
+    line_color="black",
+    annotation_text="Sem Erro (0%)",
+    annotation_position="bottom right"
 )
 
 # Configuração do layout
 fig.update_layout(
     title={
-        'text': 'Erro Percentual da Matriz de Merecimento por Filial',
+        'text': 'Erro Percentual da Matriz de Merecimento por Filial (com Sinal)',
         'x': 0.5,
         'xanchor': 'center',
         'font': {'size': 20}
     },
     xaxis_title="Índice de Ordenação (Cd_primario + Erro)",
-    yaxis_title="Erro Percentual (%)",
+    yaxis_title="Erro Percentual com Sinal (%)",
     plot_bgcolor="#F8F8FF",
     paper_bgcolor="#F8F8FF",
     font=dict(size=12),
@@ -703,15 +723,17 @@ fig.show()
 # MAGIC ### Análise do Scatter Plot
 # MAGIC
 # MAGIC **Interpretação dos resultados:**
-# MAGIC - **Pontos altos**: Filiais com maior erro percentual (maior discrepância entre matriz e realidade)
-# MAGIC - **Pontos baixos**: Filiais com menor erro percentual (matriz mais alinhada com realidade)
-# MAGIC - **Linha tracejada**: Erro médio para referência
-# MAGIC - **Cor dos pontos**: Escala de vermelho (mais escuro = maior erro)
+# MAGIC - **Pontos acima de 0**: Filiais onde a matriz **SUBESTIMA** a demanda real (matriz prevê menos do que realidade)
+# MAGIC - **Pontos abaixo de 0**: Filiais onde a matriz **SUPERESTIMA** a demanda real (matriz prevê mais do que realidade)
+# MAGIC - **Linha tracejada cinza**: Erro médio para referência
+# MAGIC - **Linha pontilhada preta**: Linha de zero (sem erro)
+# MAGIC - **Cor dos pontos**: Escala RdBu (vermelho = negativo/superestimação, azul = positivo/subestimação)
 # MAGIC
 # MAGIC **Ações recomendadas:**
-# MAGIC 1. **Filiais com erro > 2x média**: Revisar alocações prioritariamente
-# MAGIC 2. **Filiais com erro < 0.5x média**: Considerar como benchmark
-# MAGIC 3. **Padrões geográficos**: Analisar se erros altos se concentram em regiões específicas
+# MAGIC 1. **Filiais com erro positivo alto**: Aumentar alocações na matriz (demanda real > prevista)
+# MAGIC 2. **Filiais com erro negativo alto**: Reduzir alocações na matriz (demanda real < prevista)
+# MAGIC 3. **Filiais próximas de zero**: Matriz bem calibrada (manter como está)
+# MAGIC 4. **Padrões geográficos**: Analisar se erros se concentram em regiões específicas
 
 # COMMAND ----------
 
@@ -720,21 +742,22 @@ df_resumo_erro = (
     df_scatter_pandas
     .assign(
         faixa_erro=lambda x: pd.cut(
-            x['erro_percentual'], 
-            bins=[0, erro_medio/2, erro_medio, erro_medio*2, float('inf')],
-            labels=['Baixo (<50% média)', 'Médio-Baixo', 'Médio-Alto', 'Alto (>200% média)']
+            x['erro_percentual_sinal'], 
+            bins=[float('-inf'), -erro_medio_sinal, -erro_medio_sinal/2, 0, erro_medio_sinal/2, erro_medio_sinal, float('inf')],
+            labels=['Muito Negativo', 'Negativo', 'Levemente Negativo', 'Levemente Positivo', 'Positivo', 'Muito Positivo']
         )
     )
     .groupby('faixa_erro')
     .agg({
         'CdFilial': 'count',
-        'erro_percentual': ['mean', 'std'],
+        'erro_percentual_sinal': ['mean', 'std'],
+        'erro_percentual_abs': 'mean',
         'qtd_produtos': 'mean'
     })
     .round(2)
 )
 
-df_resumo_erro.columns = ['Qtd_Filiais', 'Erro_Medio', 'Erro_Desvio', 'Produtos_Medio']
+df_resumo_erro.columns = ['Qtd_Filiais', 'Erro_Medio_Sinal', 'Erro_Desvio', 'Erro_Medio_Abs', 'Produtos_Medio']
 df_resumo_erro = df_resumo_erro.reset_index()
 
 print("Resumo por faixa de erro:")
