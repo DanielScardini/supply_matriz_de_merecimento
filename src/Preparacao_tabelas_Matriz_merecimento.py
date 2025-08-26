@@ -132,10 +132,6 @@ df_mercadoria = load_mercadoria_data(spark)
 
 # COMMAND ----------
 
-df_mercadoria.display()
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC ## Base de Vendas
 
@@ -279,10 +275,6 @@ df_vendas = build_sales_view(spark, start_date=20250101, end_date=20251231)
 
 # COMMAND ----------
 
-df_vendas.display()
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC ## Base de Estoque CD
 
@@ -338,10 +330,6 @@ df_estoque_cd = load_estoque_cd_data(spark, hoje.year)
 
 # COMMAND ----------
 
-df_estoque_cd.display()
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC ## Base de Filiais
 
@@ -384,10 +372,6 @@ df_filial = load_filial_data(spark)
 # MAGIC
 # MAGIC Exibimos os dados das filiais carregados para verificação
 # MAGIC da estrutura e qualidade dos dados.
-
-# COMMAND ----------
-
-df_filial.display()
 
 # COMMAND ----------
 
@@ -445,10 +429,6 @@ print(f"Total de registros: {df_consolidado.count():,}")
 
 # COMMAND ----------
 
-df_consolidado.display()
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC ## Cálculo de Métricas de Negócio
 
@@ -488,10 +468,6 @@ print("Métricas de negócio calculadas com sucesso!")
 # MAGIC
 # MAGIC Exibimos as métricas calculadas para verificação
 # MAGIC da qualidade e consistência dos dados.
-
-# COMMAND ----------
-
-df_com_metricas.display()
 
 # COMMAND ----------
 

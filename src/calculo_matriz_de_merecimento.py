@@ -254,7 +254,7 @@ df_stats_gemeo.orderBy("gemeos", "year_month").limit(10).display()
 # MAGIC
 # MAGIC %md
 # MAGIC Identificamos os meses que serão removidos por serem considerados atípicos
-# MAGIC segundo a regra dos 3 desvios padrão.
+# MAGIC segundo a regra dos n desvios padrão.
 
 # COMMAND ----------
 
@@ -319,292 +319,23 @@ df_resumo_atipicos_gemeo.display()
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ## 6. Filtragem dos Dados - Remoção de Meses Atípicos APENAS para Gêmeos
-# MAGIC
-# MAGIC %md
-# MAGIC Aplicamos o filtro para remover os meses identificados como atípicos,
-# MAGIC mas APENAS para produtos que pertencem ao grupo "Gêmeos".
-# MAGIC Produtos sem grupo definido ou com outros grupos não são afetados.
-# MAGIC Isso garante que apenas os produtos similares tenham seus meses atípicos removidos.
-
-# COMMAND ----------
-
-# Lista de meses atípicos para filtro
-meses_atipicos_filtro = (
-    df_meses_atipicos
-    .select("year_month")
+de_para_filial_cd = (
+    spark.table('databox.bcg_comum.supply_base_merecimento_diario')
+    .select("CdFilial", "Cd_primario")
     .distinct()
-    .collect()
+    .dropna()
 )
 
-meses_atipicos_lista = [row["year_month"] for row in meses_atipicos_filtro]
-
-print("🔍 MESES ATÍPICOS IDENTIFICADOS PARA REMOÇÃO:")
-print("=" * 50)
-if meses_atipicos_lista:
-    for mes in sorted(meses_atipicos_lista):
-        print(f"📅 {mes}")
-    print(f"\n📊 Total de meses únicos a serem removidos: {len(meses_atipicos_lista)}")
-else:
-    print("✅ Nenhum mês atípico identificado!")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### 6.1 Aplicação do Filtro de Meses Atípicos APENAS para Gêmeos
-# MAGIC
-# MAGIC %md
-# MAGIC Aplicamos o filtro para remover os meses atípicos da base de dados,
-# MAGIC mas APENAS para produtos que pertencem ao grupo "Gêmeos".
-# MAGIC Produtos sem grupo definido ou com outros grupos mantêm todos os seus meses.
-# MAGIC Isso garante que apenas os produtos similares tenham seus meses atípicos removidos.
-
-# COMMAND ----------
-
-# Aplicação do filtro de meses atípicos APENAS para produtos do grupo Gêmeos
-df_vendas_estoque_telefonia_filtrado = (
-    df_vendas_estoque_telefonia_gemeos_modelos
-    .filter(
-        # Remove meses atípicos apenas quando o produto pertence ao grupo Gêmeos
-        ~(
-            (F.col("gemeos").isNotNull()) & 
-            (F.col("gemeos") != "") & 
-            (F.col("year_month").isin(meses_atipicos_lista))
-        )
-    )
-)
-
-print("✅ FILTRO DE MESES ATÍPICOS APLICADO (APENAS para Gêmeos):")
-print("=" * 60)
-print(f"📊 Total de registros ANTES do filtro: {df_vendas_estoque_telefonia_gemeos_modelos.count():,}")
-print(f"📊 Total de registros DEPOIS do filtro: {df_vendas_estoque_telefonia_filtrado.count():,}")
-print(f"📊 Registros removidos: {df_vendas_estoque_telefonia_gemeos_modelos.count() - df_vendas_estoque_telefonia_filtrado.count():,}")
-print("ℹ️  Nota: Apenas produtos do grupo 'Gêmeos' tiveram meses atípicos removidos")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### 6.2 Validação da Filtragem
-# MAGIC
-# MAGIC %md
-# MAGIC Validamos que a filtragem foi aplicada corretamente, verificando
-# MAGIC se os meses atípicos foram efetivamente removidos.
-
-# COMMAND ----------
-
-# Validação da filtragem
-meses_restantes = (
-    df_vendas_estoque_telefonia_filtrado
-    .select("year_month")
-    .distinct()
-    .orderBy("year_month")
-    .collect()
-)
-
-meses_restantes_lista = [row["year_month"] for row in meses_restantes]
-
-print("✅ VALIDAÇÃO DA FILTRAGEM:")
-print("=" * 50)
-print(f"📊 Total de meses restantes: {len(meses_restantes_lista)}")
-print(f"📅 Meses disponíveis para análise:")
-for mes in meses_restantes_lista:
-    print(f"  • {mes}")
-
-# Verificar se algum mês atípico ainda está presente para produtos Gêmeos
-meses_atipicos_gemeos_ainda_presentes = (
-    df_vendas_estoque_telefonia_filtrado
-    .filter(
-        (F.col("gemeos").isNotNull()) & 
-        (F.col("gemeos") != "") & 
-        (F.col("year_month").isin(meses_atipicos_lista))
-    )
-    .select("year_month")
-    .distinct()
-    .collect()
-)
-
-if meses_atipicos_gemeos_ainda_presentes:
-    meses_ainda_presentes_lista = [row["year_month"] for row in meses_atipicos_gemeos_ainda_presentes]
-    print(f"\n⚠️ ATENÇÃO: Meses atípicos ainda presentes para produtos Gêmeos: {meses_ainda_presentes_lista}")
-else:
-    print(f"\n✅ CONFIRMADO: Todos os meses atípicos foram removidos com sucesso dos produtos Gêmeos!")
-    
-print(f"ℹ️  Nota: Produtos sem grupo 'Gêmeos' mantêm todos os seus meses (incluindo atípicos)")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 7. Agregação dos Dados Filtrados
-# MAGIC
-# MAGIC %md
-# MAGIC Agregamos os dados filtrados por mês, modelo, gêmeos e filial para
-# MAGIC análise no nível de loja. Produtos do grupo "Gêmeos" não têm meses atípicos,
-# MAGIC enquanto outros produtos mantêm todos os seus meses.
-
-# COMMAND ----------
-
-df_vendas_estoque_telefonia_agg_filtrado = (
-    df_vendas_estoque_telefonia_filtrado
-    .filter(~F.col("NmEspecieGerencial").contains("CHIP"))  # Excluir chips
-    .groupBy("year_month", "gemeos", "CdFilial")
-    .agg(
-        F.sum("QtMercadoria").alias("QtMercadoria"),
-        F.round(F.sum("Receita"), 2).alias("Receita"),
-        F.round(F.sum("Media90_Qt_venda_estq"), 0).alias("QtdDemanda"),
-        F.round(F.median("PrecoMedio90"), 2).alias("PrecoMedio90")
-    )
-)
-
-print("✅ Dados agregados por filial (sem meses atípicos):")
-print(f"📊 Total de registros agregados: {df_vendas_estoque_telefonia_agg_filtrado.count():,}")
-
-df_vendas_estoque_telefonia_agg_filtrado.limit(5).display()
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 8. Cálculo de Percentuais para Matriz de Merecimento
-# MAGIC
-# MAGIC %md
-# MAGIC Calculamos os percentuais de participação nas vendas e demanda por mês,
-# MAGIC modelo e grupo de produtos similares, agora com base nos dados filtrados.
-
-# COMMAND ----------
-
-# Janela por mês, modelo e gêmeos
-w = Window.partitionBy("year_month", "gemeos")
-
-df_pct_telefonia_filtrado = (
-    df_vendas_estoque_telefonia_agg_filtrado
-    # Totais no mês/especie
-    .withColumn("Qt_total_mes_especie", F.sum("QtMercadoria").over(w))
-    .withColumn("Demanda_total_mes_especie", F.sum("QtdDemanda").over(w))
-    
-    # Percentuais de venda e demanda
-    .withColumn(
-        "pct_vendas", 
-        F.when(F.col("Qt_total_mes_especie") > 0,
-               F.col("QtMercadoria") / F.col("Qt_total_mes_especie"))
-         .otherwise(F.lit(None).cast("double"))
-    )
-    .withColumn(
-        "pct_demanda", 
-        F.when(F.col("Demanda_total_mes_especie") > 0,
-               F.col("QtdDemanda") / F.col("Demanda_total_mes_especie"))
-         .otherwise(F.lit(None).cast("double"))
-    )
-    
-    # Percentuais em %
-    .withColumn("pct_vendas_perc", F.round(F.col("pct_vendas") * 100, 2))
-    .withColumn("pct_demanda_perc", F.round(F.col("pct_demanda") * 100, 2))
-    
-    # Selecionar colunas finais
-    .select(
-        "year_month", "gemeos", "CdFilial",
-        "QtMercadoria", "QtdDemanda", "PrecoMedio90",
-        "Qt_total_mes_especie", "Demanda_total_mes_especie",
-        "pct_vendas", "pct_vendas_perc",
-        "pct_demanda", "pct_demanda_perc"
-    )
-    .fillna(0, subset=[
-        "Qt_total_mes_especie", "Demanda_total_mes_especie",
-        "pct_vendas", "pct_vendas_perc", 
-        "pct_demanda", "pct_demanda_perc"
-    ])
-)
-
-print("✅ Percentuais calculados por filial (dados filtrados):")
-print(f"📊 Total de registros: {df_pct_telefonia_filtrado.count():,}")
-
-df_pct_telefonia_filtrado.limit(5).display()
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 9. Resumo da Detecção de Meses Atípicos
-# MAGIC
-# MAGIC %md
-# MAGIC Apresentamos um resumo completo da detecção e remoção de meses atípicos,
-# MAGIC incluindo estatísticas e impacto na base de dados.
-
-# COMMAND ----------
-
-# Estatísticas finais
-total_registros_original = df_vendas_estoque_telefonia_gemeos_modelos.count()
-total_registros_filtrado = df_vendas_estoque_telefonia_filtrado.count()
-total_meses_original = df_vendas_estoque_telefonia_gemeos_modelos.select("year_month").distinct().count()
-total_meses_filtrado = df_vendas_estoque_telefonia_filtrado.select("year_month").distinct().count()
-
-print("📋 RESUMO COMPLETO DA DETECÇÃO DE MESES ATÍPICOS")
-print("=" * 80)
-
-print(f"\n📊 IMPACTO NA BASE DE DADOS:")
-print(f"  • Registros originais: {total_registros_original:,}")
-print(f"  • Registros após filtro: {total_registros_filtrado:,}")
-print(f"  • Registros removidos: {total_registros_original - total_registros_filtrado:,}")
-print(f"  • Percentual de remoção: {((total_registros_original - total_registros_filtrado) / total_registros_original * 100):.2f}%")
-
-print(f"\n📅 IMPACTO NOS MESES:")
-print(f"  • Meses originais: {total_meses_original}")
-print(f"  • Meses após filtro: {total_meses_filtrado}")
-print(f"  • Meses removidos: {total_meses_original - total_meses_filtrado}")
-
-print(f"\n🔍 MESES ATÍPICOS REMOVIDOS:")
-if meses_atipicos_lista:
-    for mes in sorted(meses_atipicos_lista):
-        print(f"  • {mes}")
-else:
-    print("  • Nenhum mês atípico identificado")
-
-print(f"\n✅ RESULTADO:")
-print(f"  • Base limpa para cálculo da matriz de merecimento")
-print(f"  • Remoção automática de outliers estatísticos")
-print(f"  • Melhoria na qualidade das alocações calculadas")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 10. Próximos Passos
-# MAGIC
-# MAGIC %md
-# MAGIC A base de dados está agora limpa e pronta para o cálculo da matriz de merecimento.
-# MAGIC Os próximos passos incluem:
-
-# COMMAND ----------
-
-print("🎯 PRÓXIMOS PASSOS PARA CÁLCULO DA MATRIZ:")
-print("=" * 60)
-
-print(f"\n1️⃣ BASE PREPARADA:")
-print(f"   ✅ Dados de vendas e estoque carregados")
-print(f"   ✅ Mapeamentos de produtos aplicados")
-print(f"   ✅ Meses atípicos removidos automaticamente")
-print(f"   ✅ Estatísticas validadas")
-
-print(f"\n2️⃣ PRÓXIMAS ETAPAS:")
-print(f"   📊 Cálculo da matriz de merecimento por filial")
-print(f"   📊 Otimização das alocações")
-print(f"   📊 Validação dos resultados")
-print(f"   📊 Geração de relatórios")
-
-print(f"\n3️⃣ ARQUIVOS DE SAÍDA:")
-print(f"   📁 Matriz de merecimento otimizada")
-print(f"   📁 Relatório de meses removidos")
-print(f"   📁 Estatísticas de qualidade")
-
-print(f"\n✅ Notebook de detecção de meses atípicos concluído com sucesso!")
-print(f"🎯 Base pronta para cálculo da matriz de merecimento!")
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## 11. Cálculo de Demanda por Médias Móveis (Sem Ruptura)
-
+# MAGIC
 # MAGIC %md
 # MAGIC Calculamos a demanda usando médias móveis de 90, 120 e 360 dias,
 # MAGIC considerando apenas dias que não tiveram ruptura (com estoque).
-# MAGIC 
+# MAGIC
 # MAGIC **Metodologia:**
 # MAGIC - **Filtro de Ruptura**: Apenas dias com estoque > 0
 # MAGIC - **Médias Móveis**: 90, 120 e 360 dias
@@ -615,7 +346,7 @@ print(f"🎯 Base pronta para cálculo da matriz de merecimento!")
 
 # MAGIC %md
 # MAGIC ### 11.1 Preparação dos Dados para Cálculo de Médias Móveis
-
+# MAGIC
 # MAGIC %md
 # MAGIC Preparamos os dados filtrados para cálculo das médias móveis,
 # MAGIC aplicando filtros de ruptura e organizando por SKU e loja.
@@ -643,7 +374,7 @@ df_dados_medias_moveis = (
         "DayIdx",
         F.datediff(F.col("DtAtual_date"), F.lit("1970-01-01"))
     )
-    .orderBy("CdSku", "CdFilial", "DayIdx")
+    .orderBy("gemeos", "CdFilial", "DayIdx")
 )
 
 print("✅ Dados preparados para cálculo de médias móveis:")
@@ -656,7 +387,7 @@ df_dados_medias_moveis.limit(5).display()
 
 # MAGIC %md
 # MAGIC ### 11.2 Cálculo de Médias Móveis por SKU-Loja
-
+# MAGIC
 # MAGIC %md
 # MAGIC Calculamos as médias móveis de 90, 120 e 360 dias para cada
 # MAGIC combinação de SKU e loja, considerando apenas dias sem ruptura.
@@ -664,7 +395,7 @@ df_dados_medias_moveis.limit(5).display()
 # COMMAND ----------
 
 # Janelas para diferentes períodos de média móvel
-w_90 = Window.partitionBy("CdSku", "CdFilial").orderBy("DayIdx").rangeBetween(-89, 0)
+w_90 = Window.partitionBy("gemeos", "CdFilial").orderBy("DayIdx").rangeBetween(-89, 0)
 w_120 = Window.partitionBy("CdSku", "CdFilial").orderBy("DayIdx").rangeBetween(-119, 0)
 w_360 = Window.partitionBy("CdSku", "CdFilial").orderBy("DayIdx").rangeBetween(-359, 0)
 
@@ -711,7 +442,7 @@ df_medias_moveis_sku_loja.orderBy("CdSku", "CdFilial", "DtAtual").limit(10).disp
 
 # MAGIC %md
 # MAGIC ### 11.3 Agregação por Gêmeo para Cálculo de Percentuais
-
+# MAGIC
 # MAGIC %md
 # MAGIC Agregamos os dados por gêmeo para calcular os percentuais de merecimento,
 # MAGIC consolidando as informações de SKUs similares.
@@ -745,7 +476,7 @@ df_agregado_gemeo_filial.limit(5).display()
 
 # MAGIC %md
 # MAGIC ### 11.4 Cálculo de Percentuais de Merecimento
-
+# MAGIC
 # MAGIC %md
 # MAGIC Calculamos os percentuais de merecimento por gêmeo e filial,
 # MAGIC usando as médias móveis calculadas para distribuir as alocações.
@@ -815,7 +546,7 @@ df_percentuais_merecimento.orderBy("gemeos", "CdFilial", "year_month").limit(10)
 
 # MAGIC %md
 # MAGIC ### 11.5 Resumo das Médias Móveis por Gêmeo
-
+# MAGIC
 # MAGIC %md
 # MAGIC Apresentamos um resumo das médias móveis calculadas por gêmeo,
 # MAGIC mostrando a distribuição da demanda entre diferentes períodos.
@@ -848,7 +579,7 @@ df_resumo_medias_moveis_gemeo.display()
 
 # MAGIC %md
 # MAGIC ### 11.6 Comparação entre Diferentes Períodos de Média Móvel
-
+# MAGIC
 # MAGIC %md
 # MAGIC Analisamos as diferenças entre os percentuais calculados usando
 # MAGIC diferentes períodos de média móvel para identificar a melhor abordagem.
@@ -905,7 +636,7 @@ df_comparacao_medias.orderBy("gemeos", "CdFilial", "year_month").limit(10).displ
 
 # MAGIC %md
 # MAGIC ## 12. Resumo Final - Matriz de Merecimento Calculada
-
+# MAGIC
 # MAGIC %md
 # MAGIC A matriz de merecimento foi calculada com sucesso usando médias móveis
 # MAGIC de diferentes períodos, considerando apenas dias sem ruptura.
