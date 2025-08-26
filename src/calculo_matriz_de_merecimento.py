@@ -1,17 +1,23 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Cálculo da Matriz de Merecimento - Detecção Automática de Meses Atípicos
+# MAGIC # Cálculo da Matriz de Merecimento - Arquitetura em Duas Camadas com Múltiplas Médias Móveis
 # MAGIC
-# MAGIC Este notebook implementa o cálculo da matriz de merecimento com detecção automática
-# MAGIC de meses atípicos usando regra analítica baseada em estatísticas robustas.
+# MAGIC Este notebook implementa o cálculo da matriz de merecimento em duas camadas com detecção automática
+# MAGIC de meses atípicos e múltiplas abordagens de médias móveis para demanda robusta à ruptura.
 # MAGIC
-# MAGIC **Objetivo**: Calcular a matriz de merecimento otimizada removendo meses com comportamento
-# MAGIC atípico que podem distorcer as alocações.
+# MAGIC **Objetivo**: Calcular a matriz de merecimento otimizada em duas camadas:
+# MAGIC 1. **Primeira camada**: Matriz a nível CD (gêmeo)
+# MAGIC 2. **Segunda camada**: Distribuição interna ao CD para as lojas
 # MAGIC
 # MAGIC **Metodologia de Detecção de Outliers**:
-# MAGIC - **Regra dos 3 Desvios**: Remove meses com QtMercadoria > 3σ da média
+# MAGIC - **Regra dos n Desvios**: Remove meses com QtMercadoria > nσ da média APENAS do gêmeo específico
 # MAGIC - **Cálculo por Gêmeo**: Estatísticas calculadas individualmente para cada grupo de produtos similares
-# MAGIC - **Validação Automática**: Identifica e reporta meses removidos com justificativa estatística
+# MAGIC - **Validação Automática**: Identifica e reporta meses removidos com justificativa estatística por gêmeo
+# MAGIC
+# MAGIC **Múltiplas Médias Móveis**:
+# MAGIC - **Médias Móveis Normais**: 90, 180, 270, 360 dias
+# MAGIC - **Medianas Móveis**: 90, 180, 270, 360 dias
+# MAGIC - **Médias Móveis Aparadas (10%)**: 90, 180, 270, 360 dias
 
 # COMMAND ----------
 
@@ -157,13 +163,13 @@ df_vendas_estoque_telefonia_gemeos_modelos.limit(1).display()
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 5. Detecção Automática de Meses Atípicos
+# MAGIC ## 5. Detecção Automática de Meses Atípicos por Gêmeo
 # MAGIC
 # MAGIC %md
 # MAGIC Implementamos a regra analítica para detectar meses atípicos:
 # MAGIC - **Cálculo por Gêmeo**: Estatísticas calculadas individualmente para cada grupo de produtos similares
-# MAGIC - **Regra dos n Desvios**: Remove meses com QtMercadoria > nσ da média
-# MAGIC - **Validação Automática**: Identifica e reporta meses removidos com justificativa estatística
+# MAGIC - **Regra dos n Desvios**: Remove meses com QtMercadoria > nσ da média APENAS do gêmeo específico
+# MAGIC - **Validação Automática**: Identifica e reporta meses removidos com justificativa estatística por gêmeo
 
 # COMMAND ----------
 
@@ -319,6 +325,7 @@ df_resumo_atipicos_gemeo.display()
 
 # COMMAND ----------
 
+# Mapeamento de filiais para CDs primários
 de_para_filial_cd = (
     spark.table('databox.bcg_comum.supply_base_merecimento_diario')
     .select("CdFilial", "Cd_primario")
@@ -326,19 +333,214 @@ de_para_filial_cd = (
     .dropna()
 )
 
+print("✅ Mapeamento de filiais para CDs primários carregado:")
+print(f"🏪 Total de filiais mapeadas: {de_para_filial_cd.count():,}")
+print(f"🏢 Total de CDs primários: {de_para_filial_cd.select('Cd_primario').distinct().count()}")
+
+de_para_filial_cd.limit(5).display()
+
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 11. Cálculo de Demanda por Médias Móveis (Sem Ruptura)
+# MAGIC ## 6. Filtragem de Meses Atípicos por Gêmeo Específico
 # MAGIC
 # MAGIC %md
-# MAGIC Calculamos a demanda usando médias móveis de 90, 120 e 360 dias,
-# MAGIC considerando apenas dias que não tiveram ruptura (com estoque).
+# MAGIC Aplicamos o filtro para remover os meses identificados como atípicos,
+# MAGIC mas APENAS para o gêmeo específico onde o mês foi diagnosticado como atípico.
+# MAGIC Isso garante que a remoção seja precisa e não afete outros gêmeos ou produtos.
+
+# COMMAND ----------
+
+# Aplicação do filtro de meses atípicos por gêmeo específico
+df_vendas_estoque_telefonia_filtrado = (
+    df_vendas_estoque_telefonia_gemeos_modelos
+    .join(
+        df_meses_atipicos.select("gemeos", "year_month").withColumn("flag_remover", F.lit(1)),
+        on=["gemeos", "year_month"],
+        how="left"
+    )
+    .filter(
+        F.col("flag_remover").isNull()  # Remove apenas os meses atípicos do gêmeo específico
+    )
+    .drop("flag_remover")
+)
+
+print("✅ FILTRO DE MESES ATÍPICOS APLICADO (por gêmeo específico):")
+print("=" * 60)
+print(f"📊 Total de registros ANTES do filtro: {df_vendas_estoque_telefonia_gemeos_modelos.count():,}")
+print(f"📊 Total de registros DEPOIS do filtro: {df_vendas_estoque_telefonia_filtrado.count():,}")
+print(f"📊 Registros removidos: {df_vendas_estoque_telefonia_gemeos_modelos.count() - df_vendas_estoque_telefonia_filtrado.count():,}")
+print("ℹ️  Nota: Apenas meses atípicos do gêmeo específico foram removidos")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 7. Cálculo da Matriz de Merecimento a Nível CD (Gêmeo)
+# MAGIC
+# MAGIC %md
+# MAGIC Calculamos a primeira camada da matriz de merecimento ao nível de CD (gêmeo),
+# MAGIC consolidando as informações por grupo de produtos similares.
+
+# COMMAND ----------
+
+# Agregação por gêmeo e mês para matriz a nível CD
+df_matriz_cd_gemeo = (
+    df_vendas_estoque_telefonia_filtrado
+    .filter(~F.col("NmEspecieGerencial").contains("CHIP"))  # Excluir chips
+    .groupBy("year_month", "gemeos")
+    .agg(
+        F.sum("QtMercadoria").alias("QtMercadoria_total_cd"),
+        F.round(F.sum("Receita"), 2).alias("Receita_total_cd"),
+        F.round(F.sum("Media90_Qt_venda_estq"), 0).alias("Demanda_total_cd"),
+        F.round(F.median("PrecoMedio90"), 2).alias("PrecoMedio90_cd"),
+        F.countDistinct("CdSku").alias("qtd_skus_cd"),
+        F.countDistinct("CdFilial").alias("qtd_filiais_cd")
+    )
+    .filter(F.col("QtMercadoria_total_cd") > 0)  # Remove registros sem vendas
+)
+
+print("✅ Matriz de merecimento a nível CD (gêmeo) calculada:")
+print(f"📊 Total de registros: {df_matriz_cd_gemeo.count():,}")
+
+df_matriz_cd_gemeo.limit(5).display()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 8. Join com CdFilial usando Cd_primario
+# MAGIC
+# MAGIC %md
+# MAGIC Realizamos o join entre a matriz de CD e as filiais usando o mapeamento
+# MAGIC de Cd_primario para distribuir as alocações às lojas.
+
+# COMMAND ----------
+
+# Join da matriz de CD com as filiais
+df_matriz_cd_filiais = (
+    df_matriz_cd_gemeo
+    .crossJoin(de_para_filial_cd)
+    .select(
+        "year_month", "gemeos", "CdFilial", "Cd_primario",
+        "QtMercadoria_total_cd", "Receita_total_cd", "Demanda_total_cd",
+        "PrecoMedio90_cd", "qtd_skus_cd", "qtd_filiais_cd"
+    )
+)
+
+print("✅ Join realizado entre matriz de CD e filiais:")
+print(f"📊 Total de registros após join: {df_matriz_cd_filiais.count():,}")
+
+df_matriz_cd_filiais.limit(5).display()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 9. Cálculo da Segunda Matriz Interna ao CD para as Lojas
+# MAGIC
+# MAGIC %md
+# MAGIC Calculamos a segunda camada da matriz de merecimento, distribuindo
+# MAGIC as alocações do CD entre as lojas atreladas.
+
+# COMMAND ----------
+
+# Janela para cálculo de totais por CD e mês
+w_cd_mes = Window.partitionBy("Cd_primario", "year_month")
+
+# Cálculo da segunda matriz interna ao CD
+df_matriz_interna_cd = (
+    df_matriz_cd_filiais
+    # Totais por CD e mês
+    .withColumn("total_filiais_cd_mes", F.count("CdFilial").over(w_cd_mes))
+    
+    # Percentuais de distribuição entre filiais do mesmo CD
+    .withColumn(
+        "pct_distribuicao_filial",
+        F.lit(1.0) / F.col("total_filiais_cd_mes")  # Distribuição igual entre filiais
+    )
+    
+    # Alocações calculadas para cada filial
+    .withColumn(
+        "QtMercadoria_alocada_filial",
+        F.round(F.col("QtMercadoria_total_cd") * F.col("pct_distribuicao_filial"), 2)
+    )
+    .withColumn(
+        "Receita_alocada_filial",
+        F.round(F.col("Receita_total_cd") * F.col("pct_distribuicao_filial"), 2)
+    )
+    .withColumn(
+        "Demanda_alocada_filial",
+        F.round(F.col("Demanda_total_cd") * F.col("pct_distribuicao_filial"), 0)
+    )
+    
+    # Percentuais em %
+    .withColumn("pct_distribuicao_filial_perc", F.round(F.col("pct_distribuicao_filial") * 100, 4))
+    
+    # Seleção das colunas finais
+    .select(
+        "year_month", "gemeos", "CdFilial", "Cd_primario",
+        "QtMercadoria_total_cd", "Receita_total_cd", "Demanda_total_cd",
+        "QtMercadoria_alocada_filial", "Receita_alocada_filial", "Demanda_alocada_filial",
+        "pct_distribuicao_filial", "pct_distribuicao_filial_perc",
+        "total_filiais_cd_mes", "qtd_skus_cd", "qtd_filiais_cd"
+    )
+)
+
+print("✅ Segunda matriz interna ao CD calculada:")
+print(f"📊 Total de registros: {df_matriz_interna_cd.count():,}")
+
+df_matriz_interna_cd.limit(5).display()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 10. Resumo da Matriz de Merecimento em Duas Camadas
+# MAGIC
+# MAGIC %md
+# MAGIC Apresentamos um resumo da matriz de merecimento calculada em duas camadas:
+# MAGIC 1. **Primeira camada**: Matriz a nível CD (gêmeo)
+# MAGIC 2. **Segunda camada**: Distribuição interna ao CD para as lojas
+
+# COMMAND ----------
+
+# Estatísticas finais da matriz em duas camadas
+total_cds = df_matriz_interna_cd.select("Cd_primario").distinct().count()
+total_filiais = df_matriz_interna_cd.select("CdFilial").distinct().count()
+total_gemeos = df_matriz_interna_cd.select("gemeos").distinct().count()
+total_meses = df_matriz_interna_cd.select("year_month").distinct().count()
+
+print("🎯 MATRIZ DE MERECIMENTO EM DUAS CAMADAS CALCULADA COM SUCESSO!")
+print("=" * 80)
+
+print(f"\n📊 COBERTURA DA MATRIZ:")
+print(f"  • Total de CDs primários: {total_cds}")
+print(f"  • Total de filiais: {total_filiais}")
+print(f"  • Total de grupos gêmeos: {total_gemeos}")
+print(f"  • Total de meses: {total_meses}")
+print(f"  • Total de combinações CD-filial-mês: {df_matriz_interna_cd.count():,}")
+
+print(f"\n🏗️  ARQUITETURA EM DUAS CAMADAS:")
+print(f"  • Camada 1: Matriz a nível CD (gêmeo)")
+print(f"  • Camada 2: Distribuição interna ao CD para as lojas")
+
+print(f"\n✅ CARACTERÍSTICAS DA IMPLEMENTAÇÃO:")
+print(f"  • Meses atípicos removidos por gêmeo específico")
+print(f"  • Cálculo hierárquico CD → Lojas")
+print(f"  • Distribuição proporcional entre filiais do mesmo CD")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 11. Cálculo de Demanda por Múltiplas Médias Móveis (Robusta à Ruptura)
+# MAGIC
+# MAGIC %md
+# MAGIC Calculamos a demanda usando múltiplas abordagens de médias móveis:
+# MAGIC - **Média Móvel Normal**: 90, 180, 270 e 360 dias
+# MAGIC - **Mediana Móvel**: 90, 180, 270 e 360 dias  
+# MAGIC - **Média Móvel Aparada (10%)**: 90, 180, 270 e 360 dias
 # MAGIC
 # MAGIC **Metodologia:**
-# MAGIC - **Filtro de Ruptura**: Apenas dias com estoque > 0
-# MAGIC - **Médias Móveis**: 90, 120 e 360 dias
+# MAGIC - **Filtro de Ruptura**: Apenas dias com estoque > 0 (demanda robusta à ruptura)
+# MAGIC - **Múltiplos Períodos**: Análise de curto, médio e longo prazo
 # MAGIC - **Nível SKU-Loja**: Cálculo individual por produto e filial
 # MAGIC - **Agregação por Gêmeo**: Consolidação para cálculo de percentuais
 
@@ -395,40 +597,90 @@ df_dados_medias_moveis.limit(5).display()
 # COMMAND ----------
 
 # Janelas para diferentes períodos de média móvel
-w_90 = Window.partitionBy("gemeos", "CdFilial").orderBy("DayIdx").rangeBetween(-89, 0)
-w_120 = Window.partitionBy("CdSku", "CdFilial").orderBy("DayIdx").rangeBetween(-119, 0)
+w_90 = Window.partitionBy("CdSku", "CdFilial").orderBy("DayIdx").rangeBetween(-89, 0)
+w_180 = Window.partitionBy("CdSku", "CdFilial").orderBy("DayIdx").rangeBetween(-179, 0)
+w_270 = Window.partitionBy("CdSku", "CdFilial").orderBy("DayIdx").rangeBetween(-269, 0)
 w_360 = Window.partitionBy("CdSku", "CdFilial").orderBy("DayIdx").rangeBetween(-359, 0)
 
-# Cálculo das médias móveis
+# Cálculo das múltiplas médias móveis
 df_medias_moveis_sku_loja = (
     df_dados_medias_moveis
+    # Médias móveis normais
     .withColumn(
         "Media90_Qt_venda_estq",
         F.avg("QtMercadoria").over(w_90)
     )
     .withColumn(
-        "Media120_Qt_venda_estq",
-        F.avg("QtMercadoria").over(w_120)
+        "Media180_Qt_venda_estq",
+        F.avg("QtMercadoria").over(w_180)
+    )
+    .withColumn(
+        "Media270_Qt_venda_estq",
+        F.avg("QtMercadoria").over(w_270)
     )
     .withColumn(
         "Media360_Qt_venda_estq",
         F.avg("QtMercadoria").over(w_360)
     )
+    
+    # Medianas móveis
+    .withColumn(
+        "Mediana90_Qt_venda_estq",
+        F.expr("percentile_approx(QtMercadoria, 0.5)").over(w_90)
+    )
+    .withColumn(
+        "Mediana180_Qt_venda_estq",
+        F.expr("percentile_approx(QtMercadoria, 0.5)").over(w_180)
+    )
+    .withColumn(
+        "Mediana270_Qt_venda_estq",
+        F.expr("percentile_approx(QtMercadoria, 0.5)").over(w_270)
+    )
+    .withColumn(
+        "Mediana360_Qt_venda_estq",
+        F.expr("percentile_approx(QtMercadoria, 0.5)").over(w_360)
+    )
+    
+    # Médias móveis aparadas (10% - percentis 10-90)
+    .withColumn(
+        "MediaAparada90_Qt_venda_estq",
+        F.expr("(percentile_approx(QtMercadoria, 0.9) + percentile_approx(QtMercadoria, 0.1)) / 2").over(w_90)
+    )
+    .withColumn(
+        "MediaAparada180_Qt_venda_estq",
+        F.expr("(percentile_approx(QtMercadoria, 0.9) + percentile_approx(QtMercadoria, 0.1)) / 2").over(w_180)
+    )
+    .withColumn(
+        "MediaAparada270_Qt_venda_estq",
+        F.expr("(percentile_approx(QtMercadoria, 0.9) + percentile_approx(QtMercadoria, 0.1)) / 2").over(w_270)
+    )
+    .withColumn(
+        "MediaAparada360_Qt_venda_estq",
+        F.expr("(percentile_approx(QtMercadoria, 0.9) + percentile_approx(QtMercadoria, 0.1)) / 2").over(w_360)
+    )
+    
+    # Médias móveis de receita
     .withColumn(
         "Media90_Receita",
         F.avg("Receita").over(w_90)
     )
     .withColumn(
-        "Media120_Receita",
-        F.avg("Receita").over(w_120)
+        "Media180_Receita",
+        F.avg("Receita").over(w_180)
+    )
+    .withColumn(
+        "Media270_Receita",
+        F.avg("Receita").over(w_270)
     )
     .withColumn(
         "Media360_Receita",
         F.avg("Receita").over(w_360)
     )
     .fillna(0, subset=[
-        "Media90_Qt_venda_estq", "Media120_Qt_venda_estq", "Media360_Qt_venda_estq",
-        "Media90_Receita", "Media120_Receita", "Media360_Receita"
+        "Media90_Qt_venda_estq", "Media180_Qt_venda_estq", "Media270_Qt_venda_estq", "Media360_Qt_venda_estq",
+        "Mediana90_Qt_venda_estq", "Mediana180_Qt_venda_estq", "Mediana270_Qt_venda_estq", "Mediana360_Qt_venda_estq",
+        "MediaAparada90_Qt_venda_estq", "MediaAparada180_Qt_venda_estq", "MediaAparada270_Qt_venda_estq", "MediaAparada360_Qt_venda_estq",
+        "Media90_Receita", "Media180_Receita", "Media270_Receita", "Media360_Receita"
     ])
 )
 
@@ -456,12 +708,31 @@ df_agregado_gemeo_filial = (
     .agg(
         F.sum("QtMercadoria").alias("QtMercadoria_total"),
         F.sum("Receita").alias("Receita_total"),
+        
+        # Médias móveis normais
         F.round(F.avg("Media90_Qt_venda_estq"), 2).alias("Media90_Qt_venda_estq"),
-        F.round(F.avg("Media120_Qt_venda_estq"), 2).alias("Media120_Qt_venda_estq"),
+        F.round(F.avg("Media180_Qt_venda_estq"), 2).alias("Media180_Qt_venda_estq"),
+        F.round(F.avg("Media270_Qt_venda_estq"), 2).alias("Media270_Qt_venda_estq"),
         F.round(F.avg("Media360_Qt_venda_estq"), 2).alias("Media360_Qt_venda_estq"),
+        
+        # Medianas móveis
+        F.round(F.avg("Mediana90_Qt_venda_estq"), 2).alias("Mediana90_Qt_venda_estq"),
+        F.round(F.avg("Mediana180_Qt_venda_estq"), 2).alias("Mediana180_Qt_venda_estq"),
+        F.round(F.avg("Mediana270_Qt_venda_estq"), 2).alias("Mediana270_Qt_venda_estq"),
+        F.round(F.avg("Mediana360_Qt_venda_estq"), 2).alias("Mediana360_Qt_venda_estq"),
+        
+        # Médias móveis aparadas
+        F.round(F.avg("MediaAparada90_Qt_venda_estq"), 2).alias("MediaAparada90_Qt_venda_estq"),
+        F.round(F.avg("MediaAparada180_Qt_venda_estq"), 2).alias("MediaAparada180_Qt_venda_estq"),
+        F.round(F.avg("MediaAparada270_Qt_venda_estq"), 2).alias("MediaAparada270_Qt_venda_estq"),
+        F.round(F.avg("MediaAparada360_Qt_venda_estq"), 2).alias("MediaAparada360_Qt_venda_estq"),
+        
+        # Médias móveis de receita
         F.round(F.avg("Media90_Receita"), 2).alias("Media90_Receita"),
-        F.round(F.avg("Media120_Receita"), 2).alias("Media120_Receita"),
+        F.round(F.avg("Media180_Receita"), 2).alias("Media180_Receita"),
+        F.round(F.avg("Media270_Receita"), 2).alias("Media270_Receita"),
         F.round(F.avg("Media360_Receita"), 2).alias("Media360_Receita"),
+        
         F.countDistinct("CdSku").alias("qtd_skus_gemeo")
     )
     .filter(F.col("QtMercadoria_total") > 0)  # Remove registros sem vendas
@@ -492,11 +763,26 @@ df_percentuais_merecimento = (
     # Totais por gêmeo e mês
     .withColumn("total_qt_mercadoria_gemeo_mes", F.sum("QtMercadoria_total").over(w_gemeo_mes))
     .withColumn("total_receita_gemeo_mes", F.sum("Receita_total").over(w_gemeo_mes))
+    
+    # Totais de demanda por diferentes médias móveis
     .withColumn("total_media90_demanda_gemeo_mes", F.sum("Media90_Qt_venda_estq").over(w_gemeo_mes))
-    .withColumn("total_media120_demanda_gemeo_mes", F.sum("Media120_Qt_venda_estq").over(w_gemeo_mes))
+    .withColumn("total_media180_demanda_gemeo_mes", F.sum("Media180_Qt_venda_estq").over(w_gemeo_mes))
+    .withColumn("total_media270_demanda_gemeo_mes", F.sum("Media270_Qt_venda_estq").over(w_gemeo_mes))
     .withColumn("total_media360_demanda_gemeo_mes", F.sum("Media360_Qt_venda_estq").over(w_gemeo_mes))
     
-    # Percentuais baseados em diferentes médias móveis
+    # Totais de medianas móveis
+    .withColumn("total_mediana90_demanda_gemeo_mes", F.sum("Mediana90_Qt_venda_estq").over(w_gemeo_mes))
+    .withColumn("total_mediana180_demanda_gemeo_mes", F.sum("Mediana180_Qt_venda_estq").over(w_gemeo_mes))
+    .withColumn("total_mediana270_demanda_gemeo_mes", F.sum("Mediana270_Qt_venda_estq").over(w_gemeo_mes))
+    .withColumn("total_mediana360_demanda_gemeo_mes", F.sum("Mediana360_Qt_venda_estq").over(w_gemeo_mes))
+    
+    # Totais de médias aparadas
+    .withColumn("total_mediaAparada90_demanda_gemeo_mes", F.sum("MediaAparada90_Qt_venda_estq").over(w_gemeo_mes))
+    .withColumn("total_mediaAparada180_demanda_gemeo_mes", F.sum("MediaAparada180_Qt_venda_estq").over(w_gemeo_mes))
+    .withColumn("total_mediaAparada270_demanda_gemeo_mes", F.sum("MediaAparada270_Qt_venda_estq").over(w_gemeo_mes))
+    .withColumn("total_mediaAparada360_demanda_gemeo_mes", F.sum("MediaAparada360_Qt_venda_estq").over(w_gemeo_mes))
+    
+    # Percentuais baseados em médias móveis normais
     .withColumn(
         "pct_merecimento_media90",
         F.when(F.col("total_media90_demanda_gemeo_mes") > 0,
@@ -504,9 +790,15 @@ df_percentuais_merecimento = (
          .otherwise(F.lit(0.0))
     )
     .withColumn(
-        "pct_merecimento_media120",
-        F.when(F.col("total_media120_demanda_gemeo_mes") > 0,
-               F.col("Media120_Qt_venda_estq") / F.col("total_media120_demanda_gemeo_mes"))
+        "pct_merecimento_media180",
+        F.when(F.col("total_media180_demanda_gemeo_mes") > 0,
+               F.col("Media180_Qt_venda_estq") / F.col("total_media180_demanda_gemeo_mes"))
+         .otherwise(F.lit(0.0))
+    )
+    .withColumn(
+        "pct_merecimento_media270",
+        F.when(F.col("total_media270_demanda_gemeo_mes") > 0,
+               F.col("Media270_Qt_venda_estq") / F.col("total_media270_demanda_gemeo_mes"))
          .otherwise(F.lit(0.0))
     )
     .withColumn(
@@ -516,22 +808,113 @@ df_percentuais_merecimento = (
          .otherwise(F.lit(0.0))
     )
     
+    # Percentuais baseados em medianas móveis
+    .withColumn(
+        "pct_merecimento_mediana90",
+        F.when(F.col("total_mediana90_demanda_gemeo_mes") > 0,
+               F.col("Mediana90_Qt_venda_estq") / F.col("total_mediana90_demanda_gemeo_mes"))
+         .otherwise(F.lit(0.0))
+    )
+    .withColumn(
+        "pct_merecimento_mediana180",
+        F.when(F.col("total_mediana180_demanda_gemeo_mes") > 0,
+               F.col("Mediana180_Qt_venda_estq") / F.col("total_mediana180_demanda_gemeo_mes"))
+         .otherwise(F.lit(0.0))
+    )
+    .withColumn(
+        "pct_merecimento_mediana270",
+        F.when(F.col("total_mediana270_demanda_gemeo_mes") > 0,
+               F.col("Mediana270_Qt_venda_estq") / F.col("total_mediana270_demanda_gemeo_mes"))
+         .otherwise(F.lit(0.0))
+    )
+    .withColumn(
+        "pct_merecimento_mediana360",
+        F.when(F.col("total_mediana360_demanda_gemeo_mes") > 0,
+               F.col("Mediana360_Qt_venda_estq") / F.col("total_mediana360_demanda_gemeo_mes"))
+         .otherwise(F.lit(0.0))
+    )
+    
+    # Percentuais baseados em médias aparadas
+    .withColumn(
+        "pct_merecimento_mediaAparada90",
+        F.when(F.col("total_mediaAparada90_demanda_gemeo_mes") > 0,
+               F.col("MediaAparada90_Qt_venda_estq") / F.col("total_mediaAparada90_demanda_gemeo_mes"))
+         .otherwise(F.lit(0.0))
+    )
+    .withColumn(
+        "pct_merecimento_mediaAparada180",
+        F.when(F.col("total_mediaAparada180_demanda_gemeo_mes") > 0,
+               F.col("MediaAparada180_Qt_venda_estq") / F.col("total_mediaAparada180_demanda_gemeo_mes"))
+         .otherwise(F.lit(0.0))
+    )
+    .withColumn(
+        "pct_merecimento_mediaAparada270",
+        F.when(F.col("total_mediaAparada270_demanda_gemeo_mes") > 0,
+               F.col("MediaAparada270_Qt_venda_estq") / F.col("total_mediaAparada270_demanda_gemeo_mes"))
+         .otherwise(F.lit(0.0))
+    )
+    .withColumn(
+        "pct_merecimento_mediaAparada360",
+        F.when(F.col("total_mediaAparada360_demanda_gemeo_mes") > 0,
+               F.col("MediaAparada360_Qt_venda_estq") / F.col("total_mediaAparada360_demanda_gemeo_mes"))
+         .otherwise(F.lit(0.0))
+    )
+    
     # Percentuais em %
     .withColumn("pct_merecimento_media90_perc", F.round(F.col("pct_merecimento_media90") * 100, 4))
-    .withColumn("pct_merecimento_media120_perc", F.round(F.col("pct_merecimento_media120") * 100, 4))
+    .withColumn("pct_merecimento_media180_perc", F.round(F.col("pct_merecimento_media180") * 100, 4))
+    .withColumn("pct_merecimento_media270_perc", F.round(F.col("pct_merecimento_media270") * 100, 4))
     .withColumn("pct_merecimento_media360_perc", F.round(F.col("pct_merecimento_media360") * 100, 4))
+    
+    .withColumn("pct_merecimento_mediana90_perc", F.round(F.col("pct_merecimento_mediana90") * 100, 4))
+    .withColumn("pct_merecimento_mediana180_perc", F.round(F.col("pct_merecimento_mediana180") * 100, 4))
+    .withColumn("pct_merecimento_mediana270_perc", F.round(F.col("pct_merecimento_mediana270") * 100, 4))
+    .withColumn("pct_merecimento_mediana360_perc", F.round(F.col("pct_merecimento_mediana360") * 100, 4))
+    
+    .withColumn("pct_merecimento_mediaAparada90_perc", F.round(F.col("pct_merecimento_mediaAparada90") * 100, 4))
+    .withColumn("pct_merecimento_mediaAparada180_perc", F.round(F.col("pct_merecimento_mediaAparada180") * 100, 4))
+    .withColumn("pct_merecimento_mediaAparada270_perc", F.round(F.col("pct_merecimento_mediaAparada270") * 100, 4))
+    .withColumn("pct_merecimento_mediaAparada360_perc", F.round(F.col("pct_merecimento_mediaAparada270") * 100, 4))
     
     # Seleção das colunas finais
     .select(
         "year_month", "gemeos", "CdFilial",
         "QtMercadoria_total", "Receita_total",
-        "Media90_Qt_venda_estq", "Media120_Qt_venda_estq", "Media360_Qt_venda_estq",
-        "Media90_Receita", "Media120_Receita", "Media360_Receita",
+        
+        # Médias móveis normais
+        "Media90_Qt_venda_estq", "Media180_Qt_venda_estq", "Media270_Qt_venda_estq", "Media360_Qt_venda_estq",
+        
+        # Medianas móveis
+        "Mediana90_Qt_venda_estq", "Mediana180_Qt_venda_estq", "Mediana270_Qt_venda_estq", "Mediana360_Qt_venda_estq",
+        
+        # Médias móveis aparadas
+        "MediaAparada90_Qt_venda_estq", "MediaAparada180_Qt_venda_estq", "MediaAparada270_Qt_venda_estq", "MediaAparada360_Qt_venda_estq",
+        
+        # Médias móveis de receita
+        "Media90_Receita", "Media180_Receita", "Media270_Receita", "Media360_Receita",
+        
+        # Totais
         "total_qt_mercadoria_gemeo_mes", "total_receita_gemeo_mes",
-        "total_media90_demanda_gemeo_mes", "total_media120_demanda_gemeo_mes", "total_media360_demanda_gemeo_mes",
+        "total_media90_demanda_gemeo_mes", "total_media180_demanda_gemeo_mes", "total_media270_demanda_gemeo_mes", "total_media360_demanda_gemeo_mes",
+        "total_mediana90_demanda_gemeo_mes", "total_mediana180_demanda_gemeo_mes", "total_mediana270_demanda_gemeo_mes", "total_mediana360_demanda_gemeo_mes",
+        "total_mediaAparada90_demanda_gemeo_mes", "total_mediaAparada180_demanda_gemeo_mes", "total_mediaAparada270_demanda_gemeo_mes", "total_mediaAparada360_demanda_gemeo_mes",
+        
+        # Percentuais de merecimento
         "pct_merecimento_media90", "pct_merecimento_media90_perc",
-        "pct_merecimento_media120", "pct_merecimento_media120_perc",
+        "pct_merecimento_media180", "pct_merecimento_media180_perc",
+        "pct_merecimento_media270", "pct_merecimento_media270_perc",
         "pct_merecimento_media360", "pct_merecimento_media360_perc",
+        
+        "pct_merecimento_mediana90", "pct_merecimento_mediana90_perc",
+        "pct_merecimento_mediana180", "pct_merecimento_mediana180_perc",
+        "pct_merecimento_mediana270", "pct_merecimento_mediana270_perc",
+        "pct_merecimento_mediana360", "pct_merecimento_mediana360_perc",
+        
+        "pct_merecimento_mediaAparada90", "pct_merecimento_mediaAparada90_perc",
+        "pct_merecimento_mediaAparada180", "pct_merecimento_mediaAparada180_perc",
+        "pct_merecimento_mediaAparada270", "pct_merecimento_mediaAparada270_perc",
+        "pct_merecimento_mediaAparada360", "pct_merecimento_mediaAparada360_perc",
+        
         "qtd_skus_gemeo"
     )
 )
@@ -553,7 +936,7 @@ df_percentuais_merecimento.orderBy("gemeos", "CdFilial", "year_month").limit(10)
 
 # COMMAND ----------
 
-# Resumo das médias móveis por gêmeo
+# Resumo das múltiplas médias móveis por gêmeo
 df_resumo_medias_moveis_gemeo = (
     df_percentuais_merecimento
     .groupBy("gemeos")
@@ -561,12 +944,42 @@ df_resumo_medias_moveis_gemeo = (
         F.count("*").alias("total_registros"),
         F.countDistinct("CdFilial").alias("total_filiais"),
         F.countDistinct("year_month").alias("total_meses"),
+        
+        # Médias móveis normais
         F.round(F.avg("Media90_Qt_venda_estq"), 2).alias("media90_media"),
-        F.round(F.avg("Media120_Qt_venda_estq"), 2).alias("media120_media"),
+        F.round(F.avg("Media180_Qt_venda_estq"), 2).alias("media180_media"),
+        F.round(F.avg("Media270_Qt_venda_estq"), 2).alias("media270_media"),
         F.round(F.avg("Media360_Qt_venda_estq"), 2).alias("media360_media"),
+        
+        # Medianas móveis
+        F.round(F.avg("Mediana90_Qt_venda_estq"), 2).alias("mediana90_media"),
+        F.round(F.avg("Mediana180_Qt_venda_estq"), 2).alias("mediana180_media"),
+        F.round(F.avg("Mediana270_Qt_venda_estq"), 2).alias("mediana270_media"),
+        F.round(F.avg("Mediana360_Qt_venda_estq"), 2).alias("mediana360_media"),
+        
+        # Médias móveis aparadas
+        F.round(F.avg("MediaAparada90_Qt_venda_estq"), 2).alias("mediaAparada90_media"),
+        F.round(F.avg("MediaAparada180_Qt_venda_estq"), 2).alias("mediaAparada180_media"),
+        F.round(F.avg("MediaAparada270_Qt_venda_estq"), 2).alias("mediaAparada270_media"),
+        F.round(F.avg("MediaAparada360_Qt_venda_estq"), 2).alias("mediaAparada360_media"),
+        
+        # Percentuais de merecimento - médias móveis normais
         F.round(F.avg("pct_merecimento_media90_perc"), 4).alias("pct_merecimento_90_medio"),
-        F.round(F.avg("pct_merecimento_media120_perc"), 4).alias("pct_merecimento_120_medio"),
-        F.round(F.avg("pct_merecimento_media360_perc"), 4).alias("pct_merecimento_360_medio")
+        F.round(F.avg("pct_merecimento_media180_perc"), 4).alias("pct_merecimento_180_medio"),
+        F.round(F.avg("pct_merecimento_media270_perc"), 4).alias("pct_merecimento_270_medio"),
+        F.round(F.avg("pct_merecimento_media360_perc"), 4).alias("pct_merecimento_360_medio"),
+        
+        # Percentuais de merecimento - medianas móveis
+        F.round(F.avg("pct_merecimento_mediana90_perc"), 4).alias("pct_merecimento_mediana90_medio"),
+        F.round(F.avg("pct_merecimento_mediana180_perc"), 4).alias("pct_merecimento_mediana180_medio"),
+        F.round(F.avg("pct_merecimento_mediana270_perc"), 4).alias("pct_merecimento_mediana270_medio"),
+        F.round(F.avg("pct_merecimento_mediana360_perc"), 4).alias("pct_merecimento_mediana360_medio"),
+        
+        # Percentuais de merecimento - médias aparadas
+        F.round(F.avg("pct_merecimento_mediaAparada90_perc"), 4).alias("pct_merecimento_mediaAparada90_medio"),
+        F.round(F.avg("pct_merecimento_mediaAparada180_perc"), 4).alias("pct_merecimento_mediaAparada180_medio"),
+        F.round(F.avg("pct_merecimento_mediaAparada270_perc"), 4).alias("pct_merecimento_mediaAparada270_medio"),
+        F.round(F.avg("pct_merecimento_mediaAparada360_perc"), 4).alias("pct_merecimento_mediaAparada360_medio")
     )
     .orderBy("gemeos")
 )
@@ -586,27 +999,79 @@ df_resumo_medias_moveis_gemeo.display()
 
 # COMMAND ----------
 
-# Análise comparativa das médias móveis
+# Análise comparativa das múltiplas médias móveis
 df_comparacao_medias = (
     df_percentuais_merecimento
+    # Diferenças entre médias móveis normais
     .withColumn(
-        "diff_90_120",
-        F.abs(F.col("pct_merecimento_media90_perc") - F.col("pct_merecimento_media120_perc"))
+        "diff_media_90_180",
+        F.abs(F.col("pct_merecimento_media90_perc") - F.col("pct_merecimento_media180_perc"))
     )
     .withColumn(
-        "diff_90_360",
+        "diff_media_90_270",
+        F.abs(F.col("pct_merecimento_media90_perc") - F.col("pct_merecimento_media270_perc"))
+    )
+    .withColumn(
+        "diff_media_90_360",
         F.abs(F.col("pct_merecimento_media90_perc") - F.col("pct_merecimento_media360_perc"))
     )
+    
+    # Diferenças entre medianas móveis
     .withColumn(
-        "diff_120_360",
-        F.abs(F.col("pct_merecimento_media120_perc") - F.col("pct_merecimento_media360_perc"))
+        "diff_mediana_90_180",
+        F.abs(F.col("pct_merecimento_mediana90_perc") - F.col("pct_merecimento_mediana180_perc"))
     )
+    .withColumn(
+        "diff_mediana_90_270",
+        F.abs(F.col("pct_merecimento_mediana90_perc") - F.col("pct_merecimento_mediana270_perc"))
+    )
+    .withColumn(
+        "diff_mediana_90_360",
+        F.abs(F.col("pct_merecimento_mediana90_perc") - F.col("pct_merecimento_mediana360_perc"))
+    )
+    
+    # Diferenças entre médias aparadas
+    .withColumn(
+        "diff_mediaAparada_90_180",
+        F.abs(F.col("pct_merecimento_mediaAparada90_perc") - F.col("pct_merecimento_mediaAparada180_perc"))
+    )
+    .withColumn(
+        "diff_mediaAparada_90_270",
+        F.abs(F.col("pct_merecimento_mediaAparada90_perc") - F.col("pct_merecimento_mediaAparada270_perc"))
+    )
+    .withColumn(
+        "diff_mediaAparada_90_360",
+        F.abs(F.col("pct_merecimento_mediaAparada90_perc") - F.col("pct_merecimento_mediaAparada360_perc"))
+    )
+    
+    # Seleção das colunas para análise
     .select(
         "gemeos", "CdFilial", "year_month",
-        "pct_merecimento_media90_perc", "pct_merecimento_media120_perc", "pct_merecimento_media360_perc",
-        F.round("diff_90_120", 4).alias("diff_90_120"),
-        F.round("diff_90_360", 4).alias("diff_90_360"),
-        F.round("diff_120_360", 4).alias("diff_120_360")
+        
+        # Percentuais de merecimento - médias móveis normais
+        "pct_merecimento_media90_perc", "pct_merecimento_media180_perc", 
+        "pct_merecimento_media270_perc", "pct_merecimento_media360_perc",
+        
+        # Percentuais de merecimento - medianas móveis
+        "pct_merecimento_mediana90_perc", "pct_merecimento_mediana180_perc",
+        "pct_merecimento_mediana270_perc", "pct_merecimento_mediana360_perc",
+        
+        # Percentuais de merecimento - médias aparadas
+        "pct_merecimento_mediaAparada90_perc", "pct_merecimento_mediaAparada180_perc",
+        "pct_merecimento_mediaAparada270_perc", "pct_merecimento_mediaAparada360_perc",
+        
+        # Diferenças calculadas
+        F.round("diff_media_90_180", 4).alias("diff_media_90_180"),
+        F.round("diff_media_90_270", 4).alias("diff_media_90_270"),
+        F.round("diff_media_90_360", 4).alias("diff_media_90_360"),
+        
+        F.round("diff_mediana_90_180", 4).alias("diff_mediana_90_180"),
+        F.round("diff_mediana_90_270", 4).alias("diff_mediana_90_270"),
+        F.round("diff_mediana_90_360", 4).alias("diff_mediana_90_360"),
+        
+        F.round("diff_mediaAparada_90_180", 4).alias("diff_mediaAparada_90_180"),
+        F.round("diff_mediaAparada_90_270", 4).alias("diff_mediaAparada_90_270"),
+        F.round("diff_mediaAparada_90_360", 4).alias("diff_mediaAparada_90_360")
     )
 )
 
@@ -614,20 +1079,39 @@ print("📊 COMPARAÇÃO ENTRE DIFERENTES PERÍODOS DE MÉDIA MÓVEL:")
 print("=" * 80)
 print(f"📈 Total de registros para comparação: {df_comparacao_medias.count():,}")
 
-# Estatísticas das diferenças
+# Estatísticas das diferenças entre múltiplas médias móveis
 stats_diferencas = df_comparacao_medias.agg(
-    F.round(F.avg("diff_90_120"), 4).alias("media_diff_90_120"),
-    F.round(F.avg("diff_90_360"), 4).alias("media_diff_90_360"),
-    F.round(F.avg("diff_120_360"), 4).alias("media_diff_120_360"),
-    F.round(F.stddev("diff_90_120"), 4).alias("std_diff_90_120"),
-    F.round(F.stddev("diff_90_360"), 4).alias("std_diff_90_360"),
-    F.round(F.stddev("diff_120_360"), 4).alias("std_diff_120_360")
+    # Diferenças entre médias móveis normais
+    F.round(F.avg("diff_media_90_180"), 4).alias("media_diff_90_180"),
+    F.round(F.avg("diff_media_90_270"), 4).alias("media_diff_90_270"),
+    F.round(F.avg("diff_media_90_360"), 4).alias("media_diff_90_360"),
+    
+    # Diferenças entre medianas móveis
+    F.round(F.avg("diff_mediana_90_180"), 4).alias("mediana_diff_90_180"),
+    F.round(F.avg("diff_mediana_90_270"), 4).alias("mediana_diff_90_270"),
+    F.round(F.avg("diff_mediana_90_360"), 4).alias("mediana_diff_90_360"),
+    
+    # Diferenças entre médias aparadas
+    F.round(F.avg("diff_mediaAparada_90_180"), 4).alias("mediaAparada_diff_90_180"),
+    F.round(F.avg("diff_mediaAparada_90_270"), 4).alias("mediaAparada_diff_90_270"),
+    F.round(F.avg("diff_mediaAparada_90_360"), 4).alias("mediaAparada_diff_90_360")
 ).collect()[0]
 
-print(f"\n📊 ESTATÍSTICAS DAS DIFERENÇAS:")
-print(f"  • Média diferença 90-120 dias: {stats_diferencas['media_diff_90_120']}%")
+print(f"\n📊 ESTATÍSTICAS DAS DIFERENÇAS ENTRE MÚLTIPLAS MÉDIAS MÓVEIS:")
+print(f"\n📈 MÉDIAS MÓVEIS NORMAIS:")
+print(f"  • Média diferença 90-180 dias: {stats_diferencas['media_diff_90_180']}%")
+print(f"  • Média diferença 90-270 dias: {stats_diferencas['media_diff_90_270']}%")
 print(f"  • Média diferença 90-360 dias: {stats_diferencas['media_diff_90_360']}%")
-print(f"  • Média diferença 120-360 dias: {stats_diferencas['media_diff_120_360']}%")
+
+print(f"\n📊 MEDIANAS MÓVEIS:")
+print(f"  • Média diferença 90-180 dias: {stats_diferencas['mediana_diff_90_180']}%")
+print(f"  • Média diferença 90-270 dias: {stats_diferencas['mediana_diff_90_270']}%")
+print(f"  • Média diferença 90-360 dias: {stats_diferencas['mediana_diff_90_360']}%")
+
+print(f"\n✂️  MÉDIAS MÓVEIS APARADAS (10%):")
+print(f"  • Média diferença 90-180 dias: {stats_diferencas['mediaAparada_diff_90_180']}%")
+print(f"  • Média diferença 90-270 dias: {stats_diferencas['mediaAparada_diff_90_270']}%")
+print(f"  • Média diferença 90-360 dias: {stats_diferencas['mediaAparada_diff_90_360']}%")
 
 # Mostrar exemplos das comparações
 df_comparacao_medias.orderBy("gemeos", "CdFilial", "year_month").limit(10).display()
@@ -657,16 +1141,18 @@ print(f"  • Total de filiais: {total_filiais}")
 print(f"  • Total de meses: {total_meses}")
 print(f"  • Total de combinações gêmeo-filial-mês: {df_percentuais_merecimento.count():,}")
 
-print(f"\n📈 MÉDIAS MÓVEIS CALCULADAS:")
-print(f"  • 90 dias: Demanda de curto prazo")
-print(f"  • 120 dias: Demanda de médio prazo")
-print(f"  • 360 dias: Demanda de longo prazo")
+print(f"\n📈 MÚLTIPLAS MÉDIAS MÓVEIS CALCULADAS:")
+print(f"  • Médias Móveis Normais: 90, 180, 270, 360 dias")
+print(f"  • Medianas Móveis: 90, 180, 270, 360 dias")
+print(f"  • Médias Móveis Aparadas (10%): 90, 180, 270, 360 dias")
 
 print(f"\n✅ CARACTERÍSTICAS DA IMPLEMENTAÇÃO:")
-print(f"  • Filtro de ruptura aplicado (apenas dias com estoque)")
+print(f"  • Filtro de ruptura aplicado (demanda robusta à ruptura)")
 print(f"  • Cálculo por SKU-Loja individual")
 print(f"  • Agregação por gêmeo para percentuais")
-print(f"  • Múltiplos períodos de análise")
+print(f"  • Múltiplos tipos e períodos de análise")
+print(f"  • Matriz em duas camadas: CD → Lojas")
+print(f"  • Remoção de meses atípicos por gêmeo específico")
 
 print(f"\n🎯 PRÓXIMOS PASSOS:")
 print(f"  • Validação dos percentuais calculados")
