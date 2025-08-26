@@ -143,7 +143,7 @@ today_int = int(date.today().strftime("%Y%m%d"))
 
 def build_sales_view(
     spark: SparkSession,
-    start_date: int = 20250101,
+    start_date: int = 20240101,
     end_date: int = today_int,
 ) -> DataFrame:
     """
