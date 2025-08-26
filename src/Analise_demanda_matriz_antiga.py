@@ -716,7 +716,7 @@ fig_scatter.show()
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC #### 11.3.2 Scatter Plot por CD Primário - Análise Detalhada
+# MAGIC #### 11.3.2 Scatter Plot por CD Primário - Análise Detalhada (Ordenado por Erro)
 
 # COMMAND ----------
 # Criar subplots para cada CD primário
@@ -741,30 +741,44 @@ fig_subplots = make_subplots(
 
 # Adicionar scatter plots para cada CD
 for i, cd in enumerate(cds_unicos):
-    df_cd = df_metricas_pd[df_metricas_pd["Cd_primario"] == cd]
+    df_cd = df_metricas_pd[df_metricas_pd["Cd_primario"] == cd].copy()
+    
+    # Ordenar filiais por erro percentual (do menor para o maior)
+    df_cd = df_cd.sort_values("erro_percentual")
+    
+    # Criar índice ordenado para o eixo X
+    df_cd["indice_ordenado"] = range(len(df_cd))
     
     row = (i // cols) + 1
     col = (i % cols) + 1
     
+    # Definir cores baseadas no tipo de erro
+    cores = []
+    for erro in df_cd["erro_percentual"]:
+        if erro < 0:  # Underallocation
+            cores.append("red")
+        elif erro > 0:  # Overallocation
+            cores.append("blue")
+        else:  # Perfeito
+            cores.append("green")
+    
     fig_subplots.add_trace(
         go.Scatter(
-            x=df_cd["CdFilial"],
+            x=df_cd["indice_ordenado"],
             y=df_cd["erro_percentual"],
             mode="markers",
             name=f"CD {cd}",
             marker=dict(
-                size=8,
-                color=df_cd["erro_percentual"],
-                colorscale="RdBu",
-                colorscale_reverse=True,
-                showscale=True,
-                colorbar=dict(title="Erro %")
+                size=10,
+                color=cores,
+                line=dict(width=1, color="black")
             ),
             text=df_cd["CdFilial"].astype(str),
             hovertemplate="<b>Filial: %{text}</b><br>" +
                          "Erro: %{y:.2f}%<br>" +
                          "Modelo: " + df_cd["modelos"] + "<br>" +
                          "Gêmeos: " + df_cd["gemeos"] + "<br>" +
+                         "Posição: %{x}<br>" +
                          "<extra></extra>"
         ),
         row=row, col=col
@@ -774,26 +788,113 @@ for i, cd in enumerate(cds_unicos):
     fig_subplots.add_hline(
         y=0, 
         line_dash="dash", 
-        line_color="red",
+        line_color="black",
+        line_width=2,
         row=row, col=col
     )
+    
+    # Adicionar linhas de tolerância
+    fig_subplots.add_hline(y=5, line_dash="dot", line_color="orange", line_width=1, row=row, col=col)
+    fig_subplots.add_hline(y=-5, line_dash="dot", line_color="orange", line_width=1, row=row, col=col)
 
 # Configurar layout
 fig_subplots.update_layout(
     height=300 * rows,
-    title_text="Distribuição de Erros por CD Primário - Análise Detalhada",
+    title_text="Distribuição de Erros por CD Primário - Filiais Ordenadas por Erro",
     showlegend=False
 )
 
 # Atualizar eixos
-fig_subplots.update_xaxes(title_text="Código da Filial")
+fig_subplots.update_xaxes(title_text="Posição da Filial (Ordenada por Erro)")
 fig_subplots.update_yaxes(title_text="Erro Percentual (%)")
 
 fig_subplots.show()
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC #### 11.3.3 Box Plot - Distribuição de Erros por CD Primário
+# MAGIC #### 11.3.3 Scatter Plot Principal - Filiais Ordenadas por CD e Erro
+
+# COMMAND ----------
+# Preparar dados ordenados para o scatter plot principal
+df_metricas_ordenado = df_metricas_pd.copy()
+
+# Criar índice ordenado por CD primário e erro percentual
+df_metricas_ordenado["indice_ordenado"] = 0
+posicao_atual = 0
+
+for cd in sorted(df_metricas_ordenado["Cd_primario"].unique()):
+    df_cd = df_metricas_ordenado[df_metricas_ordenado["Cd_primario"] == cd].copy()
+    df_cd = df_cd.sort_values("erro_percentual")
+    
+    # Atribuir posições ordenadas
+    for idx, row in df_cd.iterrows():
+        df_metricas_ordenado.loc[idx, "indice_ordenado"] = posicao_atual
+        posicao_atual += 1
+
+# Definir cores baseadas no tipo de erro
+cores_principais = []
+for erro in df_metricas_ordenado["erro_percentual"]:
+    if erro < 0:  # Underallocation
+        cores_principais.append("red")
+    elif erro > 0:  # Overallocation
+        cores_principais.append("blue")
+    else:  # Perfeito
+        cores_principais.append("green")
+
+# Scatter plot principal com filiais ordenadas
+fig_ordenado = px.scatter(
+    df_metricas_ordenado,
+    x="indice_ordenado",
+    y="erro_percentual",
+    color="Cd_primario",
+    hover_data=["CdFilial", "modelos", "gemeos", "NmCidade_UF_primario"],
+    title="Distribuição de Erros por Filial - Ordenadas por CD Primário e Erro Percentual",
+    labels={
+        "indice_ordenado": "Posição da Filial (Ordenada)",
+        "erro_percentual": "Erro Percentual (Demanda Real - Matriz)",
+        "Cd_primario": "CD Primário"
+    },
+    color_discrete_sequence=px.colors.qualitative.Set3
+)
+
+# Atualizar cores dos marcadores para vermelho/azul baseado no erro
+fig_ordenado.update_traces(
+    marker=dict(
+        size=8,
+        color=cores_principais,
+        line=dict(width=1, color="black")
+    )
+)
+
+# Adicionar linha horizontal em y = 0
+fig_ordenado.add_hline(
+    y=0, 
+    line_dash="dash", 
+    line_color="black",
+    line_width=2,
+    annotation_text="Linha de Referência (Sem Erro)"
+)
+
+# Adicionar linhas horizontais para zonas de tolerância
+fig_ordenado.add_hline(y=5, line_dash="dot", line_color="orange", line_width=1, annotation_text="Tolerância +5%")
+fig_ordenado.add_hline(y=-5, line_dash="dot", line_color="orange", line_width=1, annotation_text="Tolerância -5%")
+
+# Configurar layout
+fig_ordenado.update_layout(
+    height=600,
+    showlegend=True,
+    legend_title="CD Primário",
+    xaxis_title="Posição da Filial (Ordenada por CD e Erro)",
+    yaxis_title="Erro Percentual (%)",
+    hovermode="closest"
+)
+
+# Mostrar o gráfico
+fig_ordenado.show()
+
+# COMMAND ----------
+# MAGIC %md
+# MAGIC #### 11.3.4 Box Plot - Distribuição de Erros por CD Primário
 
 # COMMAND ----------
 # Box plot mostrando distribuição de erros por CD primário
