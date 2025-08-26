@@ -812,22 +812,6 @@ df_merecimento_cd_gemeo_final = (
     )
 )
 
-print("✅ CÁLCULO DOS 12 MERECIMENTOS CONCLUÍDO COM SUCESSO:")
-print("=" * 80)
-print(f"📊 Total de combinações CD-gêmeo: {df_merecimento_cd_gemeo_final.count():,}")
-print(f"🏪 Total de CDs únicos: {df_merecimento_cd_gemeo_final.select('Cd_primario').distinct().count()}")
-print(f"🔄 Total de grupos gêmeos: {df_merecimento_cd_gemeo_final.select('gemeos').distinct().count()}")
-
-print("\n📋 MERECIMENTOS CALCULADOS (12 métricas):")
-print("  • Médias móveis: 90, 180, 270, 360 dias")
-print("  • Medianas móveis: 90, 180, 270, 360 dias")
-print("  • Total: 8 colunas de merecimento por CD-gêmeo")
-
-print("\n🎯 INTERPRETAÇÃO:")
-print("  • Cada valor representa o percentual que o CD vai receber do gêmeo")
-print("  • Soma dos percentuais por gêmeo = 100%")
-print("  • Valores maiores = maior alocação para aquele CD")
-
 # Exibição de exemplo
 print("\n🔍 EXEMPLO DOS MERECIMENTOS CALCULADOS:")
 df_merecimento_cd_gemeo_final.limit(5).display()
@@ -867,33 +851,6 @@ df_validacao_merecimento.display()
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ## 9. Desdobramento de merecimento para lojas
-# MAGIC
-# MAGIC
-
-# COMMAND ----------
-
-# Join das medidas de demanda com o mapeamento de filiais para CD
-df_medidas_demanda_com_cd = (
-    df_medidas_centrais_demanda
-    .join(
-        de_para_filial_cd,
-        on="CdFilial",
-        how="left"
-    )
-    .dropna()
-    #.fillna("CD_NAO_MAPEADO", subset=["Cd_primario"])
-)
-
-print("✅ Join realizado entre medidas de demanda e mapeamento de CD:")
-print(f"�� Total de registros após join: {df_medidas_demanda_com_cd.count():,}")
-print(f"🏪 Total de lojas únicas: {df_medidas_demanda_com_cd.select('CdFilial').distinct().count()}")
-print(f"🏢 Total de CDs únicos: {df_medidas_demanda_com_cd.select('Cd_primario').distinct().count()}")
-
-
-# COMMAND ----------
-
 # Join das medidas de demanda com o merecimento CD-gêmeo
 df_demanda_com_merecimento_cd = (
     df_medidas_demanda_com_cd
@@ -908,8 +865,213 @@ df_demanda_com_merecimento_cd = (
     ])
 )
 
-# print("✅ Join realizado entre medidas de demanda e merecimento CD-gêmeo:")
-# print(f"�� Total de registros após join: {df_demanda_com_merecimento_cd.count():,}")
-# print(f"🏪 Total de lojas únicas: {df_demanda_com_merecimento_cd.select('CdFilial').distinct().count()}")
-# print(f"🔄 Total de grupos gêmeos: {df_demanda_com_merecimento_cd.select('gemeos').distinct().count()}")
+df_demanda_com_merecimento_cd.limit(5).display()
 
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 9. Desdobramento de merecimento para lojas
+# MAGIC
+# MAGIC
+
+# COMMAND ----------
+
+
+# Janela 1: Para cálculo de totais por CD-gêmeo (denominador da proporção interna)
+w_cd_gemeo = Window.partitionBy("Cd_primario", "gemeos")
+
+# Janela 2: Para cálculo de totais por gêmeo-filial (contexto e validação)
+w_gemeo_filial = Window.partitionBy("gemeos", "CdFilial")
+
+
+# Agregação por gêmeo-filial para consolidar as demandas
+df_demanda_agregada_gemeo_filial = (
+    df_demanda_com_merecimento_cd
+    .groupBy("CdFilial", "Cd_primario", "gemeos")
+    .agg(
+        # Soma das métricas de demanda por gêmeo-filial
+        F.sum("Media90_Qt_venda_sem_ruptura").alias("Media90_Qt_venda_sem_ruptura"),
+        F.sum("Media180_Qt_venda_sem_ruptura").alias("Media180_Qt_venda_sem_ruptura"),
+        F.sum("Media270_Qt_venda_sem_ruptura").alias("Media270_Qt_venda_sem_ruptura"),
+        F.sum("Media360_Qt_venda_sem_ruptura").alias("Media360_Qt_venda_sem_ruptura"),
+        F.sum("Mediana90_Qt_venda_sem_ruptura").alias("Mediana90_Qt_venda_sem_ruptura"),
+        F.sum("Mediana180_Qt_venda_sem_ruptura").alias("Mediana180_Qt_venda_sem_ruptura"),
+        F.sum("Mediana270_Qt_venda_sem_ruptura").alias("Mediana270_Qt_venda_sem_ruptura"),
+        F.sum("Mediana360_Qt_venda_sem_ruptura").alias("Mediana360_Qt_venda_sem_ruptura"),
+        # Contadores para contexto
+        F.countDistinct("CdSku").alias("qtd_skus_gemeo_filial"),
+        F.sum("QtMercadoria").alias("QtMercadoria_total_gemeo_filial"),
+        F.sum("Receita").alias("Receita_total_gemeo_filial")
+    )
+    .fillna(0, subset=[
+        "Media90_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura",
+        "Media270_Qt_venda_sem_ruptura", "Media360_Qt_venda_sem_ruptura",
+        "Mediana90_Qt_venda_sem_ruptura", "Mediana180_Qt_venda_sem_ruptura",
+        "Mediana270_Qt_venda_sem_ruptura", "Mediana360_Qt_venda_sem_ruptura"
+    ])
+)
+
+# Cálculo dos totais necessários para as proporções internas
+df_com_totais_cd_gemeo = (
+    df_medidas_demanda_com_cd
+    .withColumn(
+        # Totais por CD-gêmeo (para proporção interna)
+        "total_demanda_cd_gemeo_Media90",
+        F.sum("Media90_Qt_venda_sem_ruptura").over(w_cd_gemeo)
+    )
+    .withColumn(
+        "total_demanda_cd_gemeo_Media180",
+        F.sum("Media180_Qt_venda_sem_ruptura").over(w_cd_gemeo)
+    )
+    .withColumn(
+        "total_demanda_cd_gemeo_Media270",
+        F.sum("Media270_Qt_venda_sem_ruptura").over(w_cd_gemeo)
+    )
+    .withColumn(
+        "total_demanda_cd_gemeo_Media360",
+        F.sum("Media360_Qt_venda_sem_ruptura").over(w_cd_gemeo)
+    )
+    .withColumn(
+        "total_demanda_cd_gemeo_Mediana90",
+        F.sum("Mediana90_Qt_venda_sem_ruptura").over(w_cd_gemeo)
+    )
+    .withColumn(
+        "total_demanda_cd_gemeo_Mediana180",
+        F.sum("Mediana180_Qt_venda_sem_ruptura").over(w_cd_gemeo)
+    )
+    .withColumn(
+        "total_demanda_cd_gemeo_Mediana270",
+        F.sum("Mediana270_Qt_venda_sem_ruptura").over(w_cd_gemeo)
+    )
+    .withColumn(
+        "total_demanda_cd_gemeo_Mediana360",
+        F.sum("Mediana360_Qt_venda_sem_ruptura").over(w_cd_gemeo)
+    )
+    .withColumn(
+        # Totais por gêmeo-filial (para contexto e validação)
+        "total_demanda_gemeo_filial_Media90",
+        F.sum("Media90_Qt_venda_sem_ruptura").over(w_gemeo_filial)
+    )
+    .withColumn(
+        "total_demanda_gemeo_filial_Media180",
+        F.sum("Media180_Qt_venda_sem_ruptura").over(w_gemeo_filial)
+    )
+    .withColumn(
+        "total_demanda_gemeo_filial_Media270",
+        F.sum("Media270_Qt_venda_sem_ruptura").over(w_gemeo_filial)
+    )
+    .withColumn(
+        "total_demanda_gemeo_filial_Media360",
+        F.sum("Media360_Qt_venda_sem_ruptura").over(w_gemeo_filial)
+    )
+    .withColumn(
+        "total_demanda_gemeo_filial_Mediana90",
+        F.sum("Mediana90_Qt_venda_sem_ruptura").over(w_gemeo_filial)
+    )
+    .withColumn(
+        "total_demanda_gemeo_filial_Mediana180",
+        F.sum("Mediana180_Qt_venda_sem_ruptura").over(w_gemeo_filial)
+    )
+    .withColumn(
+        "total_demanda_gemeo_filial_Mediana270",
+        F.sum("Mediana270_Qt_venda_sem_ruptura").over(w_gemeo_filial)
+    )
+    .withColumn(
+        "total_demanda_gemeo_filial_Mediana360",
+        F.sum("Mediana360_Qt_venda_sem_ruptura").over(w_gemeo_filial)
+    )
+)
+
+
+# COMMAND ----------
+
+# Cálculo das proporções internas (evitando divisão por zero)
+df_proporcoes_internas = (
+    df_com_totais_cd_gemeo
+    .withColumn(
+        "ProporcaoInterna_Media90",
+        F.when(F.col("total_demanda_cd_gemeo_Media90") > 0,
+               F.round(F.col("Media90_Qt_venda_sem_ruptura") / F.col("total_demanda_cd_gemeo_Media90"), 6)
+        ).otherwise(F.lit(0))
+    )
+    .withColumn(
+        "ProporcaoInterna_Media180",
+        F.when(F.col("total_demanda_cd_gemeo_Media180") > 0,
+               F.round(F.col("Media180_Qt_venda_sem_ruptura") / F.col("total_demanda_cd_gemeo_Media180"), 6)
+        ).otherwise(F.lit(0))
+    )
+    .withColumn(
+        "ProporcaoInterna_Media270",
+        F.when(F.col("total_demanda_cd_gemeo_Media270") > 0,
+               F.round(F.col("Media270_Qt_venda_sem_ruptura") / F.col("total_demanda_cd_gemeo_Media270"), 6)
+        ).otherwise(F.lit(0))
+    )
+    .withColumn(
+        "ProporcaoInterna_Media360",
+        F.when(F.col("total_demanda_cd_gemeo_Media360") > 0,
+               F.round(F.col("Media360_Qt_venda_sem_ruptura") / F.col("total_demanda_cd_gemeo_Media360"), 6)
+        ).otherwise(F.lit(0))
+    )
+    .withColumn(
+        "ProporcaoInterna_Mediana90",
+        F.when(F.col("total_demanda_cd_gemeo_Mediana90") > 0,
+               F.round(F.col("Mediana90_Qt_venda_sem_ruptura") / F.col("total_demanda_cd_gemeo_Mediana90"), 6)
+        ).otherwise(F.lit(0))
+    )
+    .withColumn(
+        "ProporcaoInterna_Mediana180",
+        F.when(F.col("total_demanda_cd_gemeo_Mediana180") > 0,
+               F.round(F.col("Mediana180_Qt_venda_sem_ruptura") / F.col("total_demanda_cd_gemeo_Mediana180"), 6)
+        ).otherwise(F.lit(0))
+    )
+    .withColumn(
+        "ProporcaoInterna_Mediana270",
+        F.when(F.col("total_demanda_cd_gemeo_Mediana270") > 0,
+               F.round(F.col("Mediana270_Qt_venda_sem_ruptura") / F.col("total_demanda_cd_gemeo_Mediana270"), 6)
+        ).otherwise(F.lit(0))
+    )
+    .withColumn(
+        "ProporcaoInterna_Mediana360",
+        F.when(F.col("total_demanda_cd_gemeo_Mediana360") > 0,
+               F.round(F.col("Mediana360_Qt_venda_sem_ruptura") / F.col("total_demanda_cd_gemeo_Mediana360"), 6)
+        ).otherwise(F.lit(0))
+    )
+)
+
+# COMMAND ----------
+
+df_merecimento_final_filial_gemeo = (
+    df_proporcoes_internas
+    .withColumn(
+        "MerecimentoFinal_Media90",
+        F.round(F.col("Merecimento_Media90") * F.col("ProporcaoInterna_Media90"), 6)
+    )
+    .withColumn(
+        "MerecimentoFinal_Media180",
+        F.round(F.col("Merecimento_Media180") * F.col("ProporcaoInterna_Media180"), 6)
+    )
+    .withColumn(
+        "MerecimentoFinal_Media270",
+        F.round(F.col("Merecimento_Media270") * F.col("ProporcaoInterna_Media270"), 6)
+    )
+    .withColumn(
+        "MerecimentoFinal_Media360",
+        F.round(F.col("Merecimento_Media360") * F.col("ProporcaoInterna_Media360"), 6)
+    )
+    .withColumn(
+        "MerecimentoFinal_Mediana90",
+        F.round(F.col("Merecimento_Mediana90") * F.col("ProporcaoInterna_Mediana90"), 6)
+    )
+    .withColumn(
+        "MerecimentoFinal_Mediana180",
+        F.round(F.col("Merecimento_Mediana180") * F.col("ProporcaoInterna_Mediana180"), 6)
+    )
+    .withColumn(
+        "MerecimentoFinal_Mediana270",
+        F.round(F.col("Merecimento_Mediana270") * F.col("ProporcaoInterna_Mediana270"), 6)
+    )
+    .withColumn(
+        "MerecimentoFinal_Mediana360",
+        F.round(F.col("Merecimento_Mediana360") * F.col("ProporcaoInterna_Mediana360"), 6)
+    )
+)

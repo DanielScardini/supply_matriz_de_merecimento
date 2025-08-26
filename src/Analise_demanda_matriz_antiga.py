@@ -400,6 +400,10 @@ print("Distribuição da matriz por tipo de filial:")
 
 # COMMAND ----------
 
+df_matriz_telefonia.count()
+
+# COMMAND ----------
+
 df_matriz_telefonia_metricas = (
     df_matriz_telefonia
     .join(
