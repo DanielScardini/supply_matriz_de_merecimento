@@ -1445,4 +1445,282 @@ print(f"  • Implementação no sistema")
 print(f"\n✅ Notebook de cálculo da matriz de merecimento concluído!")
 print(f"🎯 Matriz pronta para uso com percentuais baseados em médias móveis!")
 
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 13. Implementação da Matriz de Merecimento Corrigida
+# MAGIC
+# MAGIC %md
+# MAGIC Implementamos a matriz de merecimento em duas camadas usando a métrica selecionada
+# MAGIC consistentemente em todo o cálculo.
+
+# COMMAND ----------
+
+# Definição dos métodos de medida central
+METODOS_MEDIDA_CENTRAL = {
+    # Médias Móveis Normais
+    "media90_normal": {
+        "nome": "Média Móvel 90 Dias Normal",
+        "coluna_demanda": "Media90_Qt_venda_estq"
+    },
+    "media180_normal": {
+        "nome": "Média Móvel 180 Dias Normal", 
+        "coluna_demanda": "Media180_Qt_venda_estq"
+    },
+    "media270_normal": {
+        "nome": "Média Móvel 270 Dias Normal",
+        "coluna_demanda": "Media270_Qt_venda_estq"
+    },
+    "media360_normal": {
+        "nome": "Média Móvel 360 Dias Normal",
+        "coluna_demanda": "Media360_Qt_venda_estq"
+    },
+    
+    # Medianas Móveis
+    "mediana90": {
+        "nome": "Mediana Móvel 90 Dias",
+        "coluna_demanda": "Mediana90_Qt_venda_estq"
+    },
+    "mediana180": {
+        "nome": "Mediana Móvel 180 Dias",
+        "coluna_demanda": "Mediana180_Qt_venda_estq"
+    },
+    "mediana270": {
+        "nome": "Mediana Móvel 270 Dias",
+        "coluna_demanda": "Mediana270_Qt_venda_estq"
+    },
+    "mediana360": {
+        "nome": "Mediana Móvel 360 Dias",
+        "coluna_demanda": "Mediana360_Qt_venda_estq"
+    },
+    
+    # Médias Móveis Aparadas (10%)
+    "mediaAparada90": {
+        "nome": "Média Móvel Aparada 90 Dias (10%)",
+        "coluna_demanda": "MediaAparada90_Qt_venda_estq"
+    },
+    "mediaAparada180": {
+        "nome": "Média Móvel Aparada 180 Dias (10%)",
+        "coluna_demanda": "MediaAparada180_Qt_venda_estq"
+    },
+    "mediaAparada270": {
+        "nome": "Média Móvel Aparada 270 Dias (10%)",
+        "coluna_demanda": "MediaAparada270_Qt_venda_estq"
+    },
+    "mediaAparada360": {
+        "nome": "Média Móvel Aparada 360 Dias (10%)",
+        "coluna_demanda": "MediaAparada360_Qt_venda_estq"
+    }
+}
+
+# COMMAND ----------
+
+def calcular_matriz_merecimento_metodo(metodo_config, df_dados_filtrados, data_referencia="2025-06-30"):
+    coluna_demanda = metodo_config["coluna_demanda"]
+    
+    # PRIMEIRA CAMADA: Gêmeo → CD (merecimento do CD no gêmeo)
+    df_matriz_gemeo_cd = (
+        df_dados_filtrados
+        .filter(~F.col("NmEspecieGerencial").contains("CHIP"))
+        .filter(F.col("DtAtual") == data_referencia)
+        .groupBy("gemeos", "Cd_primario")
+        .agg(
+            F.sum(coluna_demanda).alias("Demanda_total_cd"),                # Demanda total do CD
+            F.countDistinct("CdSku").alias("qtd_skus_cd"),                  # SKUs únicos
+            F.countDistinct("CdFilial").alias("qtd_filiais_cd")             # Filiais únicas
+        )
+    )
+    
+    # Janela para cálculo de totais por gêmeo
+    w_gemeo = Window.partitionBy("gemeos")
+    
+    # Cálculo do merecimento do CD no gêmeo
+    df_matriz_com_totais_gemeo = (
+        df_matriz_gemeo_cd
+        .withColumn(
+            "total_demanda_gemeo",
+            F.sum("Demanda_total_cd").over(w_gemeo)
+        )
+        .withColumn(
+            "pct_merecimento_cd_no_gemeo",
+            F.when(F.col("total_demanda_gemeo") > 0,
+                   F.col("Demanda_total_cd") / F.col("total_demanda_gemeo"))
+             .otherwise(F.lit(0.0))
+        )
+        .withColumn(
+            "pct_merecimento_cd_no_gemeo_perc",
+            F.round(F.col("pct_merecimento_cd_no_gemeo") * 100, 4)
+        )
+    )
+    
+    # SEGUNDA CAMADA: CD → Filiais (merecimento de cada filial no CD para cada gêmeo)
+    # Agregação por gêmeo, CD e filial para calcular demanda por filial
+    df_demanda_por_filial = (
+        df_dados_filtrados
+        .filter(~F.col("NmEspecieGerencial").contains("CHIP"))
+        .filter(F.col("DtAtual") == data_referencia)
+        .groupBy("gemeos", "Cd_primario", "CdFilial")
+        .agg(
+            F.sum(coluna_demanda).alias("Demanda_filial"),  # Usa a mesma métrica
+            F.countDistinct("CdSku").alias("qtd_skus_filial")
+        )
+    )
+    
+    # Janela para cálculo de totais por CD (dentro de cada gêmeo)
+    w_cd_gemeo = Window.partitionBy("gemeos", "Cd_primario")
+    
+    # Cálculo do merecimento da filial no CD
+    df_merecimento_filial_cd = (
+        df_demanda_por_filial
+        .withColumn(
+            "total_demanda_cd_gemeo",
+            F.sum("Demanda_filial").over(w_cd_gemeo)
+        )
+        .withColumn(
+            "pct_merecimento_filial_no_cd",
+            F.when(F.col("total_demanda_cd_gemeo") > 0,
+                   F.col("Demanda_filial") / F.col("total_demanda_cd_gemeo"))
+             .otherwise(F.lit(0.0))
+        )
+        .withColumn(
+            "pct_merecimento_filial_no_cd_perc",
+            F.round(F.col("pct_merecimento_filial_no_cd") * 100, 4)
+        )
+    )
+    
+    # Join das duas camadas para matriz final
+    df_matriz_final = (
+        df_merecimento_filial_cd
+        .join(
+            df_matriz_com_totais_gemeo.select(
+                "gemeos", "Cd_primario", 
+                "Demanda_total_cd",
+                "total_demanda_gemeo", "pct_merecimento_cd_no_gemeo", "pct_merecimento_cd_no_gemeo_perc",
+                "qtd_skus_cd", "qtd_filiais_cd"
+            ),
+            on=["gemeos", "Cd_primario"],
+            how="inner"
+        )
+        .withColumn(
+            "Demanda_alocada_filial",
+            F.round(F.col("Demanda_total_cd") * F.col("pct_merecimento_filial_no_cd"), 0)
+        )
+        .withColumn(
+            "data_referencia",
+            F.lit(data_referencia)
+        )
+        .withColumn(
+            "metodo_calculo",
+            F.lit(metodo_config["nome"])
+        )
+        .select(
+            "gemeos", "CdFilial", "Cd_primario",
+            "Demanda_total_cd",
+            "total_demanda_gemeo", "pct_merecimento_cd_no_gemeo", "pct_merecimento_cd_no_gemeo_perc",
+            "Demanda_filial",
+            "total_demanda_cd_gemeo", "pct_merecimento_filial_no_cd", "pct_merecimento_filial_no_cd_perc",
+            "Demanda_alocada_filial",
+            "qtd_skus_cd", "qtd_filiais_cd", "qtd_skus_filial",
+            "data_referencia", "metodo_calculo"
+        )
+    )
+    
+    return df_matriz_final
+
+# COMMAND ----------
+
+# Data de referência: último dia de 2025-06
+DATA_REFERENCIA = "2025-06-30"
+
+# Dicionário para armazenar todas as matrizes
+matrizes_merecimento = {}
+
+# Calcula uma matriz para cada método
+for metodo_id, metodo_config in METODOS_MEDIDA_CENTRAL.items():
+    print(f"🔄 Calculando matriz para: {metodo_config['nome']}")
+    print(f"📅 Data de referência: {DATA_REFERENCIA}")
+    
+    matriz_resultado = calcular_matriz_merecimento_metodo(
+        metodo_config, 
+        df_vendas_estoque_sem_outliers,
+        DATA_REFERENCIA
+    )
+    
+    matrizes_merecimento[metodo_id] = matriz_resultado
+    
+    print(f"✅ Matriz {metodo_id} calculada: {matriz_resultado.count():,} registros")
+
+print(f"\n🎯 Total de matrizes geradas para {DATA_REFERENCIA}: {len(matrizes_merecimento)}")
+
+# COMMAND ----------
+
+# Resumo de cada matriz
+for metodo_id, matriz in matrizes_merecimento.items():
+    print(f"\n📊 MATRIZ: {metodo_id}")
+    print(f"📈 Métrica usada: {matriz.select('metodo_calculo').first()[0]}")
+    print(f"📅 Data de referência: {matriz.select('data_referencia').first()[0]}")
+    print(f"📊 Total de registros: {matriz.count():,}")
+    print(f"🏢 CDs únicos: {matriz.select('Cd_primario').distinct().count()}")
+    print(f"🏪 Filiais únicas: {matriz.select('CdFilial').distinct().count()}")
+    print(f"🔄 Gêmeos únicos: {matriz.select('gemeos').distinct().count()}")
+    
+    stats_merecimento = matriz.agg(
+        F.round(F.avg("pct_merecimento_cd_no_gemeo_perc"), 4).alias("media_merecimento_cd"),
+        F.round(F.stddev("pct_merecimento_cd_no_gemeo_perc"), 4).alias("desvio_merecimento_cd"),
+        F.round(F.min("pct_merecimento_cd_no_gemeo_perc"), 4).alias("min_merecimento_cd"),
+        F.round(F.max("pct_merecimento_cd_no_gemeo_perc"), 4).alias("max_merecimento_cd")
+    ).collect()[0]
+    
+    print(f"�� Estatísticas de merecimento por CD:")
+    print(f"  • Média: {stats_merecimento['media_merecimento_cd']}%")
+    print(f"  • Desvio: {stats_merecimento['desvio_merecimento_cd']}%")
+    print(f"  • Min: {stats_merecimento['min_merecimento_cd']}%")
+    print(f"  • Max: {stats_merecimento['max_merecimento_cd']}%")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 14. Resumo Final - Matriz de Merecimento Implementada
+# MAGIC
+# MAGIC %md
+# MAGIC A matriz de merecimento foi implementada com sucesso usando a métrica selecionada
+# MAGIC consistentemente em duas camadas.
+
+# COMMAND ----------
+
+# Estatísticas finais
+total_gemeos = list(matrizes_merecimento.values())[0].select("gemeos").distinct().count()
+total_cds = list(matrizes_merecimento.values())[0].select("Cd_primario").distinct().count()
+total_filiais = list(matrizes_merecimento.values())[0].select("CdFilial").distinct().count()
+
+print("🎯 MATRIZ DE MERECIMENTO IMPLEMENTADA COM SUCESSO!")
+print("=" * 80)
+
+print(f"\n📊 COBERTURA DA MATRIZ:")
+print(f"  • Total de grupos gêmeos: {total_gemeos}")
+print(f"  • Total de CDs primários: {total_cds}")
+print(f"  • Total de filiais: {total_filiais}")
+print(f"  • Total de matrizes geradas: {len(matrizes_merecimento)}")
+
+print(f"\n🏗️  ARQUITETURA EM DUAS CAMADAS:")
+print(f"  • Camada 1: Matriz a nível gêmeo-CD")
+print(f"  • Camada 2: Distribuição interna ao CD para as lojas")
+
+print(f"\n✅ CARACTERÍSTICAS DA IMPLEMENTAÇÃO:")
+print(f"  • Métrica selecionada usada consistentemente nas duas camadas")
+print(f"  • Agrupamento por gêmeo-CD (sem year_month)")
+print(f"  • Data de referência fixa: {DATA_REFERENCIA}")
+print(f"  • M matrizes independentes para diferentes métodos")
+print(f"  • Cálculo de merecimento por CD dentro de cada gêmeo")
+print(f"  • Distribuição proporcional entre filiais do mesmo CD")
+
+print(f"\n🎯 PRÓXIMOS PASSOS:")
+print(f"  • Validação dos percentuais calculados")
+print(f"  • Comparação entre diferentes métodos")
+print(f"  • Exportação das matrizes para uso")
+print(f"  • Implementação no sistema")
+
+print(f"\n✅ Notebook de cálculo da matriz de merecimento concluído!")
+print(f"🎯 Matriz pronta para uso com percentuais baseados na métrica selecionada!")
+
 
