@@ -102,6 +102,74 @@ A nova ferramenta traz **maior robustez e melhor governança** através de:
 - **Agendamento**: Automação de rodadas de cálculo
 - **Alertas**: Sistema de notificações para anomalias
 
+## Métricas de Avaliação da Matriz de Merecimento
+
+### Visão Geral
+
+Implementamos um sistema robusto de métricas para avaliar a qualidade das alocações da matriz de merecimento, permitindo comparação entre valores previstos e reais de demanda.
+
+### Métricas Implementadas
+
+#### 🔍 **wMAPE (Weighted Mean Absolute Percentage Error)**
+- **Descrição**: Erro percentual absoluto ponderado pelo volume
+- **Interpretação**: Quanto menor, melhor a precisão da matriz
+- **Escala**: < 10% = Excelente, 10-20% = Bom, > 20% = Precisa melhorar
+
+#### 🔍 **SE (Share Error)**
+- **Descrição**: Erro na distribuição de participações entre filiais
+- **Interpretação**: Quanto menor, melhor a distribuição
+- **Escala**: < 5 pp = Excelente, 5-10 pp = Bom, > 10 pp = Precisa melhorar
+
+#### 🔍 **Cross Entropy**
+- **Descrição**: Medida de divergência entre distribuições reais e previstas
+- **Interpretação**: Quanto menor, mais similares as distribuições
+- **Escala**: < 0.1 = Excelente, 0.1-0.3 = Bom, > 0.3 = Precisa melhorar
+
+#### 🔍 **KL Divergence**
+- **Descrição**: Divergência de Kullback-Leibler para comparação de distribuições
+- **Interpretação**: Quanto menor, mais similares as distribuições
+- **Escala**: < 0.1 = Excelente, 0.1-0.3 = Bom, > 0.3 = Precisa melhorar
+
+### Funcionalidades do Sistema de Métricas
+
+#### 📊 **Cálculo Automático**
+- Métricas calculadas para todas as 8 abordagens de demanda (4 médias + 4 medianas)
+- Agregação por diferentes níveis: global, CD, gêmeo, CD-gêmeo
+- Validação automática de dados antes do cálculo
+
+#### 📈 **Análise Comparativa**
+- Comparação entre diferentes métodos de cálculo de demanda
+- Ranking de performance por CD e gêmeo
+- Identificação de oportunidades de melhoria
+
+#### 📋 **Resumos Estatísticos**
+- Estatísticas descritivas das métricas (média, desvio padrão, min, max, mediana)
+- Agrupamento por diferentes dimensões de análise
+- Exportação para tabelas Delta para análise posterior
+
+### Arquivos de Implementação
+
+- **`metricas_matriz_merecimento.py`**: Módulo principal com todas as funções de métricas
+- **`exemplo_uso_metricas.py`**: Notebook de demonstração com exemplos práticos
+- **`calculo_matriz_de_merecimento.py`**: Integração das métricas no cálculo principal
+
+### Uso das Métricas
+
+#### 🔧 **Implementação Automática**
+As métricas são calculadas automaticamente após o cálculo da matriz de merecimento, comparando:
+- **Valores previstos**: Merecimentos calculados pela matriz
+- **Valores reais**: Demandas observadas (médias móveis e medianas)
+
+#### 📊 **Análise e Monitoramento**
+- **Monitoramento contínuo**: Cálculo regular das métricas para acompanhamento da evolução
+- **Análise por segmento**: Identificação de padrões por CD, gêmeo, região
+- **Ações corretivas**: Uso dos resultados para otimização da matriz
+
+#### 🎯 **Benefícios para o Negócio**
+- **Qualidade da matriz**: Avaliação objetiva da precisão das alocações
+- **Identificação de gaps**: Detecção de problemas específicos por segmento
+- **Otimização contínua**: Base para melhorias iterativas da matriz
+
 ## Estrutura do Projeto
 
 ```

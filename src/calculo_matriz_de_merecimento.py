@@ -902,3 +902,238 @@ df_merecimento_final_filial_gemeo = (
     .withColumn("MerecimentoFinal_Mediana270", F.round(F.col("Merecimento_Mediana270") * F.col("ProporcaoInterna_Mediana270"), 6))
     .withColumn("MerecimentoFinal_Mediana360", F.round(F.col("Merecimento_Mediana360") * F.col("ProporcaoInterna_Mediana360"), 6))
 )
+
+print("✅ Matriz de merecimento final calculada com sucesso!")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 10. Cálculo e Avaliação das Métricas da Matriz de Merecimento
+# MAGIC
+# MAGIC Nesta etapa, calculamos métricas robustas para avaliar a qualidade das alocações
+# MAGIC da matriz de merecimento calculada, comparando com dados reais de demanda.
+# MAGIC
+# MAGIC **Métricas Calculadas:**
+# MAGIC - **wMAPE**: Weighted Mean Absolute Percentage Error ponderado por volume
+# MAGIC - **SE (Share Error)**: Erro na distribuição de participações entre filiais
+# MAGIC - **Cross Entropy**: Medida de divergência entre distribuições reais e previstas
+# MAGIC - **KL Divergence**: Divergência de Kullback-Leibler para comparação
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 10.1 Importação das Funções de Métricas
+# MAGIC
+# MAGIC Importamos as funções de métricas para avaliação da matriz de merecimento.
+
+# COMMAND ----------
+
+# Importação das funções de métricas
+from metricas_matriz_merecimento import (
+    add_allocation_metrics,
+    calculate_line_metrics,
+    validate_metrics_data,
+    generate_metrics_summary
+)
+
+print("✅ Funções de métricas importadas com sucesso!")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 10.2 Preparação dos Dados para Cálculo de Métricas
+# MAGIC
+# MAGIC Preparamos os dados para comparação entre a matriz calculada e dados reais de demanda.
+
+# COMMAND ----------
+
+# Preparação dos dados para cálculo de métricas
+# Vamos usar as médias móveis como proxy de demanda real para comparação
+df_para_metricas = (
+    df_merecimento_final_filial_gemeo
+    .select(
+        "CdFilial", "Cd_primario", "gemeos",
+        # Merecimentos calculados (valores previstos)
+        "MerecimentoFinal_Media90", "MerecimentoFinal_Media180", 
+        "MerecimentoFinal_Media270", "MerecimentoFinal_Media360",
+        "MerecimentoFinal_Mediana90", "MerecimentoFinal_Mediana180",
+        "MerecimentoFinal_Mediana270", "MerecimentoFinal_Mediana360"
+    )
+    .join(
+        df_medidas_demanda_com_cd.select(
+            "CdFilial", "Cd_primario", "gemeos",
+            # Demandas reais (valores observados)
+            "Media90_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura",
+            "Media270_Qt_venda_sem_ruptura", "Media360_Qt_venda_sem_ruptura",
+            "Mediana90_Qt_venda_sem_ruptura", "Mediana180_Qt_venda_sem_ruptura",
+            "Mediana270_Qt_venda_sem_ruptura", "Mediana360_Qt_venda_sem_ruptura"
+        ),
+        on=["CdFilial", "Cd_primario", "gemeos"],
+        how="inner"
+    )
+    .fillna(0)
+)
+
+print("✅ Dados preparados para cálculo de métricas:")
+print(f"  • Total de registros: {df_para_metricas.count()}")
+print(f"  • Colunas disponíveis: {', '.join(df_para_metricas.columns)}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 10.3 Cálculo das Métricas por Métrica de Demanda
+# MAGIC
+# MAGIC Calculamos as métricas para cada uma das 8 métricas de demanda (4 médias + 4 medianas).
+
+# COMMAND ----------
+
+# Lista de métricas para análise
+metricas_analise = [
+    ("Media90", "MerecimentoFinal_Media90", "Media90_Qt_venda_sem_ruptura"),
+    ("Media180", "MerecimentoFinal_Media180", "Media180_Qt_venda_sem_ruptura"),
+    ("Media270", "MerecimentoFinal_Media270", "Media270_Qt_venda_sem_ruptura"),
+    ("Media360", "MerecimentoFinal_Media360", "Media360_Qt_venda_sem_ruptura"),
+    ("Mediana90", "MerecimentoFinal_Mediana90", "Mediana90_Qt_venda_sem_ruptura"),
+    ("Mediana180", "MerecimentoFinal_Mediana180", "Mediana180_Qt_venda_sem_ruptura"),
+    ("Mediana270", "MerecimentoFinal_Mediana270", "Mediana270_Qt_venda_sem_ruptura"),
+    ("Mediana360", "MerecimentoFinal_Mediana360", "Mediana360_Qt_venda_sem_ruptura")
+]
+
+# Dicionário para armazenar resultados das métricas
+resultados_metricas = {}
+
+print("📊 CALCULANDO MÉTRICAS PARA CADA ABORDAGEM DE DEMANDA:")
+print("=" * 80)
+
+for nome_metrica, col_merecimento, col_demanda in metricas_analise:
+    print(f"\n🔍 Calculando métricas para: {nome_metrica}")
+    
+    try:
+        # Validar dados para esta métrica
+        df_metrica = df_para_metricas.select(
+            "CdFilial", "Cd_primario", "gemeos", col_merecimento, col_demanda
+        ).filter(F.col(col_demanda) > 0)  # Filtrar apenas registros com demanda > 0
+        
+        is_valid, message = validate_metrics_data(
+            df_metrica,
+            y_col=col_demanda,
+            yhat_col=col_merecimento
+        )
+        
+        if is_valid:
+            # Calcular métricas agregadas
+            df_metrics_agg = add_allocation_metrics(
+                df=df_metrica,
+                y_col=col_demanda,
+                yhat_col=col_merecimento,
+                group_cols=["Cd_primario", "gemeos"]
+            )
+            
+            # Calcular métricas linha a linha
+            df_metrics_line = calculate_line_metrics(
+                df=df_metrica,
+                y_col=col_demanda,
+                yhat_col=col_merecimento,
+                group_cols=["Cd_primario", "gemeos"]
+            )
+            
+            # Armazenar resultados
+            resultados_metricas[nome_metrica] = {
+                "agregadas": df_metrics_agg,
+                "linha_linha": df_metrics_line,
+                "total_registros": df_metrica.count()
+            }
+            
+            print(f"  ✅ {nome_metrica}: {df_metrica.count()} registros processados")
+            
+            # Mostrar resumo das métricas agregadas
+            df_resumo = generate_metrics_summary(df_metrics_agg, group_cols=["Cd_primario"])
+            print(f"  📈 Métricas calculadas para {df_resumo.count()} CDs")
+            
+        else:
+            print(f"  ❌ {nome_metrica}: {message}")
+            
+    except Exception as e:
+        print(f"  ❌ {nome_metrica}: Erro no cálculo - {str(e)}")
+
+print(f"\n✅ Cálculo de métricas concluído para {len(resultados_metricas)} abordagens de demanda")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 10.4 Resumo Geral das Métricas
+# MAGIC
+# MAGIC Apresentamos um resumo geral das métricas calculadas para todas as abordagens.
+
+# COMMAND ----------
+
+print("📋 RESUMO GERAL DAS MÉTRICAS CALCULADAS:")
+print("=" * 80)
+
+for nome_metrica, dados in resultados_metricas.items():
+    print(f"\n🔍 {nome_metrica}:")
+    print(f"  • Total de registros: {dados['total_registros']}")
+    
+    # Resumo das métricas agregadas
+    df_agg = dados['agregadas']
+    if df_agg.count() > 0:
+        # Calcular médias das métricas principais
+        metricas_principais = df_agg.select(
+            F.avg("wMAPE_perc").alias("avg_wMAPE"),
+            F.avg("SE_pp").alias("avg_SE"),
+            F.avg("Cross_entropy").alias("avg_Cross_entropy"),
+            F.avg("KL_divergence").alias("avg_KL")
+        ).collect()[0]
+        
+        print(f"  • wMAPE médio: {metricas_principais['avg_wMAPE']:.2f}%")
+        print(f"  • Share Error médio: {metricas_principais['avg_SE']:.2f} pp")
+        print(f"  • Cross Entropy médio: {metricas_principais['avg_Cross_entropy']:.4f}")
+        print(f"  • KL Divergence médio: {metricas_principais['avg_KL']:.4f}")
+
+print(f"\n✅ Análise de métricas concluída para {len(resultados_metricas)} abordagens de demanda")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 10.5 Exportação dos Resultados das Métricas
+# MAGIC
+# MAGIC Exportamos os resultados das métricas para análise posterior.
+
+# COMMAND ----------
+
+# Exportação dos resultados das métricas
+for nome_metrica, dados in resultados_metricas.items():
+    try:
+        # Exportar métricas agregadas
+        dados['agregadas'].write.mode("overwrite").saveAsTable(
+            f"metricas_matriz_merecimento_{nome_metrica.lower()}_agregadas"
+        )
+        
+        # Exportar métricas linha a linha
+        dados['linha_linha'].write.mode("overwrite").saveAsTable(
+            f"metricas_matriz_merecimento_{nome_metrica.lower()}_linha_linha"
+        )
+        
+        print(f"✅ {nome_metrica}: Métricas exportadas para tabelas Delta")
+        
+    except Exception as e:
+        print(f"❌ {nome_metrica}: Erro na exportação - {str(e)}")
+
+print("\n✅ Exportação das métricas concluída!")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 11. Conclusão
+# MAGIC
+# MAGIC Implementamos com sucesso o cálculo da matriz de merecimento em duas camadas com:
+# MAGIC - **Detecção automática de outliers** por gêmeo específico
+# MAGIC - **Múltiplas abordagens de médias móveis** para demanda robusta
+# MAGIC - **Cálculo de merecimento** a nível CD-gêmeo e distribuição interna
+# MAGIC - **Avaliação completa de métricas** para todas as abordagens de demanda
+# MAGIC
+# MAGIC **Próximos passos recomendados:**
+# MAGIC 1. Analisar as métricas por CD e gêmeo para identificar oportunidades de melhoria
+# MAGIC 2. Comparar performance entre diferentes abordagens de demanda (médias vs. medianas)
+# MAGIC 3. Implementar monitoramento contínuo das métricas para acompanhamento da evolução
+# MAGIC 4. Ajustar parâmetros de outliers conforme necessário para otimização
