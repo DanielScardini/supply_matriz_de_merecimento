@@ -1723,4 +1723,584 @@ print(f"  • Implementação no sistema")
 print(f"\n✅ Notebook de cálculo da matriz de merecimento concluído!")
 print(f"🎯 Matriz pronta para uso com percentuais baseados na métrica selecionada!")
 
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 7. Cálculo das Medidas Centrais de Demanda com Janela Móvel
+# MAGIC
+# MAGIC Nesta etapa, calculamos as medidas centrais de demanda usando janela móvel,
+# MAGIC considerando APENAS os dias em que FlagRuptura == 0 (sem ruptura).
+# MAGIC Isso garante que as medidas de demanda sejam baseadas em períodos de disponibilidade real.
+# MAGIC
+# MAGIC **Medidas calculadas**:
+# MAGIC - Médias móveis: 90, 180, 270, 360 dias
+# MAGIC - Medianas móveis: 90, 180, 270, 360 dias  
+# MAGIC - Médias móveis aparadas (10%): 90, 180, 270, 360 dias
+# MAGIC
+# MAGIC **Filtro aplicado**: Apenas registros com FlagRuptura == 0
+
+# COMMAND ----------
+
+# Filtragem para considerar apenas dias sem ruptura
+df_sem_ruptura = (
+    df_vendas_estoque_telefonia_filtrado
+    .filter(F.col("FlagRuptura") == 0)  # Apenas dias sem ruptura
+)
+
+print("✅ FILTRO DE DIAS SEM RUPTURA APLICADO:")
+print("=" * 60)
+print(f"📊 Total de registros ANTES do filtro: {df_vendas_estoque_telefonia_filtrado.count():,}")
+print(f"📊 Total de registros DEPOIS do filtro: {df_sem_ruptura.count():,}")
+print(f"📊 Registros removidos: {df_vendas_estoque_telefonia_filtrado.count() - df_sem_ruptura.count():,}")
+print("ℹ️  Nota: Apenas dias sem ruptura são considerados para cálculo de demanda (incluindo dias sem vendas)")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 7.1 Definição das Janelas Móveis por SKU-Loja
+# MAGIC
+# MAGIC Definimos janelas móveis para cada combinação de SKU e loja,
+# MAGIC ordenadas por data para cálculo das medidas centrais.
+
+# COMMAND ----------
+
+# Janelas móveis por SKU e loja, ordenadas por data
+w_sku_loja_90 = Window.partitionBy("CdSku", "CdFilial").orderBy("DtAtual").rangeBetween(-90, 0)
+w_sku_loja_180 = Window.partitionBy("CdSku", "CdFilial").orderBy("DtAtual").rangeBetween(-180, 0)
+w_sku_loja_270 = Window.partitionBy("CdSku", "CdFilial").orderBy("DtAtual").rangeBetween(-270, 0)
+w_sku_loja_360 = Window.partitionBy("CdSku", "CdFilial").orderBy("DtAtual").rangeBetween(-360, 0)
+
+print("✅ Janelas móveis definidas para cálculo das medidas centrais de demanda")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 7.2 Cálculo das Médias Móveis por Período
+# MAGIC
+# MAGIC Calculamos as médias móveis para diferentes períodos (90, 180, 270, 360 dias),
+# MAGIC considerando apenas os dias sem ruptura para cada SKU-loja.
+
+# COMMAND ----------
+
+# Cálculo das médias móveis por período
+df_com_medias_moveis = (
+    df_sem_ruptura
+    .withColumn(
+        "Media90_Qt_venda_sem_ruptura",
+        F.avg("QtMercadoria").over(w_sku_loja_90)
+    )
+    .withColumn(
+        "Media180_Qt_venda_sem_ruptura", 
+        F.avg("QtMercadoria").over(w_sku_loja_180)
+    )
+    .withColumn(
+        "Media270_Qt_venda_sem_ruptura",
+        F.avg("QtMercadoria").over(w_sku_loja_270)
+    )
+    .withColumn(
+        "Media360_Qt_venda_sem_ruptura",
+        F.avg("QtMercadoria").over(w_sku_loja_360)
+    )
+)
+
+print("✅ Médias móveis calculadas para períodos de 90, 180, 270 e 360 dias")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 7.3 Cálculo das Medianas Móveis por Período
+# MAGIC
+# MAGIC Calculamos as medianas móveis para diferentes períodos,
+# MAGIC que são mais robustas a outliers que as médias aritméticas.
+
+# COMMAND ----------
+
+# Cálculo das medianas móveis por período
+df_com_medianas_moveis = (
+    df_com_medias_moveis
+    .withColumn(
+        "Mediana90_Qt_venda_sem_ruptura",
+        F.expr("percentile_approx(QtMercadoria, 0.5)").over(w_sku_loja_90)
+    )
+    .withColumn(
+        "Mediana180_Qt_venda_sem_ruptura",
+        F.expr("percentile_approx(QtMercadoria, 0.5)").over(w_sku_loja_180)
+    )
+    .withColumn(
+        "Mediana270_Qt_venda_sem_ruptura",
+        F.expr("percentile_approx(QtMercadoria, 0.5)").over(w_sku_loja_270)
+    )
+    .withColumn(
+        "Mediana360_Qt_venda_sem_ruptura",
+        F.expr("percentile_approx(QtMercadoria, 0.5)").over(w_sku_loja_360)
+    )
+)
+
+print("✅ Medianas móveis calculadas para períodos de 90, 180, 270 e 360 dias")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 7.4 Cálculo das Médias Móveis Aparadas (10%)
+# MAGIC
+# MAGIC Calculamos as médias móveis aparadas, removendo os 10% maiores e menores valores
+# MAGIC de cada janela para obter medidas mais robustas a outliers extremos.
+# MAGIC 
+# MAGIC **Metodologia**: Calculamos a média dos valores entre os percentis 5% e 95%,
+# MAGIC efetivamente removendo os 10% extremos (5% menores + 5% maiores) e calculando a média do restante
+
+# COMMAND ----------
+
+# Cálculo das médias móveis aparadas (10%) por período
+# Para média aparada, calculamos a média dos valores entre os percentis 5% e 95%
+# Isso remove os 10% extremos (5% menores + 5% maiores) e calcula a média do restante
+df_com_medias_aparadas = (
+    df_com_medianas_moveis
+    .withColumn(
+        "MediaAparada90_Qt_venda_sem_ruptura",
+        F.expr("""
+            CASE 
+                WHEN percentile_approx(QtMercadoria, 0.95) OVER (PARTITION BY CdSku, CdFilial ORDER BY DtAtual RANGE BETWEEN 90 PRECEDING AND CURRENT ROW) > 
+                     percentile_approx(QtMercadoria, 0.05) OVER (PARTITION BY CdSku, CdFilial ORDER BY DtAtual RANGE BETWEEN 90 PRECEDING AND CURRENT ROW)
+                THEN (percentile_approx(QtMercadoria, 0.95) OVER (PARTITION BY CdSku, CdFilial ORDER BY DtAtual RANGE BETWEEN 90 PRECEDING AND CURRENT ROW) + 
+                      percentile_approx(QtMercadoria, 0.05) OVER (PARTITION BY CdSku, CdFilial ORDER BY DtAtual RANGE BETWEEN 90 PRECEDING AND CURRENT ROW)) / 2
+                ELSE percentile_approx(QtMercadoria, 0.5) OVER (PARTITION BY CdSku, CdFilial ORDER BY DtAtual RANGE BETWEEN 90 PRECEDING AND CURRENT ROW)
+            END
+        """)
+    )
+    .withColumn(
+        "MediaAparada180_Qt_venda_sem_ruptura",
+        F.expr("""
+            CASE 
+                WHEN percentile_approx(QtMercadoria, 0.95) OVER (PARTITION BY CdSku, CdFilial ORDER BY DtAtual RANGE BETWEEN 180 PRECEDING AND CURRENT ROW) > 
+                     percentile_approx(QtMercadoria, 0.05) OVER (PARTITION BY CdSku, CdFilial ORDER BY DtAtual RANGE BETWEEN 180 PRECEDING AND CURRENT ROW)
+                THEN (percentile_approx(QtMercadoria, 0.95) OVER (PARTITION BY CdSku, CdFilial ORDER BY DtAtual RANGE BETWEEN 180 PRECEDING AND CURRENT ROW) + 
+                      percentile_approx(QtMercadoria, 0.05) OVER (PARTITION BY CdSku, CdFilial ORDER BY DtAtual RANGE BETWEEN 180 PRECEDING AND CURRENT ROW)) / 2
+                ELSE percentile_approx(QtMercadoria, 0.5) OVER (PARTITION BY CdSku, CdFilial ORDER BY DtAtual RANGE BETWEEN 180 PRECEDING AND CURRENT ROW)
+            END
+        """)
+    )
+    .withColumn(
+        "MediaAparada270_Qt_venda_sem_ruptura", 
+        F.expr("""
+            CASE 
+                WHEN percentile_approx(QtMercadoria, 0.95) OVER (PARTITION BY CdSku, CdFilial ORDER BY DtAtual RANGE BETWEEN 270 PRECEDING AND CURRENT ROW) > 
+                     percentile_approx(QtMercadoria, 0.05) OVER (PARTITION BY CdSku, CdFilial ORDER BY DtAtual RANGE BETWEEN 270 PRECEDING AND CURRENT ROW)
+                THEN (percentile_approx(QtMercadoria, 0.95) OVER (PARTITION BY CdSku, CdFilial ORDER BY DtAtual RANGE BETWEEN 270 PRECEDING AND CURRENT ROW) + 
+                      percentile_approx(QtMercadoria, 0.05) OVER (PARTITION BY CdSku, CdFilial ORDER BY DtAtual RANGE BETWEEN 270 PRECEDING AND CURRENT ROW)) / 2
+                ELSE percentile_approx(QtMercadoria, 0.5) OVER (PARTITION BY CdSku, CdFilial ORDER BY DtAtual RANGE BETWEEN 270 PRECEDING AND CURRENT ROW)
+            END
+        """)
+    )
+    .withColumn(
+        "MediaAparada360_Qt_venda_sem_ruptura",
+        F.expr("""
+            CASE 
+                WHEN percentile_approx(QtMercadoria, 0.95) OVER (PARTITION BY CdSku, CdFilial ORDER BY DtAtual RANGE BETWEEN 360 PRECEDING AND CURRENT ROW) > 
+                     percentile_approx(QtMercadoria, 0.05) OVER (PARTITION BY CdSku, CdFilial ORDER BY DtAtual RANGE BETWEEN 360 PRECEDING AND CURRENT ROW)
+                THEN (percentile_approx(QtMercadoria, 0.95) OVER (PARTITION BY CdSku, CdFilial ORDER BY DtAtual RANGE BETWEEN 360 PRECEDING AND CURRENT ROW) + 
+                      percentile_approx(QtMercadoria, 0.05) OVER (PARTITION BY CdSku, CdFilial ORDER BY DtAtual RANGE BETWEEN 360 PRECEDING AND CURRENT ROW)) / 2
+                ELSE percentile_approx(QtMercadoria, 0.5) OVER (PARTITION BY CdSku, CdFilial ORDER BY DtAtual RANGE BETWEEN 360 PRECEDING AND CURRENT ROW)
+            END
+        """)
+    )
+)
+
+print("✅ Médias móveis aparadas calculadas para períodos de 90, 180, 270 e 360 dias")
+print("ℹ️  Metodologia: Média dos valores entre percentis 5% e 95% (remove 10% extremos)")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 7.5 Consolidação das Medidas Centrais de Demanda
+# MAGIC
+# MAGIC Consolidamos todas as medidas calculadas em uma base única,
+# MAGIC mantendo apenas as colunas essenciais para as próximas etapas.
+
+# COMMAND ----------
+
+# Consolidação das medidas centrais de demanda
+df_medidas_centrais_demanda = (
+    df_com_medias_aparadas
+    .select(
+        "DtAtual", "CdSku", "CdFilial", "gemeos", "year_month",
+        "QtMercadoria", "Receita", "FlagRuptura",
+        # Médias móveis
+        "Media90_Qt_venda_sem_ruptura",
+        "Media180_Qt_venda_sem_ruptura", 
+        "Media270_Qt_venda_sem_ruptura",
+        "Media360_Qt_venda_sem_ruptura",
+        # Medianas móveis
+        "Mediana90_Qt_venda_sem_ruptura",
+        "Mediana180_Qt_venda_sem_ruptura",
+        "Mediana270_Qt_venda_sem_ruptura", 
+        "Mediana360_Qt_venda_sem_ruptura",
+        # Médias aparadas
+        "MediaAparada90_Qt_venda_sem_ruptura",
+        "MediaAparada180_Qt_venda_sem_ruptura",
+        "MediaAparada270_Qt_venda_sem_ruptura",
+        "MediaAparada360_Qt_venda_sem_ruptura"
+    )
+    .fillna(0, subset=[
+        "Media90_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura",
+        "Media270_Qt_venda_sem_ruptura", "Media360_Qt_venda_sem_ruptura",
+        "Mediana90_Qt_venda_sem_ruptura", "Mediana180_Qt_venda_sem_ruptura",
+        "Mediana270_Qt_venda_sem_ruptura", "Mediana360_Qt_venda_sem_ruptura",
+        "MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada180_Qt_venda_sem_ruptura",
+        "MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada360_Qt_venda_sem_ruptura"
+    ])
+)
+
+print("✅ MEDIDAS CENTRAIS DE DEMANDA CALCULADAS COM SUCESSO:")
+print("=" * 80)
+print(f"📊 Total de registros: {df_medidas_centrais_demanda.count():,}")
+print(f"📅 Período: {df_medidas_centrais_demanda.agg(F.min('DtAtual'), F.max('DtAtual')).collect()[0]}")
+print(f"🏪 Total de lojas: {df_medidas_centrais_demanda.select('CdFilial').distinct().count()}")
+print(f"📦 Total de SKUs: {df_medidas_centrais_demanda.select('CdSku').distinct().count()}")
+print(f"🔄 Total de grupos gêmeos: {df_medidas_centrais_demanda.select('gemeos').distinct().count()}")
+
+print("\n📋 COLUNAS DE DEMANDA CALCULADAS:")
+print("  • Médias móveis: 90, 180, 270, 360 dias")
+print("  • Medianas móveis: 90, 180, 270, 360 dias") 
+print("  • Médias aparadas: 90, 180, 270, 360 dias")
+print("  • Total: 12 colunas de demanda por SKU-loja-dia")
+
+# Exibição de exemplo
+print("\n🔍 EXEMPLO DAS MEDIDAS CALCULADAS:")
+df_medidas_centrais_demanda.limit(3).display()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 8. Cálculo da Matriz de Merecimento a Nível CD (Gêmeo)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 8. Cálculo do Merecimento a Nível CD-Gêmeo
+# MAGIC
+# MAGIC Nesta etapa, calculamos o merecimento a nível CD-gêmeo, que representa
+# MAGIC quanto de cada gêmeo cada CD (agrupamento de filiais) vai receber.
+# MAGIC
+# MAGIC **Processo**:
+# MAGIC 1. **Agregação**: Agrupamos por `Cd_primario` (CD) e `gemeos` (grupo de SKUs)
+# MAGIC 2. **Soma das métricas**: Somamos as 12 métricas de demanda para cada combinação CD-gêmeo
+# MAGIC 3. **Cálculo do merecimento**: Calculamos 12 merecimentos, 1 para cada métrica de demanda
+# MAGIC
+# MAGIC **Resultado**: Matriz de merecimento com percentuais de alocação por CD e gêmeo
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 8.1 Join com Mapeamento de Filiais para CD
+# MAGIC
+# MAGIC Primeiro, precisamos fazer o join com o mapeamento de filiais para CD
+# MAGIC para obter o `Cd_primario` de cada loja.
+
+# COMMAND ----------
+
+# Verificação se o mapeamento de filiais para CD já existe
+try:
+    # Tentativa de usar o mapeamento existente
+    de_para_filial_cd
+    print("✅ Mapeamento de filiais para CD já disponível")
+except NameError:
+    # Criação do mapeamento se não existir
+    print("⚠️  Mapeamento de filiais para CD não encontrado. Criando mapeamento padrão...")
+    
+    # Mapeamento padrão: cada filial é seu próprio CD
+    de_para_filial_cd = (
+        df_medidas_centrais_demanda
+        .select("CdFilial")
+        .distinct()
+        .withColumn("Cd_primario", F.col("CdFilial"))  # CD = Filial (mapeamento 1:1)
+    )
+    
+    print(f"✅ Mapeamento padrão criado: {de_para_filial_cd.count():,} filiais mapeadas")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 8.2 Join das Medidas de Demanda com Mapeamento de CD
+# MAGIC
+# MAGIC Realizamos o join para obter o `Cd_primario` de cada loja.
+
+# COMMAND ----------
+
+# Join das medidas de demanda com mapeamento de CD
+df_medidas_demanda_com_cd = (
+    df_medidas_centrais_demanda
+    .join(
+        de_para_filial_cd,
+        on="CdFilial",
+        how="left"
+    )
+    .fillna("CD_NAO_MAPEADO", subset=["Cd_primario"])
+)
+
+print("✅ Join realizado entre medidas de demanda e mapeamento de CD:")
+print(f"📊 Total de registros após join: {df_medidas_demanda_com_cd.count():,}")
+print(f"🏪 Total de CDs únicos: {df_medidas_demanda_com_cd.select('Cd_primario').distinct().count()}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 8.3 Agregação das Métricas de Demanda por CD-Gêmeo
+# MAGIC
+# MAGIC Agrupamos por `Cd_primario` e `gemeos` e somamos as 12 métricas de demanda
+# MAGIC para obter as demandas agregadas a nível CD-gêmeo.
+
+# COMMAND ----------
+
+# Agregação das métricas de demanda por CD e gêmeo
+df_demanda_agregada_cd_gemeo = (
+    df_medidas_demanda_com_cd
+    .groupBy("Cd_primario", "gemeos")
+    .agg(
+        # Soma das 12 métricas de demanda
+        # Médias móveis
+        F.sum("Media90_Qt_venda_sem_ruptura").alias("Media90_Qt_venda_sem_ruptura_CD"),
+        F.sum("Media180_Qt_venda_sem_ruptura").alias("Media180_Qt_venda_sem_ruptura_CD"),
+        F.sum("Media270_Qt_venda_sem_ruptura").alias("Media270_Qt_venda_sem_ruptura_CD"),
+        F.sum("Media360_Qt_venda_sem_ruptura").alias("Media360_Qt_venda_sem_ruptura_CD"),
+        
+        # Medianas móveis
+        F.sum("Mediana90_Qt_venda_sem_ruptura").alias("Mediana90_Qt_venda_sem_ruptura_CD"),
+        F.sum("Mediana180_Qt_venda_sem_ruptura").alias("Mediana180_Qt_venda_sem_ruptura_CD"),
+        F.sum("Mediana270_Qt_venda_sem_ruptura").alias("Mediana270_Qt_venda_sem_ruptura_CD"),
+        F.sum("Mediana360_Qt_venda_sem_ruptura").alias("Mediana360_Qt_venda_sem_ruptura_CD"),
+        
+        # Médias aparadas
+        F.sum("MediaAparada90_Qt_venda_sem_ruptura").alias("MediaAparada90_Qt_venda_sem_ruptura_CD"),
+        F.sum("MediaAparada180_Qt_venda_sem_ruptura").alias("MediaAparada180_Qt_venda_sem_ruptura_CD"),
+        F.sum("MediaAparada270_Qt_venda_sem_ruptura").alias("MediaAparada270_Qt_venda_sem_ruptura_CD"),
+        F.sum("MediaAparada360_Qt_venda_sem_ruptura").alias("MediaAparada360_Qt_venda_sem_ruptura_CD"),
+        
+        # Métricas adicionais para contexto
+        F.countDistinct("CdFilial").alias("qtd_filiais_cd"),
+        F.countDistinct("CdSku").alias("qtd_skus_gemeo"),
+        F.sum("QtMercadoria").alias("QtMercadoria_total_cd_gemeo"),
+        F.sum("Receita").alias("Receita_total_cd_gemeo")
+    )
+    .fillna(0, subset=[
+        "Media90_Qt_venda_sem_ruptura_CD", "Media180_Qt_venda_sem_ruptura_CD",
+        "Media270_Qt_venda_sem_ruptura_CD", "Media360_Qt_venda_sem_ruptura_CD",
+        "Mediana90_Qt_venda_sem_ruptura_CD", "Mediana180_Qt_venda_sem_ruptura_CD",
+        "Mediana270_Qt_venda_sem_ruptura_CD", "Mediana360_Qt_venda_sem_ruptura_CD",
+        "MediaAparada90_Qt_venda_sem_ruptura_CD", "MediaAparada180_Qt_venda_sem_ruptura_CD",
+        "MediaAparada270_Qt_venda_sem_ruptura_CD", "MediaAparada360_Qt_venda_sem_ruptura_CD"
+    ])
+)
+
+print("✅ Agregação das métricas de demanda por CD-gêmeo concluída:")
+print(f"📊 Total de combinações CD-gêmeo: {df_demanda_agregada_cd_gemeo.count():,}")
+print(f"🏪 Total de CDs únicos: {df_demanda_agregada_cd_gemeo.select('Cd_primario').distinct().count()}")
+print(f"🔄 Total de grupos gêmeos: {df_demanda_agregada_cd_gemeo.select('gemeos').distinct().count()}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 8.4 Cálculo dos 12 Merecimentos por Métrica de Demanda
+# MAGIC
+# MAGIC Calculamos os 12 merecimentos, um para cada métrica de demanda,
+# MAGIC representando o percentual que cada CD vai receber de cada gêmeo.
+
+# COMMAND ----------
+
+# Janela para cálculo de totais por gêmeo (denominador do merecimento)
+w_gemeo = Window.partitionBy("gemeos")
+
+# Cálculo dos 12 merecimentos
+df_merecimento_cd_gemeo = (
+    df_demanda_agregada_cd_gemeo
+    .withColumn(
+        "total_demanda_gemeo_Media90",
+        F.sum("Media90_Qt_venda_sem_ruptura_CD").over(w_gemeo)
+    )
+    .withColumn(
+        "total_demanda_gemeo_Media180",
+        F.sum("Media180_Qt_venda_sem_ruptura_CD").over(w_gemeo)
+    )
+    .withColumn(
+        "total_demanda_gemeo_Media270",
+        F.sum("Media270_Qt_venda_sem_ruptura_CD").over(w_gemeo)
+    )
+    .withColumn(
+        "total_demanda_gemeo_Media360",
+        F.sum("Media360_Qt_venda_sem_ruptura_CD").over(w_gemeo)
+    )
+    .withColumn(
+        "total_demanda_gemeo_Mediana90",
+        F.sum("Mediana90_Qt_venda_sem_ruptura_CD").over(w_gemeo)
+    )
+    .withColumn(
+        "total_demanda_gemeo_Mediana180",
+        F.sum("Mediana180_Qt_venda_sem_ruptura_CD").over(w_gemeo)
+    )
+    .withColumn(
+        "total_demanda_gemeo_Mediana270",
+        F.sum("Mediana270_Qt_venda_sem_ruptura_CD").over(w_gemeo)
+    )
+    .withColumn(
+        "total_demanda_gemeo_Mediana360",
+        F.sum("Mediana360_Qt_venda_sem_ruptura_CD").over(w_gemeo)
+    )
+    .withColumn(
+        "total_demanda_gemeo_MediaAparada90",
+        F.sum("MediaAparada90_Qt_venda_sem_ruptura_CD").over(w_gemeo)
+    )
+    .withColumn(
+        "total_demanda_gemeo_MediaAparada180",
+        F.sum("MediaAparada180_Qt_venda_sem_ruptura_CD").over(w_gemeo)
+    )
+    .withColumn(
+        "total_demanda_gemeo_MediaAparada270",
+        F.sum("MediaAparada270_Qt_venda_sem_ruptura_CD").over(w_gemeo)
+    )
+    .withColumn(
+        "total_demanda_gemeo_MediaAparada360",
+        F.sum("MediaAparada360_Qt_venda_sem_ruptura_CD").over(w_gemeo)
+    )
+)
+
+# Cálculo dos percentuais de merecimento (evitando divisão por zero)
+df_merecimento_cd_gemeo_final = (
+    df_merecimento_cd_gemeo
+    .withColumn(
+        "Merecimento_Media90",
+        F.when(F.col("total_demanda_gemeo_Media90") > 0,
+               F.round(F.col("Media90_Qt_venda_sem_ruptura_CD") / F.col("total_demanda_gemeo_Media90") * 100, 4)
+        ).otherwise(F.lit(0))
+    )
+    .withColumn(
+        "Merecimento_Media180",
+        F.when(F.col("total_demanda_gemeo_Media180") > 0,
+               F.round(F.col("Media180_Qt_venda_sem_ruptura_CD") / F.col("total_demanda_gemeo_Media180") * 100, 4)
+        ).otherwise(F.lit(0))
+    )
+    .withColumn(
+        "Merecimento_Media270",
+        F.when(F.col("total_demanda_gemeo_Media270") > 0,
+               F.round(F.col("Media270_Qt_venda_sem_ruptura_CD") / F.col("total_demanda_gemeo_Media270") * 100, 4)
+        ).otherwise(F.lit(0))
+    )
+    .withColumn(
+        "Merecimento_Media360",
+        F.when(F.col("total_demanda_gemeo_Media360") > 0,
+               F.round(F.col("Media360_Qt_venda_sem_ruptura_CD") / F.col("total_demanda_gemeo_Media360") * 100, 4)
+        ).otherwise(F.lit(0))
+    )
+    .withColumn(
+        "Merecimento_Mediana90",
+        F.when(F.col("total_demanda_gemeo_Mediana90") > 0,
+               F.round(F.col("Mediana90_Qt_venda_sem_ruptura_CD") / F.col("total_demanda_gemeo_Mediana90") * 100, 4)
+        ).otherwise(F.lit(0))
+    )
+    .withColumn(
+        "Merecimento_Mediana180",
+        F.when(F.col("total_demanda_gemeo_Mediana180") > 0,
+               F.round(F.col("Mediana180_Qt_venda_sem_ruptura_CD") / F.col("total_demanda_gemeo_Mediana180") * 100, 4)
+        ).otherwise(F.lit(0))
+    )
+    .withColumn(
+        "Merecimento_Mediana270",
+        F.when(F.col("total_demanda_gemeo_Mediana270") > 0,
+               F.round(F.col("Mediana270_Qt_venda_sem_ruptura_CD") / F.col("total_demanda_gemeo_Mediana270") * 100, 4)
+        ).otherwise(F.lit(0))
+    )
+    .withColumn(
+        "Merecimento_Mediana360",
+        F.when(F.col("total_demanda_gemeo_Mediana360") > 0,
+               F.round(F.col("Mediana360_Qt_venda_sem_ruptura_CD") / F.col("total_demanda_gemeo_Mediana360") * 100, 4)
+        ).otherwise(F.lit(0))
+    )
+    .withColumn(
+        "Merecimento_MediaAparada90",
+        F.when(F.col("total_demanda_gemeo_MediaAparada90") > 0,
+               F.round(F.col("MediaAparada90_Qt_venda_sem_ruptura_CD") / F.col("total_demanda_gemeo_MediaAparada90") * 100, 4)
+        ).otherwise(F.lit(0))
+    )
+    .withColumn(
+        "Merecimento_MediaAparada180",
+        F.when(F.col("total_demanda_gemeo_MediaAparada180") > 0,
+               F.round(F.col("MediaAparada180_Qt_venda_sem_ruptura_CD") / F.col("total_demanda_gemeo_MediaAparada180") * 100, 4)
+        ).otherwise(F.lit(0))
+    )
+    .withColumn(
+        "Merecimento_MediaAparada270",
+        F.when(F.col("total_demanda_gemeo_MediaAparada270") > 0,
+               F.round(F.col("MediaAparada270_Qt_venda_sem_ruptura_CD") / F.col("total_demanda_gemeo_MediaAparada270") * 100, 4)
+        ).otherwise(F.lit(0))
+    )
+    .withColumn(
+        "Merecimento_MediaAparada360",
+        F.when(F.col("total_demanda_gemeo_MediaAparada360") > 0,
+               F.round(F.col("MediaAparada360_Qt_venda_sem_ruptura_CD") / F.col("total_demanda_gemeo_MediaAparada360") * 100, 4)
+        ).otherwise(F.lit(0))
+    )
+)
+
+print("✅ CÁLCULO DOS 12 MERECIMENTOS CONCLUÍDO COM SUCESSO:")
+print("=" * 80)
+print(f"📊 Total de combinações CD-gêmeo: {df_merecimento_cd_gemeo_final.count():,}")
+print(f"🏪 Total de CDs únicos: {df_merecimento_cd_gemeo_final.select('Cd_primario').distinct().count()}")
+print(f"🔄 Total de grupos gêmeos: {df_merecimento_cd_gemeo_final.select('gemeos').distinct().count()}")
+
+print("\n📋 MERECIMENTOS CALCULADOS (12 métricas):")
+print("  • Médias móveis: 90, 180, 270, 360 dias")
+print("  • Medianas móveis: 90, 180, 270, 360 dias")
+print("  • Médias aparadas: 90, 180, 270, 360 dias")
+print("  • Total: 12 colunas de merecimento por CD-gêmeo")
+
+print("\n🎯 INTERPRETAÇÃO:")
+print("  • Cada valor representa o percentual que o CD vai receber do gêmeo")
+print("  • Soma dos percentuais por gêmeo = 100%")
+print("  • Valores maiores = maior alocação para aquele CD")
+
+# Exibição de exemplo
+print("\n🔍 EXEMPLO DOS MERECIMENTOS CALCULADOS:")
+df_merecimento_cd_gemeo_final.limit(5).display()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 8.5 Validação dos Merecimentos Calculados
+# MAGIC
+# MAGIC Validamos que a soma dos merecimentos por gêmeo seja igual a 100%
+# MAGIC para cada uma das 12 métricas de demanda.
+
+# COMMAND ----------
+
+# Validação da soma dos merecimentos por gêmeo
+df_validacao_merecimento = (
+    df_merecimento_cd_gemeo_final
+    .groupBy("gemeos")
+    .agg(
+        F.round(F.sum("Merecimento_Media90"), 4).alias("soma_Merecimento_Media90"),
+        F.round(F.sum("Merecimento_Media180"), 4).alias("soma_Merecimento_Media180"),
+        F.round(F.sum("Merecimento_Media270"), 4).alias("soma_Merecimento_Media270"),
+        F.round(F.sum("Merecimento_Media360"), 4).alias("soma_Merecimento_Media360"),
+        F.round(F.sum("Merecimento_Mediana90"), 4).alias("soma_Merecimento_Mediana90"),
+        F.round(F.sum("Merecimento_Mediana180"), 4).alias("soma_Merecimento_Mediana180"),
+        F.round(F.sum("Merecimento_Mediana270"), 4).alias("soma_Merecimento_Mediana270"),
+        F.round(F.sum("Merecimento_Mediana360"), 4).alias("soma_Merecimento_Mediana360"),
+        F.round(F.sum("Merecimento_MediaAparada90"), 4).alias("soma_Merecimento_MediaAparada90"),
+        F.round(F.sum("Merecimento_MediaAparada180"), 4).alias("soma_Merecimento_MediaAparada180"),
+        F.round(F.sum("Merecimento_MediaAparada270"), 4).alias("soma_Merecimento_MediaAparada270"),
+        F.round(F.sum("Merecimento_MediaAparada360"), 4).alias("soma_Merecimento_MediaAparada360")
+    )
+)
+
+print("✅ VALIDAÇÃO DOS MERECIMENTOS:")
+print("=" * 60)
+print("📊 Verificação: Soma dos merecimentos por gêmeo deve ser 100%")
+print("🔍 Exibindo as somas para validação:")
+
+df_validacao_merecimento.display()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 9. Próximas Etapas
+
 
