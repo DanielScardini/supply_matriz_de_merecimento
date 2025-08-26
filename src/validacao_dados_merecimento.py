@@ -24,6 +24,10 @@ import json
 # MAGIC %md
 # MAGIC ## Carregamento dos Dados
 
+# MAGIC %md
+# MAGIC Carregamos a tabela de merecimento para validação
+# MAGIC e análise de qualidade dos dados.
+
 # COMMAND ----------
 
 # Carregar dados da tabela de merecimento
@@ -37,6 +41,10 @@ print(f"📋 Total de colunas: {len(df_merecimento.columns)}")
 
 # MAGIC %md
 # MAGIC ## 1. Informações Básicas do Dataset
+
+# MAGIC %md
+# MAGIC Analisamos as informações básicas do dataset para entender
+# MAGIC a estrutura e período dos dados.
 
 # COMMAND ----------
 
@@ -61,6 +69,10 @@ print(f"📅 Período: {date_range['data_min']} a {date_range['data_max']}")
 # MAGIC %md
 # MAGIC ## 2. Contagem de Entidades Distintas
 
+# MAGIC %md
+# MAGIC Contamos as entidades distintas para verificar a cobertura
+# MAGIC dos dados por filial, SKU e classificações.
+
 # COMMAND ----------
 
 # Contagem de entidades distintas
@@ -76,7 +88,7 @@ print("🏢 CONTAGEM DE ENTIDADES DISTINTAS")
 print("=" * 50)
 print(f"🏪 Filiais distintas: {distinct_counts['filiais_distintas']}")
 print(f"📦 SKUs distintos: {distinct_counts['skus_distintos']}")
-print(f"🏭 Setores distintos: {distinct_counts['setores_distintos']}")
+print(f"🏭 Setores distintos: {distinct_counts['setores_distintas']}")
 print(f"📊 Curvas distintas: {distinct_counts['curvas_distintas']}")
 print(f"📊 Curvas ABC distintas: {distinct_counts['curvas_abc_distintas']}")
 
@@ -84,6 +96,10 @@ print(f"📊 Curvas ABC distintas: {distinct_counts['curvas_abc_distintas']}")
 
 # MAGIC %md
 # MAGIC ## 3. Análise de Campos Nulos
+
+# MAGIC %md
+# MAGIC Verificamos a presença de campos nulos para identificar
+# MAGIC possíveis problemas de qualidade dos dados.
 
 # COMMAND ----------
 
@@ -105,6 +121,10 @@ for col in df_merecimento.columns:
 
 # MAGIC %md
 # MAGIC ## 4. Distribuição de Dias por Filial e SKU
+
+# MAGIC %md
+# MAGIC Analisamos a distribuição de dias por filial e SKU para verificar
+# MAGIC a consistência temporal dos dados.
 
 # COMMAND ----------
 
@@ -137,6 +157,10 @@ display(days_per_filial_sku.limit(10))
 # MAGIC %md
 # MAGIC ## 5. Quantidade de SKUs por Filial
 
+# MAGIC %md
+# MAGIC Analisamos a quantidade de SKUs por filial para verificar
+# MAGIC a distribuição de produtos entre as lojas.
+
 # COMMAND ----------
 
 # Quantidade de SKUs por filial
@@ -168,6 +192,10 @@ display(skus_per_filial.limit(10))
 # MAGIC %md
 # MAGIC ## 6. Análise de Métricas de Negócio
 
+# MAGIC %md
+# MAGIC Analisamos as métricas de negócio para verificar
+# MAGIC a consistência dos valores calculados.
+
 # COMMAND ----------
 
 # Métricas de negócio
@@ -192,6 +220,10 @@ print(f"💸 Receita perdida por ruptura: R$ {business_metrics['receita_perdida_
 # MAGIC %md
 # MAGIC ## 7. Verificações de Qualidade
 
+# MAGIC %md
+# MAGIC Realizamos verificações específicas de qualidade para identificar
+# MAGIC possíveis inconsistências nos dados.
+
 # COMMAND ----------
 
 print("🔍 VERIFICAÇÕES DE QUALIDADE")
@@ -202,21 +234,21 @@ negative_estoque = df_merecimento.filter(F.col("EstoqueLoja") < 0).count()
 negative_receita = df_merecimento.filter(F.col("Receita") < 0).count()
 negative_vendas = df_merecimento.filter(F.col("QtMercadoria") < 0).count()
 
-print(f"✅ Estoque negativo: {negative_estoque} registros")
-print(f"✅ Receita negativa: {negative_receita} registros")
-print(f"✅ Vendas negativas: {negative_vendas} registros")
+print(f"📦 Estoque negativo: {negative_estoque} registros")
+print(f"💰 Receita negativa: {negative_receita} registros")
+print(f"🛒 Vendas negativas: {negative_vendas} registros")
 
-# Verificar consistência de datas
+# Verificar datas inválidas
 invalid_dates = df_merecimento.filter(
-    (F.col("DtAtual").isNull()) | 
-    (F.col("year_month").isNull())
+    (F.col("DtAtual").isNull()) |
+    (F.col("DtAtual") < "2020-01-01") |
+    (F.col("DtAtual") > "2030-12-31")
 ).count()
 
-print(f"✅ Datas inválidas: {invalid_dates} registros")
+print(f"📅 Datas inválidas: {invalid_dates} registros")
 
-# Verificar médias móveis
+# Verificar médias móveis inválidas
 invalid_media = df_merecimento.filter(
-    (F.col("Media90_Receita_venda_estq") < 0) |
     (F.col("Media90_Qt_venda_estq") < 0)
 ).count()
 
@@ -226,6 +258,10 @@ print(f"✅ Médias móveis inválidas: {invalid_media} registros")
 
 # MAGIC %md
 # MAGIC ## 8. Análise de Rupturas
+
+# MAGIC %md
+# MAGIC Analisamos detalhadamente as rupturas para entender
+# MAGIC o impacto no negócio e identificar padrões.
 
 # COMMAND ----------
 
@@ -261,6 +297,10 @@ display(top_rupturas)
 # MAGIC %md
 # MAGIC ## 9. Distribuição por Setor e Curva
 
+# MAGIC %md
+# MAGIC Analisamos a distribuição dos dados por setor e curva
+# MAGIC para verificar a representatividade das classificações.
+
 # COMMAND ----------
 
 # Distribuição por setor
@@ -294,6 +334,10 @@ display(curva_distribution)
 # MAGIC %md
 # MAGIC ## 10. Resumo Executivo
 
+# MAGIC %md
+# MAGIC Apresentamos um resumo executivo da validação com
+# MAGIC score de qualidade e recomendações.
+
 # COMMAND ----------
 
 # Calcular score de qualidade (0-100)
@@ -317,32 +361,37 @@ print("📋 RESUMO EXECUTIVO")
 print("=" * 50)
 
 if quality_score >= 90:
-    status = "🟢 EXCELENTE"
+    print("🟢 QUALIDADE EXCELENTE")
 elif quality_score >= 80:
-    status = "🟡 BOM"
+    print("🟡 QUALIDADE BOA")
 elif quality_score >= 70:
-    status = "🟠 REGULAR"
+    print("🟠 QUALIDADE REGULAR")
 else:
-    status = "🔴 ATENÇÃO NECESSÁRIA"
+    print("🔴 QUALIDADE CRÍTICA")
 
-print(f"📊 Score de Qualidade: {quality_score}/100 - {status}")
-print(f"📈 Total de registros válidos: {total_rows:,}")
-print(f"🏪 Cobertura de filiais: {distinct_counts['filiais_distintas']} filiais")
-print(f"📦 Cobertura de SKUs: {distinct_counts['skus_distintos']} produtos")
-print(f"📅 Período analisado: {date_range['data_min']} a {date_range['data_max']}")
+print(f"📊 Score de qualidade: {quality_score}/100")
 
-# COMMAND ----------
+print(f"\n📈 Total de registros: {total_rows:,}")
+print(f"🏪 Total de filiais: {distinct_counts['filiais_distintas']}")
+print(f"📦 Total de SKUs: {distinct_counts['skus_distintos']}")
+print(f"⚠️ Total de rupturas: {business_metrics['total_rupturas']:,}")
 
-# MAGIC %md
-# MAGIC ## 📊 RELATÓRIO CONCLUÍDO
-# MAGIC 
-# MAGIC Este relatório fornece uma visão abrangente da qualidade dos dados da matriz de merecimento.
-# MAGIC 
-# MAGIC **Próximos passos**:
-# MAGIC 1. Analisar os números apresentados
-# MAGIC 2. Verificar se fazem sentido para o negócio
-# MAGIC 3. Definir balizamento para validações automáticas
-# MAGIC 4. Ajustar thresholds conforme necessário
-# MAGIC 
-# MAGIC **Arquivos gerados**: Relatório visual no notebook
-# MAGIC **Score de qualidade**: {quality_score}/100
+print(f"\n🔍 PROBLEMAS IDENTIFICADOS:")
+if total_null_fields > 0:
+    print(f"  • {total_null_fields} campos com valores nulos")
+if total_negative > 0:
+    print(f"  • {total_negative} registros com valores negativos")
+if invalid_dates > 0:
+    print(f"  • {invalid_dates} registros com datas inválidas")
+
+print(f"\n✅ RECOMENDAÇÕES:")
+if quality_score >= 90:
+    print("  • Dados prontos para uso em análises")
+elif quality_score >= 80:
+    print("  • Pequenos ajustes recomendados antes do uso")
+elif quality_score >= 70:
+    print("  • Revisão moderada necessária")
+else:
+    print("  • Revisão urgente necessária antes do uso")
+
+print(f"\n🎯 Próximos passos: Executar notebook de análise da matriz de merecimento")

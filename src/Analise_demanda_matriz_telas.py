@@ -103,40 +103,31 @@ def add_allocation_metrics(
     )
 
     agg = base.groupBy(*group_cols) if group_cols else base.groupBy()
-
-    res = agg.agg(
-        # volume
-        F.sum("__abs_err__").alias("_sum_abs_err"),
-        F.sum("__wmape_distance__").alias("_sum_wmape_distance"),
-        F.sum("__y__").alias("_sum_y"),
-        F.sum("__yhat__").alias("_sum_yhat"),
-        # shares
-        F.sum(F.abs(F.col("__p__") - F.col("__phat__"))).alias("_SE"),
-        F.sum("__kl_term__").alias("_KL"),
-        F.sum("__cross_entropy_term__").alias("_cross_entropy"),
-        F.sum("__wmape_share__").alias("_num_wmape_share")
-    ).withColumn(
-        # volume (%)
-        "wMAPE_perc", F.round(F.when(F.col("_sum_y") > 0, F.col("_sum_wmape_distance")/F.col("_sum_y")).otherwise(0.0) * 100, 4)
-    ).withColumn(
-        # shares (% e pp)
-        "SE_pp", F.round(F.col("_SE") * 100, 4)  # 0–200 p.p.
-    ).withColumn(
-        "wMAPE_share_perc", F.round(F.when(F.col("_sum_y") > 0, F.col("_num_wmape_share")/F.col("_sum_y")).otherwise(0.0) * 100, 4)
-    ).withColumn(
-        "Cross_entropy", F.when(F.col("_sum_y") > 0, F.col("_cross_entropy")).otherwise(F.lit(0.0))
-    ).withColumn(
-        "KL_divergence", F.when((F.col("_sum_y") > 0) & (F.col("_sum_yhat") > 0), F.col("_KL")).otherwise(F.lit(0.0))
-    ).select(
-        *(group_cols if group_cols else []),
-        # volume
-        "wMAPE_perc",
-        # shares ponderados por volume
-        "SE_pp", "wMAPE_share_perc",
-        # distância de distribuição
-        "Cross_entropy", "KL_divergence"
+    res = (agg.agg(
+            F.sum("__abs_err__").alias("_sum_abs_err"),
+            F.sum("__wmape_distance__").alias("_sum_wmape_distance"),
+            F.sum("__y__").alias("_sum_y"),
+            F.sum("__yhat__").alias("_sum_yhat"),
+            F.sum(F.abs(F.col("__p__") - F.col("__phat__"))).alias("_SE"),
+            F.sum("__kl_term__").alias("_KL"),
+            F.sum("__cross_entropy_term__").alias("_cross_entropy"),
+            F.sum("__wmape_share__").alias("_num_wmape_share")
+        )
+        # WMAPE correto (%)
+        .withColumn("wMAPE_perc", F.round(F.when(F.col("_sum_y") > 0, F.col("_sum_abs_err")/F.col("_sum_y")*100).otherwise(0.0), 4))
+        # wMAPE distance (unidades de volume, sem %)
+        .withColumn("wMAPE_distance", F.round(F.when(F.col("_sum_y") > 0, F.col("_sum_wmape_distance")/F.col("_sum_y")).otherwise(0.0), 4))
+        # Shares
+        .withColumn("SE_pp", F.round(F.col("_SE") * 100, 4))
+        .withColumn("wMAPE_share_perc", F.round(F.when(F.col("_sum_y") > 0, F.col("_num_wmape_share")/F.col("_sum_y")*100).otherwise(0.0), 4))
+        # Distribuição
+        .withColumn("Cross_entropy", F.when(F.col("_sum_y") > 0, F.col("_cross_entropy")).otherwise(F.lit(0.0)))
+        .withColumn("KL_divergence", F.when((F.col("_sum_y") > 0) & (F.col("_sum_yhat") > 0), F.col("_KL")).otherwise(F.lit(0.0)))
+        .select(*(group_cols if group_cols else []),
+                "wMAPE_perc", "wMAPE_distance",
+                "SE_pp", "wMAPE_share_perc",
+                "Cross_entropy", "KL_divergence")
     )
-
     return res
 
 # COMMAND ----------
@@ -248,7 +239,7 @@ df_vendas_estoque_telas_agg = (
         how="left",
         on="CdSku"
     )
-    .groupBy("year_month", "modelos", "gemeos", "CdFilial")
+    .groupBy("year_month", "gemeos", "CdFilial")
     .agg(
         F.sum("QtMercadoria").alias("QtMercadoria"),
         F.round(F.sum("Receita"), 2).alias("Receita"),
@@ -257,7 +248,7 @@ df_vendas_estoque_telas_agg = (
     )
 )
 
-print("Dados agregados por filial para telas:")
+print("Dados agregados por filial:")
 df_vendas_estoque_telas_agg.limit(1).display()
 
 # COMMAND ----------
@@ -271,7 +262,7 @@ df_vendas_estoque_telas_agg.limit(1).display()
 # COMMAND ----------
 
 # Janela por mês, modelo e gêmeos
-w = Window.partitionBy("year_month", "modelos", "gemeos")
+w = Window.partitionBy("year_month", "gemeos")
 
 df_pct_telas = (
     df_vendas_estoque_telas_agg
@@ -299,7 +290,7 @@ df_pct_telas = (
     
     # Selecionar colunas finais
     .select(
-        "year_month", "modelos", "gemeos", "CdFilial",
+        "year_month", "gemeos", "CdFilial",
         "QtMercadoria", "QtdDemanda", "PrecoMedio90",
         "Qt_total_mes_especie", "Demanda_total_mes_especie",
         "pct_vendas", "pct_vendas_perc",
@@ -313,7 +304,7 @@ df_pct_telas = (
     .filter(F.col("year_month") == 202507)  # Foco no mês de análise
 )
 
-print("Percentuais calculados por filial para telas:")
+print("Percentuais calculados por filial:")
 df_pct_telas.limit(1).display()
 
 # COMMAND ----------
@@ -326,24 +317,37 @@ df_pct_telas.limit(1).display()
 
 # COMMAND ----------
 
-!pip install openpyxl # Leitura da matriz de merecimento para telas
+# Leitura da matriz de merecimento
 df_matriz_telas_pd = pd.read_excel(
-    "dados_analise/Base analise- Telas.xlsx", 
-    sheet_name="AJUSTADO"
+    "dados_analise/(DRP)_MATRIZ_20250825174952.csv.xlsx", 
+    sheet_name="(DRP)_MATRIZ_20250825174952"
 )
 
+# Conversão para evitar erros de conversão
+if 'DATA_VALIDADE_RELACAO' in df_matriz_telas_pd.columns:
+    df_matriz_telas_pd['DATA_VALIDADE_RELACAO'] = df_matriz_telas_pd['DATA_VALIDADE_RELACAO'].astype(str)
 
 # Criação do DataFrame Spark com mapeamentos
 df_matriz_telas = (
     spark.createDataFrame(df_matriz_telas_pd)
-    .withColumnRenamed("GEMEO", "gemeos")
-    .withColumnRenamed("FILIAL", "CdFilial")
-    .withColumnRenamed("OFF", "Percentual_matriz_fixa")
+    .withColumnRenamed("CODIGO", "CdSku")
+    .join(
+        de_para_modelos_gemeos_tecnologia_telas
+        .withColumnRenamed("sku_loja", "CdSku"),
+        how="left",
+        on="CdSku"
+    )
+    .withColumnRenamed("CODIGO_FILIAL", "CdFilial")
+    .filter(F.col("TIPO_FILIAL") != 'CD')  # Apenas lojas
+    .filter(F.col("CANAL") == 'OFFLINE')   # Apenas canal offline
+    .withColumn(
+        "CdFilial",
+        F.col("CdFilial").substr(6, 20).cast("int")
+    )
 )
 
-
-print("Matriz de merecimento para telas carregada:")
-df_matriz_telas.limit(10).display()
+print("Matriz de merecimento carregada:")
+df_matriz_telas.limit(1).display()
 
 # COMMAND ----------
 
@@ -363,8 +367,8 @@ df_matriz_telas_metricas = (
         on=["gemeos", "CdFilial"]
     )
     .select(
-        "year_month", "gemeos", "CdFilial",
-        F.round(F.col("Percentual_matriz_fixa"), 2).alias("Percentual_matriz_fixa"),
+        "year_month", "gemeos",  "CdFilial",
+        F.round(F.col("PERCENTUAL_MATRIZ"), 2).alias("Percentual_matriz_fixa"),
         "pct_vendas_perc",
         "pct_demanda_perc",
         "QtMercadoria", "QtdDemanda", 
@@ -372,7 +376,7 @@ df_matriz_telas_metricas = (
     )
 )
 
-print("Dados consolidados para análise de métricas de telas:")
+print("Dados consolidados para análise de métricas:")
 df_matriz_telas_metricas.limit(1).display()
 
 # COMMAND ----------
@@ -381,7 +385,13 @@ df_matriz_telas_metricas.limit(1).display()
 # MAGIC ## 9. Cálculo das Métricas de Avaliação
 # MAGIC
 # MAGIC Calculamos as métricas linha a linha e agregadas para avaliar a qualidade
-# MAGIC das alocações da matriz de merecimento para telas.
+# MAGIC das alocações da matriz de merecimento.
+# MAGIC
+# MAGIC **Métricas Principais:**
+# MAGIC - **wMAPE**: Weighted Mean Absolute Percentage Error (nível volume e shares)
+# MAGIC - **SE (Share Error)**: Erro na distribuição de participações
+# MAGIC - **Cross Entropy**: Divergência entre distribuições reais e previstas
+# MAGIC - **KL Divergence**: Medida de divergência para comparação
 
 # COMMAND ----------
 
@@ -398,6 +408,10 @@ df_matriz_telas_metricas.limit(1).display()
 
 # COMMAND ----------
 
+# Parâmetros das métricas
+GAMMA = 1.5
+EPSILON = 1e-12
+
 # APLICA FILTROS PRIMEIRO
 df_filtered_telas = (
     df_matriz_telas_metricas
@@ -406,13 +420,13 @@ df_filtered_telas = (
 )
 
 # DEPOIS calcula métricas sobre os dados filtrados
-w_filtered_telas = Window.partitionBy(F.lit(1))  # Janela sobre dados filtrados
+w_filtered = Window.partitionBy(F.lit(1))  # Janela sobre dados filtrados
 
 df_with_metrics_telas = (
     df_filtered_telas
     # Totais sobre dados FILTRADOS (não globais)
-    .withColumn("total_matriz_filtrado", F.sum("Percentual_matriz_fixa").over(w_filtered_telas))
-    .withColumn("total_demanda_real_filtrado", F.sum("pct_demanda_perc").over(w_filtered_telas))
+    .withColumn("total_matriz_filtrado", F.sum("Percentual_matriz_fixa").over(w_filtered))
+    .withColumn("total_demanda_real_filtrado", F.sum("pct_demanda_perc").over(w_filtered))
     
     # Shares sobre dados filtrados
     .withColumn(
@@ -434,7 +448,7 @@ df_with_metrics_telas = (
     .withColumn(
         "weight", 
         F.when(F.col("Percentual_matriz_fixa") < F.col("pct_demanda_perc"), 
-               F.lit(1.5) * F.col("pct_demanda_perc"))
+               F.lit(GAMMA) * F.col("pct_demanda_perc"))
          .otherwise(F.col("pct_demanda_perc"))
     )
     .withColumn("w_abs", F.col("weight") * F.col("abs_err"))
@@ -444,18 +458,19 @@ df_with_metrics_telas = (
         "kl_term", 
         F.when(
             (F.col("p") > 0) & (F.col("phat") > 0),
-            F.col("p") * F.log((F.col("p") + F.lit(1e-12)) / (F.col("phat") + F.lit(1e-12)))
+            F.col("p") * F.log((F.col("p") + F.lit(EPSILON)) / (F.col("phat") + F.lit(EPSILON)))
         ).otherwise(F.lit(0.0))
     )
     
     # Seleção das colunas finais
     .select(
-        "year_month",  "gemeos", "CdFilial",
+        "year_month", "gemeos", "CdFilial",
         "Percentual_matriz_fixa", "pct_vendas_perc", "pct_demanda_perc",
         "QtMercadoria", "QtdDemanda", 
         "Qt_total_mes_especie", "Demanda_total_mes_especie",
         "abs_err", "under", "weight", "w_abs", "p", "phat", "kl_term"
     )
+    .dropDuplicates()
 )
 
 print("Métricas linha a linha calculadas para telas:")
@@ -490,6 +505,14 @@ df_agg_metrics_telas = add_allocation_metrics(
 
 print("Métricas agregadas calculadas para telas por CD:")
 df_agg_metrics_telas.display()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 9.2.1 Métricas Agregadas por CD Primário
+# MAGIC
+# MAGIC Calculamos as métricas agregadas por centro de distribuição para identificar
+# MAGIC quais CDs têm melhor performance na matriz de merecimento para telas.
 
 # COMMAND ----------
 
@@ -558,249 +581,180 @@ df_erro_por_filial_telas = (
     .orderBy("Cd_primario", "erro_percentual_abs")
 )
 
-print("Erro percentual agregado por filial para telas:")
-df_erro_por_filial_telas.display()
+print("Erro percentual por filial calculado:")
+df_erro_por_filial_telas.limit(1).display()
 
 # COMMAND ----------
 
-# Preparação dos dados para o scatter plot
-df_scatter_plot_telas = (
-    df_erro_por_filial_telas
-    .withColumn(
-        "indice_ordenacao", 
-        F.monotonically_increasing_id()
-    )
-    .select(
-        "indice_ordenacao",
-        "CdFilial", 
-        "Cd_primario",
-        "erro_percentual_abs",
-        "erro_percentual_sinal",
-        "demanda_real_total",
-        "matriz_prevista_total",
-        "qtd_produtos"
-    )
-    .orderBy("indice_ordenacao")
-)
-
-print("Dados preparados para scatter plot de telas:")
-df_scatter_plot_telas.display()
+# MAGIC %md
+# MAGIC ### 10.1 Visualização do Erro por Filial
+# MAGIC
+# MAGIC Criamos visualizações para analisar a distribuição dos erros percentuais
+# MAGIC por filial, permitindo identificar padrões e outliers.
 
 # COMMAND ----------
 
-# Conversão para pandas para visualização
-df_scatter_pandas_telas = df_scatter_plot_telas.toPandas()
+# Converter para Pandas para visualização
+df_plot_telas = df_erro_por_filial_telas.toPandas()
 
-# Criação do scatter plot
-import plotly.graph_objects as go
 import plotly.express as px
+import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-# Scatter plot principal
-fig_telas = go.Figure()
-
-# Adiciona os pontos (filiais) com cores baseadas no sinal do erro
-fig_telas.add_trace(
-    go.Scatter(
-        x=df_scatter_pandas_telas['indice_ordenacao'],
-        y=df_scatter_pandas_telas['erro_percentual_sinal'],
-        mode='markers',
-        marker=dict(
-            size=8,
-            color=df_scatter_pandas_telas['erro_percentual_sinal'],
-            colorscale='RdBu',  # Vermelho para negativo, Azul para positivo
-            showscale=True,
-            colorbar=dict(title="Erro % com Sinal"),
-            cmin=df_scatter_pandas_telas['erro_percentual_sinal'].min(),
-            cmax=df_scatter_pandas_telas['erro_percentual_sinal'].max()
-        ),
-        text=df_scatter_pandas_telas['CdFilial'].astype(str),
-        hovertemplate=(
-            '<b>Filial:</b> %{text}<br>' +
-            '<b>Cd_primario:</b> ' + df_scatter_pandas_telas['Cd_primario'].astype(str) + '<br>' +
-            '<b>Erro % com Sinal:</b> %{y:.2f}%<br>' +
-            '<b>Erro % Absoluto:</b> ' + df_scatter_pandas_telas['erro_percentual_abs'].round(2).astype(str) + '%<br>' +
-            '<b>Demanda Real:</b> ' + df_scatter_pandas_telas['demanda_real_total'].round(2).astype(str) + '%<br>' +
-            '<b>Matriz Prevista:</b> ' + df_scatter_pandas_telas['matriz_prevista_total'].round(2).astype(str) + '%<br>' +
-            '<b>Qtd Produtos:</b> ' + df_scatter_pandas_telas['qtd_produtos'].astype(str) + '<br>' +
-            '<extra></extra>'
-        ),
-        name="Filiais"
-    )
-)
-
-# Linha de referência para erro médio com sinal
-erro_medio_sinal_telas = df_scatter_pandas_telas['erro_percentual_sinal'].mean()
-fig_telas.add_hline(
-    y=erro_medio_sinal_telas, 
-    line_dash="dash", 
-    line_color="gray",
-    annotation_text=f"Erro Médio: {erro_medio_sinal_telas:.2f}%",
-    annotation_position="top right"
-)
-
-# Linha de referência para zero (sem erro)
-fig_telas.add_hline(
-    y=0, 
-    line_dash="dot", 
-    line_color="black",
-    annotation_text="Sem Erro (0%)",
-    annotation_position="bottom right"
-)
-
-# Configuração do layout
-fig_telas.update_layout(
-    title={
-        'text': 'Erro Percentual da Matriz de Merecimento por Filial - Telas (com Sinal)',
-        'x': 0.5,
-        'xanchor': 'center',
-        'font': {'size': 20}
+# Scatter plot do erro percentual por filial
+fig = px.scatter(
+    df_plot_telas,
+    x="CdFilial",
+    y="erro_percentual_sinal",
+    color="erro_percentual_sinal",
+    size="qtd_produtos",
+    hover_data=["Cd_primario", "demanda_real_total", "matriz_prevista_total"],
+    title="Erro Percentual por Filial - Produtos de Telas",
+    labels={
+        "erro_percentual_sinal": "Erro Percentual (%)",
+        "CdFilial": "Filial",
+        "qtd_produtos": "Quantidade de Produtos"
     },
-    xaxis_title="Índice de Ordenação (Cd_primario + Erro)",
-    yaxis_title="Erro Percentual com Sinal (%)",
-    plot_bgcolor="#F8F8FF",
-    paper_bgcolor="#F8F8FF",
-    font=dict(size=12),
-    height=600,
-    showlegend=False
+    color_continuous_scale="RdBu",
+    color_continuous_midpoint=0
 )
 
-# Configuração dos eixos
-fig_telas.update_xaxes(
-    showgrid=True, 
-    gridwidth=1, 
-    gridcolor='lightgray',
-    zeroline=False
-)
-fig_telas.update_yaxes(
-    showgrid=True, 
-    gridwidth=1, 
-    gridcolor='lightgray',
-    zeroline=True,
-    zerolinecolor='black'
+fig.update_layout(
+    template="plotly_white",
+    title_font=dict(size=18),
+    xaxis=dict(showgrid=False),
+    yaxis=dict(showgrid=True, gridcolor="lightgrey"),
+    yaxis_title="Erro Percentual (%)",
+    xaxis_title="Filial"
 )
 
-# Exibe o gráfico
-fig_telas.show()
+fig.show()
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Análise do Scatter Plot para Telas
+# MAGIC ### 10.2 Boxplot de Erro por CD Primário
 # MAGIC
-# MAGIC **Interpretação dos resultados:**
-# MAGIC - **Pontos acima de 0**: Filiais onde a matriz **SUBESTIMA** a demanda real (matriz prevê menos do que realidade)
-# MAGIC - **Pontos abaixo de 0**: Filiais onde a matriz **SUPERESTIMA** a demanda real (matriz prevê mais do que realidade)
-# MAGIC - **Linha tracejada cinza**: Erro médio para referência
-# MAGIC - **Linha pontilhada preta**: Linha de zero (sem erro)
-# MAGIC - **Cor dos pontos**: Escala RdBu (vermelho = negativo/superestimação, azul = positivo/subestimação)
-# MAGIC
-# MAGIC **Ações recomendadas:**
-# MAGIC 1. **Filiais com erro positivo alto**: Aumentar alocações na matriz (demanda real > prevista)
-# MAGIC 2. **Filiais com erro negativo alto**: Reduzir alocações na matriz (demanda real < prevista)
-# MAGIC 3. **Filiais próximas de zero**: Matriz bem calibrada (manter como está)
-# MAGIC 4. **Padrões geográficos**: Analisar se erros se concentram em regiões específicas
-# MAGIC
-# MAGIC **Métricas Complementares:**
-# MAGIC - **Erro Absoluto**: Magnitude do erro independente da direção
-# MAGIC - **wMAPE**: Erro ponderado pelo volume real da filial
-# MAGIC - **Cross Entropy**: Qualidade da distribuição de participações
+# MAGIC Criamos um boxplot para analisar a distribuição dos erros percentuais
+# MAGIC por centro de distribuição, permitindo identificar quais CDs têm
+# MAGIC maior variabilidade na performance da matriz de merecimento.
 
 # COMMAND ----------
 
-# Estatísticas resumidas por faixa de erro para telas
-df_resumo_erro_telas = (
-    df_scatter_pandas_telas
-    .assign(
-        faixa_erro=lambda x: pd.cut(
-            x['erro_percentual_sinal'], 
-            bins=[float('-inf'), -erro_medio_sinal_telas, -erro_medio_sinal_telas/2, 0, erro_medio_sinal_telas/2, erro_medio_sinal_telas, float('inf')],
-            labels=['Muito Negativo', 'Negativo', 'Levemente Negativo', 'Levemente Positivo', 'Positivo', 'Muito Positivo']
-        )
+# Boxplot do erro percentual por CD primário
+fig_box = px.box(
+    df_plot_telas,
+    x="Cd_primario",
+    y="erro_percentual_sinal",
+    title="Distribuição do Erro Percentual por CD Primário - Telas",
+    labels={
+        "erro_percentual_sinal": "Erro Percentual (%)",
+        "Cd_primario": "CD Primário"
+    }
+)
+
+fig_box.update_layout(
+    template="plotly_white",
+    title_font=dict(size=18),
+    xaxis=dict(showgrid=False),
+    yaxis=dict(showgrid=True, gridcolor="lightgrey"),
+    yaxis_title="Erro Percentual (%)",
+    xaxis_title="CD Primário"
+)
+
+fig_box.show()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 11. Resumo das Métricas por CD
+# MAGIC
+# MAGIC Apresentamos um resumo consolidado das métricas de avaliação por centro
+# MAGIC de distribuição para facilitar a análise comparativa.
+
+# COMMAND ----------
+
+# Resumo das métricas por CD
+df_resumo_cd_telas = (
+    df_agg_metrics_telas
+    .orderBy("wMAPE_share_perc")
+    .select(
+        "Cd_primario",
+        F.round("wMAPE_perc", 2).alias("wMAPE (%)"),
+        F.round("wMAPE_share_perc", 2).alias("wMAPE Share (%)"),
+        F.round("SE_pp", 2).alias("Share Error (pp)"),
+        F.round("Cross_entropy", 4).alias("Cross Entropy"),
+        F.round("KL_divergence", 4).alias("KL Divergence")
     )
-    .groupby('faixa_erro')
-    .agg({
-        'CdFilial': 'count',
-        'erro_percentual_sinal': ['mean', 'std'],
-        'erro_percentual_abs': 'mean',
-        'qtd_produtos': 'mean'
-    })
-    .round(2)
 )
 
-df_resumo_erro_telas.columns = ['Qtd_Filiais', 'Erro_Medio_Sinal', 'Erro_Desvio', 'Erro_Medio_Abs', 'Produtos_Medio']
-df_resumo_erro_telas = df_resumo_erro_telas.reset_index()
-
-print("Resumo por faixa de erro para telas:")
-display(df_resumo_erro_telas)
+print("Resumo das métricas por CD - Produtos de Telas:")
+df_resumo_cd_telas.display()
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 11. Análise de Heterocedasticidade para Telas
+# MAGIC ## 12. Análise de Outliers e Recomendações
 # MAGIC
-# MAGIC **Problema identificado**: A agregação por CD pode mascarar problemas reais ao nível de loja individual.
-# MAGIC **Objetivo**: Demonstrar que embora as métricas wMAPE agregadas por CD pareçam "aceitáveis", 
-# MAGIC ao nível de loja existem erros significativos em todas as direções (heterocedasticidade).
-# MAGIC
-# MAGIC **Hipótese**: Os erros se "cancelam" na agregação, mas individualmente são problemáticos.
-# MAGIC
-# MAGIC **Métricas Analisadas:**
-# MAGIC - **wMAPE_share_perc**: Weighted Mean Absolute Percentage Error para shares
-# MAGIC - **SE_pp**: Share Error em pontos percentuais
-# MAGIC - **Cross_entropy**: Entropia cruzada entre distribuições
+# MAGIC Identificamos filiais com maior discrepância entre matriz prevista e realidade,
+# MAGIC fornecendo insights para otimização da matriz de merecimento.
 
 # COMMAND ----------
 
-# Cálculo de métricas ao nível de loja individual (sem agregação por CD) para telas
-df_metricas_loja_individual_telas = add_allocation_metrics(
-    df=df_filtered_telas.join(de_para_filial_cd, how="left", on="CdFilial"),
-    y_col="pct_demanda_perc",     
-    yhat_col="Percentual_matriz_fixa",  
-    group_cols=["CdFilial", "Cd_primario"]  # Agrupa por loja individual
-).dropna(subset=["CdFilial", "Cd_primario"])
-
-print("Métricas calculadas ao nível de loja individual para telas:")
-df_metricas_loja_individual_telas.display()
-
-# COMMAND ----------
-
-# Comparação: Métricas agregadas por CD vs. Distribuição das métricas ao nível de loja para telas
-df_comparacao_agregacao_telas = (
-    df_metricas_loja_individual_telas
-    .groupBy("Cd_primario")
-    .agg(
-        F.avg("wMAPE_share_perc").alias("wMAPE_medio_CD"),
-        F.stddev("wMAPE_share_perc").alias("wMAPE_desvio_CD"),
-        F.min("wMAPE_share_perc").alias("wMAPE_min_CD"),
-        F.max("wMAPE_share_perc").alias("wMAPE_max_CD"),
-        F.count("*").alias("qtd_lojas_CD")
+# Identificação de outliers (filiais com maior erro)
+df_outliers_telas = (
+    df_erro_por_filial_telas
+    .filter(F.col("erro_percentual_abs") > 20)  # Filiais com erro > 20%
+    .orderBy(F.desc("erro_percentual_abs"))
+    .select(
+        "CdFilial",
+        "Cd_primario",
+        F.round("erro_percentual_abs", 2).alias("Erro_Absoluto (%)"),
+        F.round("erro_percentual_sinal", 2).alias("Erro_Sinal (%)"),
+        "qtd_produtos",
+        F.round("demanda_real_total", 2).alias("Demanda_Real_Total"),
+        F.round("matriz_prevista_total", 2).alias("Matriz_Prevista_Total")
     )
-    .orderBy("wMAPE_medio_CD")
 )
 
-print("Comparação: Agregação por CD vs. Distribuição ao nível de loja para telas:")
-df_comparacao_agregacao_telas.display()
+print("Filiais com maior discrepância (Outliers) - Produtos de Telas:")
+df_outliers_telas.display()
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Conclusões sobre a Heterocedasticidade para Telas
+# MAGIC ### 12.1 Recomendações por CD
 # MAGIC
-# MAGIC **Evidências encontradas:**
-# MAGIC
-# MAGIC 1. **Máscara da Agregação**: As métricas wMAPE agregadas por CD não refletem a realidade das lojas individuais
-# MAGIC 2. **Variabilidade Interna**: CDs com wMAPE médio baixo podem ter lojas com erros 10-100x maiores
-# MAGIC 3. **Cancelamento de Erros**: Erros positivos e negativos se compensam na agregação, mascarando problemas reais
-# MAGIC
-# MAGIC **Recomendações:**
-# MAGIC - **Análise Granular**: Sempre analisar erros ao nível de loja individual
-# MAGIC - **Métricas Complementares**: Usar desvio padrão e coeficiente de variação além das médias
-# MAGIC - **Alertas por Loja**: Implementar monitoramento individual, não apenas agregado
-# MAGIC - **Investigações Específicas**: Focar nas lojas com maior variabilidade interna
-# MAGIC
-# MAGIC **Métricas de Monitoramento Recomendadas:**
-# MAGIC - **wMAPE_share_perc**: Para identificar lojas com maior erro de alocação
-# MAGIC - **SE_pp**: Para detectar problemas na distribuição de participações
-# MAGIC - **Cross_entropy**: Para avaliar qualidade geral das distribuições
-# MAGIC - **Coeficiente de Variação**: Para identificar CDs com alta variabilidade interna
+# MAGIC Com base nas métricas calculadas, fornecemos recomendações específicas
+# MAGIC para cada centro de distribuição.
+
+# COMMAND ----------
+
+# Recomendações baseadas nas métricas
+df_recomendacoes_telas = (
+    df_agg_metrics_telas
+    .withColumn(
+        "Recomendacao",
+        F.when(F.col("wMAPE_share_perc") < 10, "Excelente - Manter configuração atual")
+        .when(F.col("wMAPE_share_perc") < 20, "Boa - Pequenos ajustes recomendados")
+        .when(F.col("wMAPE_share_perc") < 30, "Regular - Revisão moderada necessária")
+        .otherwise("Crítica - Revisão urgente necessária")
+    )
+    .withColumn(
+        "Prioridade",
+        F.when(F.col("wMAPE_share_perc") < 10, "Baixa")
+        .when(F.col("wMAPE_share_perc") < 20, "Média")
+        .when(F.col("wMAPE_share_perc") < 30, "Alta")
+        .otherwise("Crítica")
+    )
+    .orderBy(F.desc("wMAPE_share_perc"))
+    .select(
+        "Cd_primario",
+        F.round("wMAPE_share_perc", 2).alias("wMAPE Share (%)"),
+        "Recomendacao",
+        "Prioridade"
+    )
+)
+
+print("Recomendações por CD - Produtos de Telas:")
+df_recomendacoes_telas.display()

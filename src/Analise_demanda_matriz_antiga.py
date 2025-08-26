@@ -311,7 +311,24 @@ df_pct_telefonia.limit(1).display()
 
 # COMMAND ----------
 
-!pip install openpyxl
+# MAGIC %md
+# MAGIC ### 7.1 Instalação de Dependências
+# MAGIC
+# MAGIC Instalamos a biblioteca openpyxl necessária para leitura de arquivos Excel.
+
+# COMMAND ----------
+
+# MAGIC %pip install openpyxl
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 7.2 Leitura da Matriz de Merecimento
+# MAGIC
+# MAGIC Carregamos a matriz de merecimento atual para comparar com os dados reais.
+# MAGIC Filtramos apenas lojas offline (não CDs) e aplicamos os mapeamentos de produtos.
+
+# COMMAND ----------
 
 # Leitura da matriz de merecimento
 df_matriz_telefonia_pd = pd.read_excel(
@@ -493,10 +510,25 @@ df_with_metrics = (
 print("Métricas linha a linha calculadas (sobre dados filtrados):")
 df_with_metrics.limit(1).display()
 
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 10.1.1 Visualização das Métricas Linha a Linha
+# MAGIC
+# MAGIC Exibimos as métricas calculadas ordenadas por demanda total para identificar
+# MAGIC os produtos com maior volume e suas respectivas métricas de erro.
 
 # COMMAND ----------
 
 df_with_metrics.orderBy(F.desc("Demanda_total_mes_especie")).display()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 10.1.2 Carregamento do Mapeamento Filial-CD
+# MAGIC
+# MAGIC Carregamos o mapeamento entre filiais e CDs primários para análise
+# MAGIC agregada por centro de distribuição.
 
 # COMMAND ----------
 
@@ -538,6 +570,14 @@ df_agg_metrics.display()
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ### 10.2.1 Métricas Agregadas por CD Primário
+# MAGIC
+# MAGIC Calculamos as métricas agregadas por centro de distribuição para identificar
+# MAGIC quais CDs têm melhor performance na matriz de merecimento.
+
+# COMMAND ----------
+
 # Métricas agregadas sobre dados FILTRADOS
 df_agg_metrics = add_allocation_metrics(
     df=df_filtered.join(de_para_filial_cd, how="left", on="CdFilial"),  # Usa dados filtrados
@@ -551,6 +591,14 @@ df_agg_metrics.display()
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ### 10.2.2 Métricas Agregadas por Filial e CD
+# MAGIC
+# MAGIC Calculamos as métricas agregadas por filial e CD para análise mais granular
+# MAGIC da performance da matriz de merecimento.
+
+# COMMAND ----------
+
 # Métricas agregadas sobre dados FILTRADOS
 df_agg_metrics = add_allocation_metrics(
     df=df_filtered.join(de_para_filial_cd, how="left", on="CdFilial"),  # Usa dados filtrados
@@ -561,6 +609,14 @@ df_agg_metrics = add_allocation_metrics(
 
 print("Métricas agregadas calculadas (sobre dados filtrados):")
 df_agg_metrics.display()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 11. Visualização dos Resultados
+# MAGIC
+# MAGIC Criamos visualizações para analisar a distribuição das métricas de erro
+# MAGIC por centro de distribuição, permitindo identificar padrões e outliers.
 
 # COMMAND ----------
 
