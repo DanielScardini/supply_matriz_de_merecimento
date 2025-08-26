@@ -151,7 +151,7 @@ def add_allocation_metrics(
 
 df_vendas_estoque_telas = (
     spark.table('databox.bcg_comum.supply_base_merecimento_diario')
-    .filter(F.col("NmAgrupamentoDiretoriaSetor") == 'DIRETORIA TELAS E MONITORES')
+    .filter(F.col("NmAgrupamentoDiretoriaSetor") == 'DIRETORIA DE TELAS')
     .filter(F.col("DtAtual") >= "2025-06-01")
     .withColumn(
         "year_month",
@@ -176,7 +176,7 @@ df_vendas_estoque_telas.limit(1).display()
 
 # Mapeamento de modelos e tecnologia para telas
 de_para_modelos_tecnologia_telas = (
-    pd.read_csv('dados_analise/MODELOS_AJUSTE_TELAS.csv', 
+    pd.read_csv('dados_analise/MODELOS_AJUSTE (1).csv', 
                 delimiter=';')
     .drop_duplicates()
 )
@@ -192,7 +192,7 @@ de_para_modelos_tecnologia_telas.columns = (
 
 # Mapeamento de produtos similares (gêmeos) para telas
 de_para_gemeos_tecnologia_telas = (
-    pd.read_csv('dados_analise/ITENS_GEMEOS_TELAS.csv',
+    pd.read_csv('dados_analise/ITENS_GEMEOS 2.csv',
                 delimiter=";",
                 encoding='iso-8859-1')
     .drop_duplicates()
@@ -326,37 +326,24 @@ df_pct_telas.limit(1).display()
 
 # COMMAND ----------
 
-# Leitura da matriz de merecimento para telas
+!pip install openpyxl # Leitura da matriz de merecimento para telas
 df_matriz_telas_pd = pd.read_excel(
-    "dados_analise/(DRP)_MATRIZ_TELAS_20250825174952.csv.xlsx", 
-    sheet_name="(DRP)_MATRIZ_20250825174952"
+    "dados_analise/Base analise- Telas.xlsx", 
+    sheet_name="AJUSTADO"
 )
 
-# Conversão para evitar erros de conversão
-if 'DATA_VALIDADE_RELACAO' in df_matriz_telas_pd.columns:
-    df_matriz_telas_pd['DATA_VALIDADE_RELACAO'] = df_matriz_telas_pd['DATA_VALIDADE_RELACAO'].astype(str)
 
 # Criação do DataFrame Spark com mapeamentos
 df_matriz_telas = (
     spark.createDataFrame(df_matriz_telas_pd)
-    .withColumnRenamed("CODIGO", "CdSku")
-    .join(
-        de_para_modelos_gemeos_tecnologia_telas
-        .withColumnRenamed("sku_loja", "CdSku"),
-        how="left",
-        on="CdSku"
-    )
-    .withColumnRenamed("CODIGO_FILIAL", "CdFilial")
-    .filter(F.col("TIPO_FILIAL") != 'CD')  # Apenas lojas
-    .filter(F.col("CANAL") == 'OFFLINE')   # Apenas canal offline
-    .withColumn(
-        "CdFilial",
-        F.col("CdFilial").substr(6, 20).cast("int")
-    )
+    .withColumnRenamed("GEMEO", "gemeos")
+    .withColumnRenamed("FILIAL", "CdFilial")
+    .withColumnRenamed("OFF", "Percentual_matriz_fixa")
 )
 
+
 print("Matriz de merecimento para telas carregada:")
-df_matriz_telas.limit(1).display()
+df_matriz_telas.limit(10).display()
 
 # COMMAND ----------
 
@@ -373,11 +360,11 @@ df_matriz_telas_metricas = (
     .join(
         df_pct_telas,
         how="inner",
-        on=["gemeos", "modelos", "CdFilial"]
+        on=["gemeos", "CdFilial"]
     )
     .select(
-        "year_month", "gemeos", "modelos", "CdFilial",
-        F.round(F.col("PERCENTUAL_MATRIZ"), 2).alias("Percentual_matriz_fixa"),
+        "year_month", "gemeos", "CdFilial",
+        F.round(F.col("Percentual_matriz_fixa"), 2).alias("Percentual_matriz_fixa"),
         "pct_vendas_perc",
         "pct_demanda_perc",
         "QtMercadoria", "QtdDemanda", 
@@ -463,7 +450,7 @@ df_with_metrics_telas = (
     
     # Seleção das colunas finais
     .select(
-        "year_month", "modelos", "gemeos", "CdFilial",
+        "year_month",  "gemeos", "CdFilial",
         "Percentual_matriz_fixa", "pct_vendas_perc", "pct_demanda_perc",
         "QtMercadoria", "QtdDemanda", 
         "Qt_total_mes_especie", "Demanda_total_mes_especie",
@@ -482,6 +469,27 @@ df_with_metrics_telas.limit(1).display()
 # MAGIC Calculamos as métricas agregadas para o dataframe inteiro usando a função
 # MAGIC `add_allocation_metrics` que criamos no início.
 # MAGIC **Nota**: Métricas calculadas comparando percentuais da matriz vs. percentuais reais da demanda.
+
+# COMMAND ----------
+
+# Carregamento do mapeamento filial -> CD primário
+de_para_filial_cd = (
+    spark.table('databox.bcg_comum.supply_base_merecimento_diario')
+    .select('CdFilial', 'Cd_primario')
+    .distinct()
+    .dropna()
+)
+
+# Métricas agregadas por CD para telas
+df_agg_metrics_telas = add_allocation_metrics(
+    df=df_filtered_telas,#.join(de_para_filial_cd, how="left", on="CdFilial"),
+    y_col="pct_demanda_perc",     
+    yhat_col="Percentual_matriz_fixa",  
+    group_cols=None           
+)
+
+print("Métricas agregadas calculadas para telas por CD:")
+df_agg_metrics_telas.display()
 
 # COMMAND ----------
 

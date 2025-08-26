@@ -150,11 +150,6 @@ df_vendas_estoque_telefonia.limit(1).display()
 
 # COMMAND ----------
 
-while(True):
-    pass
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC ## 4. Carregamento dos Mapeamentos de Produtos
 # MAGIC
