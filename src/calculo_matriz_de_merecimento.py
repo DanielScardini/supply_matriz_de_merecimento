@@ -372,10 +372,6 @@ print("✅ Mapeamento de filiais para CD carregado")
 
 # COMMAND ----------
 
-
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC ## 7. Filtragem de Meses Atípicos por Gêmeo Específico
 # MAGIC
@@ -560,6 +556,16 @@ df_medidas_centrais_demanda = df_medidas_centrais_demanda.withColumn(
 print("✅ MEDIDAS CENTRAIS DE DEMANDA CALCULADAS COM SUCESSO:")
 print("=" * 80)
 print("✅ Medidas centrais de demanda calculadas")
+
+# COMMAND ----------
+
+# Filtro para data específica do merecimento (após todas as janelas móveis)
+df_medidas_centrais_demanda = (
+    df_medidas_centrais_demanda
+    .filter(F.col("DtAtual") == "2025-06-30")  # Data específica para merecimento
+)
+
+print("✅ Dados filtrados para data de referência 2025-06-30")
 
 # COMMAND ----------
 
@@ -890,9 +896,22 @@ df_proporcoes_internas = (
 
 # COMMAND ----------
 
+df_proporcoes_com_merecimento_cd = (
+    df_proporcoes_internas
+    .join(
+        df_merecimento_cd_gemeo_final,
+        on=["Cd_primario", "gemeos"],
+        how="left"
+    )
+    .fillna(0, subset=[
+        "Merecimento_Media90", "Merecimento_Media180", "Merecimento_Media270", "Merecimento_Media360",
+        "Merecimento_Mediana90", "Merecimento_Mediana180", "Merecimento_Mediana270", "Merecimento_Mediana360"
+    ])
+)
+
 # Cálculo do merecimento final
 df_merecimento_final_filial_gemeo = (
-    df_proporcoes_internas
+    df_proporcoes_com_merecimento_cd
     .withColumn("MerecimentoFinal_Media90", F.round(F.col("Merecimento_Media90") * F.col("ProporcaoInterna_Media90"), 6))
     .withColumn("MerecimentoFinal_Media180", F.round(F.col("Merecimento_Media180") * F.col("ProporcaoInterna_Media180"), 6))
     .withColumn("MerecimentoFinal_Media270", F.round(F.col("Merecimento_Media270") * F.col("ProporcaoInterna_Media270"), 6))
@@ -902,3 +921,17 @@ df_merecimento_final_filial_gemeo = (
     .withColumn("MerecimentoFinal_Mediana270", F.round(F.col("Merecimento_Mediana270") * F.col("ProporcaoInterna_Mediana270"), 6))
     .withColumn("MerecimentoFinal_Mediana360", F.round(F.col("Merecimento_Mediana360") * F.col("ProporcaoInterna_Mediana360"), 6))
 )
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 11 - Comparar com a demanda medida
+
+# COMMAND ----------
+
+df_pct_telefonia = (
+    spark.table('databox.bcg_comum.supply_calculo_percentual_demanda_telefonia')
+    .fillna("SEM_GRUPO", subset=["gemeos"])
+)
+
+df_pct_telefonia.display()

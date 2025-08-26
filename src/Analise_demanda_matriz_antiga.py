@@ -310,6 +310,13 @@ df_pct_telefonia.limit(1).display()
 
 # COMMAND ----------
 
+df_pct_telefonia.write \
+    .format("delta") \
+    .mode("overwrite") \
+    .saveAsTable("databox.bcg_comum.supply_calculo_percentual_demanda_telefonia")
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 7. Carregamento da Matriz de Merecimento Atual
 # MAGIC
