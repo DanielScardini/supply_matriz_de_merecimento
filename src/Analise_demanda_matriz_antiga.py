@@ -238,7 +238,7 @@ df_vendas_estoque_telefonia_agg = (
         how="left",
         on="CdSku"
     )
-    .groupBy("year_month", "modelos", "gemeos", "CdFilial")
+    .groupBy("year_month", "gemeos", "CdFilial")
     .agg(
         F.sum("QtMercadoria").alias("QtMercadoria"),
         F.round(F.sum("Receita"), 2).alias("Receita"),
@@ -261,7 +261,7 @@ df_vendas_estoque_telefonia_agg.limit(1).display()
 # COMMAND ----------
 
 # Janela por mês, modelo e gêmeos
-w = Window.partitionBy("year_month", "modelos", "gemeos")
+w = Window.partitionBy("year_month", "gemeos")
 
 df_pct_telefonia = (
     df_vendas_estoque_telefonia_agg
@@ -289,7 +289,7 @@ df_pct_telefonia = (
     
     # Selecionar colunas finais
     .select(
-        "year_month", "modelos", "gemeos", "CdFilial",
+        "year_month", "gemeos", "CdFilial",
         "QtMercadoria", "QtdDemanda", "PrecoMedio90",
         "Qt_total_mes_especie", "Demanda_total_mes_especie",
         "pct_vendas", "pct_vendas_perc",
@@ -386,10 +386,10 @@ df_matriz_telefonia_metricas = (
     .join(
         df_pct_telefonia,
         how="inner",
-        on=["gemeos", "modelos", "CdFilial"]
+        on=["gemeos", "CdFilial"]
     )
     .select(
-        "year_month", "gemeos", "modelos", "CdFilial",
+        "year_month", "gemeos",  "CdFilial",
         F.round(F.col("PERCENTUAL_MATRIZ"), 2).alias("Percentual_matriz_fixa"),
         "pct_vendas_perc",
         "pct_demanda_perc",
@@ -486,17 +486,22 @@ df_with_metrics = (
     
     # Seleção das colunas finais
     .select(
-        "year_month", "modelos", "gemeos", "CdFilial",
+        "year_month", "gemeos", "CdFilial",
         "Percentual_matriz_fixa", "pct_vendas_perc", "pct_demanda_perc",
         "QtMercadoria", "QtdDemanda", 
         "Qt_total_mes_especie", "Demanda_total_mes_especie",
         "abs_err", "under", "weight", "w_abs", "p", "phat", "kl_term"
     )
+    .dropDuplicates()
 )
 
 print("Métricas linha a linha calculadas (sobre dados filtrados):")
 df_with_metrics.limit(1).display()
 
+
+# COMMAND ----------
+
+df_with_metrics.orderBy(F.desc("Demanda_total_mes_especie")).display()
 
 # COMMAND ----------
 
@@ -556,8 +561,35 @@ df_agg_metrics = add_allocation_metrics(
     df=df_filtered.join(de_para_filial_cd, how="left", on="CdFilial"),  # Usa dados filtrados
     y_col="pct_demanda_perc",     
     yhat_col="Percentual_matriz_fixa",  
-    group_cols=["CdFilial"]            
+    group_cols=["CdFilial", "Cd_primario"]            
 ).dropna(subset=["CdFilial"])
 
 print("Métricas agregadas calculadas (sobre dados filtrados):")
 df_agg_metrics.display()
+
+# COMMAND ----------
+
+# Converter colunas necessárias para Pandas
+df_plot = df_agg_metrics.select("Cd_primario", "wMAPE_share_perc").toPandas()
+
+import plotly.express as px
+
+fig = px.box(
+    df_plot,
+    x="Cd_primario",
+    y="wMAPE_share_perc",
+    points=False,  # remove pontos/outliers
+    title="Boxplot de wMAPE_share_perc por Cd_primario",
+    template="plotly_white"
+)
+
+fig.update_traces(marker=dict(size=4, opacity=0.6, color="royalblue"))
+fig.update_layout(
+    yaxis_title="wMAPE Share (%)",
+    xaxis_title="Cd_primario",
+    title_font=dict(size=18),
+    yaxis=dict(showgrid=True, gridcolor="lightgrey"),
+    xaxis=dict(showgrid=False)
+)
+
+fig.show()
