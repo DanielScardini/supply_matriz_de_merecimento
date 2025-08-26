@@ -43,7 +43,6 @@ def add_allocation_metrics(
     y_col: str,                             # real (y)
     yhat_col: str,                          # previsto (ŷ)
     group_cols: Optional[List[str]] = None, # ex.: ["year_month","modelo","gemeo"]
-    gamma: float = 1.5,                     # >1 penaliza under (share e volume)
     epsilon: float = 1e-12
 ):
     if group_cols is None:
@@ -63,31 +62,34 @@ def add_allocation_metrics(
 
     # Termos (volume)
     abs_err = F.abs(y - yhat)
-    under   = F.greatest(F.lit(0.0), y - yhat)
-
-    # Peso escalar assimétrico (volume)
-    weight_scalar = F.when(yhat < y, F.lit(gamma)).otherwise(F.lit(1.0))
-    w_abs = weight_scalar * abs_err
-
-    # KL em shares
-    kl_term = F.when(p > 0, p * F.log((p + F.lit(epsilon)) / (phat + F.lit(epsilon)))).otherwise(F.lit(0.0))
+    
+    # L1 Distance (Manhattan distance) - erro absoluto ponderado por volume
+    l1_distance = abs_err * y
+    
+    # Cross Entropy - medida de divergência entre distribuições
+    cross_entropy_term = F.when(
+        (p > 0) & (phat > 0), 
+        -p * F.log(phat + F.lit(epsilon))
+    ).otherwise(F.lit(0.0))
+    
+    # KL Divergence (mantido para comparação)
+    kl_term = F.when(
+        (p > 0) & (phat > 0), 
+        p * F.log((p + F.lit(epsilon)) / (phat + F.lit(epsilon)))
+    ).otherwise(F.lit(0.0))
 
     # Termos (share ponderado por volume)
-    abs_err_share   = F.abs(p - phat)
-    under_err_share = F.when(phat < p, p - phat).otherwise(F.lit(0.0))
-    w_abs_share     = abs_err_share * y
-    w_abs_share_as  = F.when(phat < p, F.lit(gamma) * abs_err_share * y).otherwise(abs_err_share * y)
-    w_under_share   = under_err_share * y
+    abs_err_share = F.abs(p - phat)
+    l1_share = abs_err_share * y  # L1 distance para shares
 
     base = (df
         .withColumn("__y__", y).withColumn("__yhat__", yhat)
         .withColumn("__p__", p).withColumn("__phat__", phat)
-        .withColumn("__abs_err__", abs_err).withColumn("__under__", under).withColumn("__w_abs__", w_abs)
+        .withColumn("__abs_err__", abs_err).withColumn("__l1_distance__", l1_distance)
         .withColumn("__kl_term__", kl_term)
+        .withColumn("__cross_entropy_term__", cross_entropy_term)
         .withColumn("__abs_err_share__", abs_err_share)
-        .withColumn("__w_abs_share__", w_abs_share)
-        .withColumn("__w_abs_share_as__", w_abs_share_as)
-        .withColumn("__w_under_share__", w_under_share)
+        .withColumn("__l1_share__", l1_share)
     )
 
     agg = base.groupBy(*group_cols) if group_cols else base.groupBy()
@@ -95,42 +97,34 @@ def add_allocation_metrics(
     res = agg.agg(
         # volume
         F.sum("__abs_err__").alias("_sum_abs_err"),
-        F.sum("__under__").alias("_sum_under"),
-        F.sum("__w_abs__").alias("_sum_w_abs"),
+        F.sum("__l1_distance__").alias("_sum_l1_distance"),
         F.sum("__y__").alias("_sum_y"),
         F.sum("__yhat__").alias("_sum_yhat"),
         # shares
         F.sum(F.abs(F.col("__p__") - F.col("__phat__"))).alias("_SE"),
         F.sum("__kl_term__").alias("_KL"),
-        F.sum("__w_abs_share__").alias("_num_wmape_share"),
-        F.sum("__w_abs_share_as__").alias("_num_wmape_share_as"),
-        F.sum("__w_under_share__").alias("_num_uape_share")
+        F.sum("__cross_entropy_term__").alias("_cross_entropy"),
+        F.sum("__l1_share__").alias("_num_l1_share")
     ).withColumn(
         # volume (%)
-        "wMAPE_perc", F.round(F.when(F.col("_sum_y") > 0, F.col("_sum_abs_err")/F.col("_sum_y")).otherwise(0.0) * 100, 4)
-    ).withColumn(
-        "UAPE_perc",  F.round(F.when(F.col("_sum_y") > 0, F.col("_sum_under") /F.col("_sum_y")).otherwise(0.0) * 100, 4)
-    ).withColumn(
-        "wMAPE_asym_perc", F.round(F.when(F.col("_sum_y") > 0, F.col("_sum_w_abs")/F.col("_sum_y")).otherwise(0.0) * 100, 4)
+        "L1_perc", F.round(F.when(F.col("_sum_y") > 0, F.col("_sum_l1_distance")/F.col("_sum_y")).otherwise(0.0) * 100, 4)
     ).withColumn(
         # shares (% e pp)
         "SE_pp", F.round(F.col("_SE") * 100, 4)  # 0–200 p.p.
     ).withColumn(
-        "wMAPE_share_perc", F.round(F.when(F.col("_sum_y") > 0, F.col("_num_wmape_share")/F.col("_sum_y")).otherwise(0.0) * 100, 4)
+        "L1_share_perc", F.round(F.when(F.col("_sum_y") > 0, F.col("_num_l1_share")/F.col("_sum_y")).otherwise(0.0) * 100, 4)
     ).withColumn(
-        "wMAPE_share_asym_perc", F.round(F.when(F.col("_sum_y") > 0, F.col("_num_wmape_share_as")/F.col("_sum_y")).otherwise(0.0) * 100, 4)
-    ).withColumn(
-        "UAPE_share_perc", F.round(F.when(F.col("_sum_y") > 0, F.col("_num_uape_share")/F.col("_sum_y")).otherwise(0.0) * 100, 4)
+        "Cross_entropy", F.when(F.col("_sum_y") > 0, F.col("_cross_entropy")).otherwise(F.lit(0.0))
     ).withColumn(
         "KL_divergence", F.when((F.col("_sum_y") > 0) & (F.col("_sum_yhat") > 0), F.col("_KL")).otherwise(F.lit(0.0))
     ).select(
         *(group_cols if group_cols else []),
         # volume
-        #"wMAPE_perc","UAPE_perc","wMAPE_asym_perc",
+        "L1_perc",
         # shares ponderados por volume
-        "SE_pp","wMAPE_share_perc","wMAPE_share_asym_perc","UAPE_share_perc",
+        "SE_pp", "L1_share_perc",
         # distância de distribuição
-        "KL_divergence"
+        "Cross_entropy", "KL_divergence"
     )
 
     return res
@@ -555,11 +549,11 @@ df_agg_metrics.display()
 
 # MAGIC %md
 # MAGIC ## 11. Visualização: Scatter Plot de Erro Percentual por Filial
-# MAGIC
+# MAGIC 
 # MAGIC Criamos um scatter plot onde cada ponto representa uma filial, mostrando:
 # MAGIC - **Eixo X**: Ordenação arbitrária baseada em Cd_primario (não tem significado específico)
 # MAGIC - **Eixo Y**: Erro percentual agregado da filial (agregando todos os produtos)
-# MAGIC
+# MAGIC 
 # MAGIC **Objetivo**: Identificar visualmente quais filiais têm maior discrepância entre matriz prevista e realidade.
 
 # COMMAND ----------
@@ -823,40 +817,40 @@ fig_hetero = go.Figure()
 
 # Adiciona os pontos de cada loja, coloridos por CD
 for cd_primario in df_heterocedasticidade['Cd_primario'].unique():
-    df_cd = df_heterocedasticidade[df_heterocedasticidade['Cd_primario'] == cd_primario]
-    
-    fig_hetero.add_trace(
-        go.Scatter(
-            x=df_cd['wMAPE_share_perc'],
-            y=df_cd['SE_pp'],
-            mode='markers',
-            marker=dict(
-                size=8,
-                symbol='circle',
-                opacity=0.7
-            ),
-            text=df_cd['CdFilial'].astype(str),
-            hovertemplate=(
-                '<b>Loja:</b> %{text}<br>' +
-                '<b>CD Primário:</b> ' + str(cd_primario) + '<br>' +
-                '<b>wMAPE Share:</b> %{x:.4f}%<br>' +
-                '<b>SE (pp):</b> %{y:.2f}<br>' +
-                '<extra></extra>'
-            ),
-            name=f'CD {cd_primario}',
-            showlegend=True
+        df_cd = df_heterocedasticidade[df_heterocedasticidade['Cd_primario'] == cd_primario]
+        
+        fig_hetero.add_trace(
+            go.Scatter(
+                x=df_cd['L1_share_perc'],
+                y=df_cd['SE_pp'],
+                mode='markers',
+                marker=dict(
+                    size=8,
+                    symbol='circle',
+                    opacity=0.7
+                ),
+                text=df_cd['CdFilial'].astype(str),
+                hovertemplate=(
+                    '<b>Loja:</b> %{text}<br>' +
+                    '<b>CD Primário:</b> ' + str(cd_primario) + '<br>' +
+                    '<b>L1 Share:</b> %{x:.4f}%<br>' +
+                    '<b>SE (pp):</b> %{y:.2f}<br>' +
+                    '<extra></extra>'
+                ),
+                name=f'CD {cd_primario}',
+                showlegend=True
+            )
         )
-    )
 
 # Adiciona linha de referência para erro médio por CD
 for cd_primario in df_heterocedasticidade['Cd_primario'].unique():
     df_cd = df_heterocedasticidade[df_heterocedasticidade['Cd_primario'] == cd_primario]
-    wmape_medio = df_cd['wMAPE_share_perc'].mean()
+    l1_medio = df_cd['L1_share_perc'].mean()
     se_medio = df_cd['SE_pp'].mean()
     
     fig_hetero.add_trace(
         go.Scatter(
-            x=[wmape_medio],
+            x=[l1_medio],
             y=[se_medio],
             mode='markers',
             marker=dict(
@@ -868,7 +862,7 @@ for cd_primario in df_heterocedasticidade['Cd_primario'].unique():
             text=f'CD {cd_primario} - Média',
             hovertemplate=(
                 '<b>CD {cd_primario} - Média</b><br>' +
-                '<b>wMAPE Share Médio:</b> ' + f'{wmape_medio:.4f}%<br>' +
+                '<b>L1 Share Médio:</b> ' + f'{l1_medio:.4f}%<br>' +
                 '<b>SE Médio:</b> ' + f'{se_medio:.2f}<br>' +
                 '<extra></extra>'
             ),
@@ -885,7 +879,7 @@ fig_hetero.update_layout(
         'xanchor': 'center',
         'font': {'size': 18}
     },
-    xaxis_title="wMAPE Share por Loja (%)",
+    xaxis_title="L1 Share por Loja (%)",
     yaxis_title="Share Error (SE) por Loja (pp)",
     plot_bgcolor="#F8F8FF",
     paper_bgcolor="#F8F8FF",
@@ -931,7 +925,7 @@ fig_hetero.show()
 # MAGIC 3. **Heterocedasticidade**: Variância dos erros não é constante - algumas lojas têm erros muito maiores que outras
 # MAGIC
 # MAGIC **Implicações:**
-# MAGIC - **Nível CD**: wMAPE pode parecer baixo (0.01% a 1.46%)
+# MAGIC - **Nível CD**: L1 pode parecer baixo, mas mascara problemas reais
 # MAGIC - **Nível Loja**: Erros individuais podem ser 10x maiores
 # MAGIC - **Cancelamento**: Erros positivos e negativos se "cancelam" na agregação
 
@@ -942,17 +936,17 @@ df_stats_hetero = (
     df_metricas_loja_individual
     .groupBy("Cd_primario")
     .agg(
-        F.avg("wMAPE_share_perc").alias("wMAPE_medio"),
-        F.stddev("wMAPE_share_perc").alias("wMAPE_desvio"),
-        F.min("wMAPE_share_perc").alias("wMAPE_min"),
-        F.max("wMAPE_share_perc").alias("wMAPE_max"),
+        F.avg("L1_share_perc").alias("L1_medio"),
+        F.stddev("L1_share_perc").alias("L1_desvio"),
+        F.min("L1_share_perc").alias("L1_min"),
+        F.max("L1_share_perc").alias("L1_max"),
         F.avg("SE_pp").alias("SE_medio"),
         F.stddev("SE_pp").alias("SE_desvio"),
         F.count("*").alias("qtd_lojas")
     )
     .withColumn(
-        "coeficiente_variacao_wMAPE", 
-        F.round(F.col("wMAPE_desvio") / F.col("wMAPE_medio"), 4)
+        "coeficiente_variacao_L1", 
+        F.round(F.col("L1_desvio") / F.col("L1_medio"), 4)
     )
     .withColumn(
         "coeficiente_variacao_SE", 
@@ -971,12 +965,12 @@ df_stats_pandas = df_stats_hetero.toPandas()
 
 fig_barras = go.Figure()
 
-# Barras para wMAPE
+# Barras para L1
 fig_barras.add_trace(
     go.Bar(
         x=df_stats_pandas['Cd_primario'].astype(str),
-        y=df_stats_pandas['wMAPE_medio'],
-        name='wMAPE Médio',
+        y=df_stats_pandas['L1_medio'],
+        name='L1 Médio',
         marker_color='lightblue',
         yaxis='y'
     )
@@ -986,7 +980,7 @@ fig_barras.add_trace(
 fig_barras.add_trace(
     go.Bar(
         x=df_stats_pandas['Cd_primario'].astype(str),
-        y=df_stats_pandas['wMAPE_desvio'],
+        y=df_stats_pandas['L1_desvio'],
         name='Desvio Padrão',
         marker_color='red',
         opacity=0.7,
@@ -1003,7 +997,7 @@ fig_barras.update_layout(
         'font': {'size': 18}
     },
     xaxis_title="CD Primário",
-    yaxis_title="wMAPE Share (%)",
+    yaxis_title="L1 Share (%)",
     plot_bgcolor="#F8F8FF",
     paper_bgcolor="#F8F8FF",
     font=dict(size=12),
@@ -1036,8 +1030,8 @@ fig_barras.show()
 # MAGIC
 # MAGIC **Evidências encontradas:**
 # MAGIC
-# MAGIC 1. **Máscara da Agregação**: Os wMAPEs agregados por CD (0.01% a 1.46%) não refletem a realidade das lojas individuais
-# MAGIC 2. **Variabilidade Interna**: CDs com wMAPE médio baixo podem ter lojas com erros 10-100x maiores
+# MAGIC 1. **Máscara da Agregação**: As métricas L1 agregadas por CD não refletem a realidade das lojas individuais
+# MAGIC 2. **Variabilidade Interna**: CDs com L1 médio baixo podem ter lojas com erros 10-100x maiores
 # MAGIC 3. **Cancelamento de Erros**: Erros positivos e negativos se compensam na agregação, mascarando problemas reais
 # MAGIC
 # MAGIC **Recomendações:**
