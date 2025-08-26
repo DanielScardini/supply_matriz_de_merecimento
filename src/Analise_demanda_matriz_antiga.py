@@ -527,10 +527,6 @@ df_with_metrics.limit(1).display()
 
 # COMMAND ----------
 
-df_with_metrics.orderBy(F.desc("Demanda_total_mes_especie")).display()
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC ### 10.1.2 Carregamento do Mapeamento Filial-CD
 # MAGIC
