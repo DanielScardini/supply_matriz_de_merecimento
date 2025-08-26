@@ -33,7 +33,7 @@ spark = SparkSession.builder.appName("calculo_matriz_merecimento").getOrCreate()
 
 # MAGIC %md
 # MAGIC ## 2. Carregamento dos Dados Base
-
+# MAGIC
 # MAGIC %md
 # MAGIC Carregamos a base de dados de vendas e estoque para produtos de telefonia celular,
 # MAGIC que será utilizada para o cálculo da matriz de merecimento.
@@ -62,7 +62,7 @@ df_vendas_estoque_telefonia.limit(1).display()
 
 # MAGIC %md
 # MAGIC ## 3. Carregamento dos Mapeamentos de Produtos
-
+# MAGIC
 # MAGIC %md
 # MAGIC Carregamos os arquivos de mapeamento que relacionam SKUs com modelos, 
 # MAGIC espécies gerenciais e grupos de produtos similares ("gêmeos").
@@ -132,7 +132,7 @@ de_para_modelos_gemeos_tecnologia.limit(1).display()
 
 # MAGIC %md
 # MAGIC ## 4. Join dos Dados com Mapeamentos
-
+# MAGIC
 # MAGIC %md
 # MAGIC Realizamos o join entre os dados de vendas/estoque e os mapeamentos
 # MAGIC para obter uma base consolidada com informações de gêmeos.
@@ -158,18 +158,18 @@ df_vendas_estoque_telefonia_gemeos_modelos.limit(1).display()
 
 # MAGIC %md
 # MAGIC ## 5. Detecção Automática de Meses Atípicos
-
+# MAGIC
 # MAGIC %md
 # MAGIC Implementamos a regra analítica para detectar meses atípicos:
 # MAGIC - **Cálculo por Gêmeo**: Estatísticas calculadas individualmente para cada grupo de produtos similares
-# MAGIC - **Regra dos 3 Desvios**: Remove meses com QtMercadoria > 3σ da média
+# MAGIC - **Regra dos n Desvios**: Remove meses com QtMercadoria > nσ da média
 # MAGIC - **Validação Automática**: Identifica e reporta meses removidos com justificativa estatística
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ### 5.1 Cálculo de Estatísticas por Gêmeo e Mês
-
+# MAGIC
 # MAGIC %md
 # MAGIC Calculamos as estatísticas (média e desvio padrão) da quantidade de mercadoria
 # MAGIC para cada grupo de produtos similares (gêmeos) por mês.
@@ -197,12 +197,14 @@ df_stats_por_gemeo_mes.limit(5).display()
 
 # MAGIC %md
 # MAGIC ### 5.2 Cálculo de Média e Desvio Padrão por Gêmeo
-
+# MAGIC
 # MAGIC %md
 # MAGIC Calculamos a média e desvio padrão da quantidade de mercadoria para cada gêmeo,
 # MAGIC considerando todos os meses disponíveis.
 
 # COMMAND ----------
+
+n_desvios = 2
 
 # Janela para cálculo de estatísticas por gêmeo
 w_stats_gemeo = Window.partitionBy("gemeos")
@@ -219,21 +221,21 @@ df_stats_gemeo = (
         F.stddev("QtMercadoria_total").over(w_stats_gemeo)
     )
     .withColumn(
-        "limite_superior_3sigma",
-        F.col("media_qt_mercadoria") + (F.lit(3) * F.col("desvio_padrao_qt_mercadoria"))
+        "limite_superior_nsigma",
+        F.col("media_qt_mercadoria") + (F.lit(n_desvios) * F.col("desvio_padrao_qt_mercadoria"))
     )
     .withColumn(
-        "limite_inferior_3sigma",
+        "limite_inferior_nsigma",
         F.greatest(
-            F.col("media_qt_mercadoria") - (F.lit(3) * F.col("desvio_padrao_qt_mercadoria")),
+            F.col("media_qt_mercadoria") - (F.lit(n_desvios) * F.col("desvio_padrao_qt_mercadoria")),
             F.lit(0)  # Não permite valores negativos
         )
     )
     .withColumn(
         "flag_mes_atipico",
         F.when(
-            (F.col("QtMercadoria_total") > F.col("limite_superior_3sigma")) |
-            (F.col("QtMercadoria_total") < F.col("limite_inferior_3sigma")),
+            (F.col("QtMercadoria_total") > F.col("limite_superior_nsigma")) |
+            (F.col("QtMercadoria_total") < F.col("limite_inferior_nsigma")),
             F.lit(1)
         ).otherwise(F.lit(0))
     )
@@ -249,7 +251,7 @@ df_stats_gemeo.orderBy("gemeos", "year_month").limit(10).display()
 
 # MAGIC %md
 # MAGIC ### 5.3 Identificação de Meses Atípicos
-
+# MAGIC
 # MAGIC %md
 # MAGIC Identificamos os meses que serão removidos por serem considerados atípicos
 # MAGIC segundo a regra dos 3 desvios padrão.
@@ -266,8 +268,8 @@ df_meses_atipicos = (
         F.round("QtMercadoria_total", 2).alias("QtMercadoria_total"),
         F.round("media_qt_mercadoria", 2).alias("media_qt_mercadoria"),
         F.round("desvio_padrao_qt_mercadoria", 2).alias("desvio_padrao_qt_mercadoria"),
-        F.round("limite_superior_3sigma", 2).alias("limite_superior_3sigma"),
-        F.round("limite_inferior_3sigma", 2).alias("limite_inferior_3sigma"),
+        F.round("limite_superior_nsigma", 2).alias("limite_superior_nsigma"),
+        F.round("limite_inferior_nsigma", 2).alias("limite_inferior_nsigma"),
         "flag_mes_atipico"
     )
     .orderBy("gemeos", "year_month")
@@ -287,7 +289,7 @@ else:
 
 # MAGIC %md
 # MAGIC ### 5.4 Resumo Estatístico por Gêmeo
-
+# MAGIC
 # MAGIC %md
 # MAGIC Apresentamos um resumo estatístico mostrando quantos meses foram identificados
 # MAGIC como atípicos para cada grupo de produtos similares.
@@ -319,7 +321,7 @@ df_resumo_atipicos_gemeo.display()
 
 # MAGIC %md
 # MAGIC ## 6. Filtragem dos Dados - Remoção de Meses Atípicos
-
+# MAGIC
 # MAGIC %md
 # MAGIC Aplicamos o filtro para remover os meses identificados como atípicos,
 # MAGIC criando uma base limpa para o cálculo da matriz de merecimento.
@@ -349,7 +351,7 @@ else:
 
 # MAGIC %md
 # MAGIC ### 6.1 Aplicação do Filtro de Meses Atípicos
-
+# MAGIC
 # MAGIC %md
 # MAGIC Aplicamos o filtro para remover os meses atípicos da base de dados,
 # MAGIC mantendo apenas os meses com comportamento normal para cálculo da matriz.
@@ -372,7 +374,7 @@ print(f"📊 Registros removidos: {df_vendas_estoque_telefonia_gemeos_modelos.co
 
 # MAGIC %md
 # MAGIC ### 6.2 Validação da Filtragem
-
+# MAGIC
 # MAGIC %md
 # MAGIC Validamos que a filtragem foi aplicada corretamente, verificando
 # MAGIC se os meses atípicos foram efetivamente removidos.
@@ -408,7 +410,7 @@ else:
 
 # MAGIC %md
 # MAGIC ## 7. Agregação dos Dados Filtrados
-
+# MAGIC
 # MAGIC %md
 # MAGIC Agregamos os dados filtrados por mês, modelo, gêmeos e filial para
 # MAGIC análise no nível de loja, agora sem os meses atípicos.
@@ -436,7 +438,7 @@ df_vendas_estoque_telefonia_agg_filtrado.limit(5).display()
 
 # MAGIC %md
 # MAGIC ## 8. Cálculo de Percentuais para Matriz de Merecimento
-
+# MAGIC
 # MAGIC %md
 # MAGIC Calculamos os percentuais de participação nas vendas e demanda por mês,
 # MAGIC modelo e grupo de produtos similares, agora com base nos dados filtrados.
@@ -494,7 +496,7 @@ df_pct_telefonia_filtrado.limit(5).display()
 
 # MAGIC %md
 # MAGIC ## 9. Resumo da Detecção de Meses Atípicos
-
+# MAGIC
 # MAGIC %md
 # MAGIC Apresentamos um resumo completo da detecção e remoção de meses atípicos,
 # MAGIC incluindo estatísticas e impacto na base de dados.
@@ -537,7 +539,7 @@ print(f"  • Melhoria na qualidade das alocações calculadas")
 
 # MAGIC %md
 # MAGIC ## 10. Próximos Passos
-
+# MAGIC
 # MAGIC %md
 # MAGIC A base de dados está agora limpa e pronta para o cálculo da matriz de merecimento.
 # MAGIC Os próximos passos incluem:
