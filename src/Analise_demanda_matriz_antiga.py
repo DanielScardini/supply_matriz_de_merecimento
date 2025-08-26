@@ -7,6 +7,12 @@
 # MAGIC
 # MAGIC **Objetivo**: Identificar gaps entre alocações previstas e realidade para otimização da matriz futura.
 # MAGIC **Escopo**: Apenas produtos de telefonia celular no nível de filial (loja).
+# MAGIC
+# MAGIC **Métricas de Avaliação:**
+# MAGIC - **wMAPE**: Weighted Mean Absolute Percentage Error ponderado por volume
+# MAGIC - **Cross Entropy**: Entropia cruzada para divergência de distribuições
+# MAGIC - **Share Error (SE)**: Erro na distribuição de participações
+# MAGIC - **KL Divergence**: Divergência de Kullback-Leibler para comparação
 
 # COMMAND ----------
 
@@ -26,12 +32,16 @@ from typing import List, Optional
 # MAGIC %md
 # MAGIC ## 2. Função para Cálculo de Métricas de Alocação
 # MAGIC
-# MAGIC Esta função calcula métricas sofisticadas para avaliar a qualidade das alocações:
-# MAGIC - **wMAPE**: Erro percentual absoluto médio ponderado
-# MAGIC - **SE (Share Error)**: Erro na distribuição de participações
-# MAGIC - **UAPE**: Penalização para subalocações
-# MAGIC - **wMAPE assimétrico**: Versão que penaliza mais os erros de subalocação
-# MAGIC - **KL Divergence**: Medida de divergência entre distribuições reais e previstas
+# MAGIC Esta função calcula métricas robustas para avaliar a qualidade das alocações:
+# MAGIC - **wMAPE**: Weighted Mean Absolute Percentage Error ponderado por volume
+# MAGIC - **SE (Share Error)**: Erro na distribuição de participações entre filiais
+# MAGIC - **Cross Entropy**: Medida de divergência entre distribuições reais e previstas
+# MAGIC - **KL Divergence**: Divergência de Kullback-Leibler para comparação de distribuições
+# MAGIC
+# MAGIC **Vantagens das métricas:**
+# MAGIC - wMAPE é padrão da indústria e bem interpretável
+# MAGIC - Cross Entropy é padrão em machine learning para avaliação de distribuições
+# MAGIC - Foco em métricas fundamentais e robustas
 
 # COMMAND ----------
 
@@ -63,8 +73,8 @@ def add_allocation_metrics(
     # Termos (volume)
     abs_err = F.abs(y - yhat)
     
-    # L1 Distance (Manhattan distance) - erro absoluto ponderado por volume
-    l1_distance = abs_err * y
+    # wMAPE (Weighted Mean Absolute Percentage Error) - erro absoluto ponderado por volume
+    wmape_distance = abs_err * y
     
     # Cross Entropy - medida de divergência entre distribuições
     cross_entropy_term = F.when(
@@ -80,16 +90,16 @@ def add_allocation_metrics(
 
     # Termos (share ponderado por volume)
     abs_err_share = F.abs(p - phat)
-    l1_share = abs_err_share * y  # L1 distance para shares
+    wmape_share = abs_err_share * y  # wMAPE para shares
 
     base = (df
         .withColumn("__y__", y).withColumn("__yhat__", yhat)
         .withColumn("__p__", p).withColumn("__phat__", phat)
-        .withColumn("__abs_err__", abs_err).withColumn("__l1_distance__", l1_distance)
+        .withColumn("__abs_err__", abs_err).withColumn("__wmape_distance__", wmape_distance)
         .withColumn("__kl_term__", kl_term)
         .withColumn("__cross_entropy_term__", cross_entropy_term)
         .withColumn("__abs_err_share__", abs_err_share)
-        .withColumn("__l1_share__", l1_share)
+        .withColumn("__wmape_share__", wmape_share)
     )
 
     agg = base.groupBy(*group_cols) if group_cols else base.groupBy()
@@ -97,22 +107,22 @@ def add_allocation_metrics(
     res = agg.agg(
         # volume
         F.sum("__abs_err__").alias("_sum_abs_err"),
-        F.sum("__l1_distance__").alias("_sum_l1_distance"),
+        F.sum("__wmape_distance__").alias("_sum_wmape_distance"),
         F.sum("__y__").alias("_sum_y"),
         F.sum("__yhat__").alias("_sum_yhat"),
         # shares
         F.sum(F.abs(F.col("__p__") - F.col("__phat__"))).alias("_SE"),
         F.sum("__kl_term__").alias("_KL"),
         F.sum("__cross_entropy_term__").alias("_cross_entropy"),
-        F.sum("__l1_share__").alias("_num_l1_share")
+        F.sum("__wmape_share__").alias("_num_wmape_share")
     ).withColumn(
         # volume (%)
-        "L1_perc", F.round(F.when(F.col("_sum_y") > 0, F.col("_sum_l1_distance")/F.col("_sum_y")).otherwise(0.0) * 100, 4)
+        "wMAPE_perc", F.round(F.when(F.col("_sum_y") > 0, F.col("_sum_wmape_distance")/F.col("_sum_y")).otherwise(0.0) * 100, 4)
     ).withColumn(
         # shares (% e pp)
         "SE_pp", F.round(F.col("_SE") * 100, 4)  # 0–200 p.p.
     ).withColumn(
-        "L1_share_perc", F.round(F.when(F.col("_sum_y") > 0, F.col("_num_l1_share")/F.col("_sum_y")).otherwise(0.0) * 100, 4)
+        "wMAPE_share_perc", F.round(F.when(F.col("_sum_y") > 0, F.col("_num_wmape_share")/F.col("_sum_y")).otherwise(0.0) * 100, 4)
     ).withColumn(
         "Cross_entropy", F.when(F.col("_sum_y") > 0, F.col("_cross_entropy")).otherwise(F.lit(0.0))
     ).withColumn(
@@ -120,9 +130,9 @@ def add_allocation_metrics(
     ).select(
         *(group_cols if group_cols else []),
         # volume
-        "L1_perc",
+        "wMAPE_perc",
         # shares ponderados por volume
-        "SE_pp", "L1_share_perc",
+        "SE_pp", "wMAPE_share_perc",
         # distância de distribuição
         "Cross_entropy", "KL_divergence"
     )
@@ -409,6 +419,12 @@ df_matriz_telefonia_metricas.limit(1).display()
 # MAGIC
 # MAGIC Calculamos as métricas linha a linha e agregadas para avaliar a qualidade
 # MAGIC das alocações da matriz de merecimento.
+# MAGIC
+# MAGIC **Métricas Principais:**
+# MAGIC - **wMAPE**: Weighted Mean Absolute Percentage Error (nível volume e shares)
+# MAGIC - **SE (Share Error)**: Erro na distribuição de participações
+# MAGIC - **Cross Entropy**: Divergência entre distribuições reais e previstas
+# MAGIC - **KL Divergence**: Medida de divergência para comparação
 
 # COMMAND ----------
 
@@ -417,6 +433,11 @@ df_matriz_telefonia_metricas.limit(1).display()
 # MAGIC
 # MAGIC Calculamos métricas para cada linha individual para análise detalhada.
 # MAGIC **Nota**: Usamos percentuais da matriz (Percentual_matriz_fixa) vs. percentuais reais da demanda (pct_demanda_perc).
+# MAGIC
+# MAGIC **Métricas Calculadas:**
+# MAGIC - **Erro Absoluto**: Diferença absoluta entre matriz e demanda real
+# MAGIC - **wMAPE**: Erro ponderado pelo volume real da filial
+# MAGIC - **Cross Entropy**: Divergência entre distribuições de participação
 
 # COMMAND ----------
 
@@ -505,6 +526,13 @@ de_para_filial_cd = (
 # MAGIC Calculamos as métricas agregadas para o dataframe inteiro usando a função
 # MAGIC `add_allocation_metrics` que criamos no início.
 # MAGIC **Nota**: Métricas calculadas comparando percentuais da matriz vs. percentuais reais da demanda.
+# MAGIC
+# MAGIC **Métricas Agregadas por CD:**
+# MAGIC - **wMAPE_perc**: Weighted Mean Absolute Percentage Error (nível volume)
+# MAGIC - **wMAPE_share_perc**: Weighted Mean Absolute Percentage Error (nível shares)
+# MAGIC - **SE_pp**: Share Error em pontos percentuais
+# MAGIC - **Cross_entropy**: Entropia cruzada entre distribuições
+# MAGIC - **KL_divergence**: Divergência de Kullback-Leibler
 
 # COMMAND ----------
 
@@ -549,12 +577,17 @@ df_agg_metrics.display()
 
 # MAGIC %md
 # MAGIC ## 11. Visualização: Scatter Plot de Erro Percentual por Filial
-# MAGIC 
+# MAGIC
 # MAGIC Criamos um scatter plot onde cada ponto representa uma filial, mostrando:
 # MAGIC - **Eixo X**: Ordenação arbitrária baseada em Cd_primario (não tem significado específico)
 # MAGIC - **Eixo Y**: Erro percentual agregado da filial (agregando todos os produtos)
-# MAGIC 
+# MAGIC
 # MAGIC **Objetivo**: Identificar visualmente quais filiais têm maior discrepância entre matriz prevista e realidade.
+# MAGIC
+# MAGIC **Métricas Visualizadas:**
+# MAGIC - **Erro com Sinal**: Positivo (subalocação) vs. Negativo (superalocação)
+# MAGIC - **Erro Absoluto**: Magnitude do erro independente da direção
+# MAGIC - **Escala de Cores**: RdBu (vermelho = superestimação, azul = subestimação)
 
 # COMMAND ----------
 
@@ -728,6 +761,11 @@ fig.show()
 # MAGIC 2. **Filiais com erro negativo alto**: Reduzir alocações na matriz (demanda real < prevista)
 # MAGIC 3. **Filiais próximas de zero**: Matriz bem calibrada (manter como está)
 # MAGIC 4. **Padrões geográficos**: Analisar se erros se concentram em regiões específicas
+# MAGIC
+# MAGIC **Métricas Complementares:**
+# MAGIC - **Erro Absoluto**: Magnitude do erro independente da direção
+# MAGIC - **L1 Distance**: Erro ponderado pelo volume real da filial
+# MAGIC - **Cross Entropy**: Qualidade da distribuição de participações
 
 # COMMAND ----------
 
@@ -763,10 +801,15 @@ display(df_resumo_erro)
 # MAGIC ## 12. Análise de Heterocedasticidade: Erros ao Nível de Loja vs. Agregação por CD
 # MAGIC
 # MAGIC **Problema identificado**: A agregação por CD pode mascarar problemas reais ao nível de loja individual.
-# MAGIC **Objetivo**: Demonstrar que embora os wMAPEs agregados por CD pareçam "aceitáveis", 
+# MAGIC **Objetivo**: Demonstrar que embora as métricas wMAPE agregadas por CD pareçam "aceitáveis", 
 # MAGIC ao nível de loja existem erros significativos em todas as direções (heterocedasticidade).
 # MAGIC
 # MAGIC **Hipótese**: Os erros se "cancelam" na agregação, mas individualmente são problemáticos.
+# MAGIC
+# MAGIC **Métricas Analisadas:**
+# MAGIC - **wMAPE_share_perc**: Weighted Mean Absolute Percentage Error para shares
+# MAGIC - **SE_pp**: Share Error em pontos percentuais
+# MAGIC - **Cross_entropy**: Entropia cruzada entre distribuições
 
 # COMMAND ----------
 
@@ -821,7 +864,7 @@ for cd_primario in df_heterocedasticidade['Cd_primario'].unique():
         
         fig_hetero.add_trace(
             go.Scatter(
-                x=df_cd['L1_share_perc'],
+                x=df_cd['wMAPE_share_perc'],
                 y=df_cd['SE_pp'],
                 mode='markers',
                 marker=dict(
@@ -833,7 +876,7 @@ for cd_primario in df_heterocedasticidade['Cd_primario'].unique():
                 hovertemplate=(
                     '<b>Loja:</b> %{text}<br>' +
                     '<b>CD Primário:</b> ' + str(cd_primario) + '<br>' +
-                    '<b>L1 Share:</b> %{x:.4f}%<br>' +
+                    '<b>wMAPE Share:</b> %{x:.4f}%<br>' +
                     '<b>SE (pp):</b> %{y:.2f}<br>' +
                     '<extra></extra>'
                 ),
@@ -845,12 +888,12 @@ for cd_primario in df_heterocedasticidade['Cd_primario'].unique():
 # Adiciona linha de referência para erro médio por CD
 for cd_primario in df_heterocedasticidade['Cd_primario'].unique():
     df_cd = df_heterocedasticidade[df_heterocedasticidade['Cd_primario'] == cd_primario]
-    l1_medio = df_cd['L1_share_perc'].mean()
+    wmape_medio = df_cd['wMAPE_share_perc'].mean()
     se_medio = df_cd['SE_pp'].mean()
     
     fig_hetero.add_trace(
         go.Scatter(
-            x=[l1_medio],
+            x=[wmape_medio],
             y=[se_medio],
             mode='markers',
             marker=dict(
@@ -862,7 +905,7 @@ for cd_primario in df_heterocedasticidade['Cd_primario'].unique():
             text=f'CD {cd_primario} - Média',
             hovertemplate=(
                 '<b>CD {cd_primario} - Média</b><br>' +
-                '<b>L1 Share Médio:</b> ' + f'{l1_medio:.4f}%<br>' +
+                '<b>wMAPE Share Médio:</b> ' + f'{wmape_medio:.4f}%<br>' +
                 '<b>SE Médio:</b> ' + f'{se_medio:.2f}<br>' +
                 '<extra></extra>'
             ),
@@ -879,7 +922,7 @@ fig_hetero.update_layout(
         'xanchor': 'center',
         'font': {'size': 18}
     },
-    xaxis_title="L1 Share por Loja (%)",
+    xaxis_title="wMAPE Share por Loja (%)",
     yaxis_title="Share Error (SE) por Loja (pp)",
     plot_bgcolor="#F8F8FF",
     paper_bgcolor="#F8F8FF",
@@ -925,9 +968,14 @@ fig_hetero.show()
 # MAGIC 3. **Heterocedasticidade**: Variância dos erros não é constante - algumas lojas têm erros muito maiores que outras
 # MAGIC
 # MAGIC **Implicações:**
-# MAGIC - **Nível CD**: L1 pode parecer baixo, mas mascara problemas reais
+# MAGIC - **Nível CD**: wMAPE pode parecer baixo, mas mascara problemas reais
 # MAGIC - **Nível Loja**: Erros individuais podem ser 10x maiores
 # MAGIC - **Cancelamento**: Erros positivos e negativos se "cancelam" na agregação
+# MAGIC
+# MAGIC **Interpretação das Métricas:**
+# MAGIC - **wMAPE_share_perc**: Erro absoluto ponderado por volume (maior = pior alocação)
+# MAGIC - **SE_pp**: Erro na distribuição de participações (0-200 pontos percentuais)
+# MAGIC - **Cross_entropy**: Divergência entre distribuições (maior = mais divergente)
 
 # COMMAND ----------
 
@@ -936,17 +984,17 @@ df_stats_hetero = (
     df_metricas_loja_individual
     .groupBy("Cd_primario")
     .agg(
-        F.avg("L1_share_perc").alias("L1_medio"),
-        F.stddev("L1_share_perc").alias("L1_desvio"),
-        F.min("L1_share_perc").alias("L1_min"),
-        F.max("L1_share_perc").alias("L1_max"),
+        F.avg("wMAPE_share_perc").alias("wMAPE_medio"),
+        F.stddev("wMAPE_share_perc").alias("wMAPE_desvio"),
+        F.min("wMAPE_share_perc").alias("wMAPE_min"),
+        F.max("wMAPE_share_perc").alias("wMAPE_max"),
         F.avg("SE_pp").alias("SE_medio"),
         F.stddev("SE_pp").alias("SE_desvio"),
         F.count("*").alias("qtd_lojas")
     )
     .withColumn(
-        "coeficiente_variacao_L1", 
-        F.round(F.col("L1_desvio") / F.col("L1_medio"), 4)
+        "coeficiente_variacao_wMAPE", 
+        F.round(F.col("wMAPE_desvio") / F.col("wMAPE_medio"), 4)
     )
     .withColumn(
         "coeficiente_variacao_SE", 
@@ -965,12 +1013,12 @@ df_stats_pandas = df_stats_hetero.toPandas()
 
 fig_barras = go.Figure()
 
-# Barras para L1
+# Barras para wMAPE
 fig_barras.add_trace(
     go.Bar(
         x=df_stats_pandas['Cd_primario'].astype(str),
-        y=df_stats_pandas['L1_medio'],
-        name='L1 Médio',
+        y=df_stats_pandas['wMAPE_medio'],
+        name='wMAPE Médio',
         marker_color='lightblue',
         yaxis='y'
     )
@@ -980,7 +1028,7 @@ fig_barras.add_trace(
 fig_barras.add_trace(
     go.Bar(
         x=df_stats_pandas['Cd_primario'].astype(str),
-        y=df_stats_pandas['L1_desvio'],
+        y=df_stats_pandas['wMAPE_desvio'],
         name='Desvio Padrão',
         marker_color='red',
         opacity=0.7,
@@ -997,7 +1045,7 @@ fig_barras.update_layout(
         'font': {'size': 18}
     },
     xaxis_title="CD Primário",
-    yaxis_title="L1 Share (%)",
+    yaxis_title="wMAPE Share (%)",
     plot_bgcolor="#F8F8FF",
     paper_bgcolor="#F8F8FF",
     font=dict(size=12),
@@ -1030,8 +1078,8 @@ fig_barras.show()
 # MAGIC
 # MAGIC **Evidências encontradas:**
 # MAGIC
-# MAGIC 1. **Máscara da Agregação**: As métricas L1 agregadas por CD não refletem a realidade das lojas individuais
-# MAGIC 2. **Variabilidade Interna**: CDs com L1 médio baixo podem ter lojas com erros 10-100x maiores
+# MAGIC 1. **Máscara da Agregação**: As métricas wMAPE agregadas por CD não refletem a realidade das lojas individuais
+# MAGIC 2. **Variabilidade Interna**: CDs com wMAPE médio baixo podem ter lojas com erros 10-100x maiores
 # MAGIC 3. **Cancelamento de Erros**: Erros positivos e negativos se compensam na agregação, mascarando problemas reais
 # MAGIC
 # MAGIC **Recomendações:**
@@ -1039,3 +1087,9 @@ fig_barras.show()
 # MAGIC - **Métricas Complementares**: Usar desvio padrão e coeficiente de variação além das médias
 # MAGIC - **Alertas por Loja**: Implementar monitoramento individual, não apenas agregado
 # MAGIC - **Investigações Específicas**: Focar nas lojas com maior variabilidade interna
+# MAGIC
+# MAGIC **Métricas de Monitoramento Recomendadas:**
+# MAGIC - **wMAPE_share_perc**: Para identificar lojas com maior erro de alocação
+# MAGIC - **SE_pp**: Para detectar problemas na distribuição de participações
+# MAGIC - **Cross_entropy**: Para avaliar qualidade geral das distribuições
+# MAGIC - **Coeficiente de Variação**: Para identificar CDs com alta variabilidade interna
