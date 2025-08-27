@@ -169,7 +169,7 @@ def determinar_grupo_necessidade(categoria: str, df: DataFrame) -> DataFrame:
     # Aplica a regra de agrupamento
     df_com_grupo = df.withColumn(
         "grupo_de_necessidade",
-        F.col(coluna_origem)  # ← Copia os VALORES da coluna origem (ex: valores de 'gemeos' ou 'NmEspecieGerencial')
+        F.coalesce(F.col(coluna_origem), F.lit("SEM_GN"))  # ← Copia os VALORES da coluna origem ou "SEM_GN" se nulo
     ).withColumn(
         "tipo_agrupamento",
         F.lit(regra["tipo_agrupamento"])  # ← Este sim é um valor fixo para identificação
@@ -676,7 +676,10 @@ def criar_de_para_filial_cd() -> DataFrame:
         .select("cdfilial", "cd_primario")
         .distinct()
         .filter(F.col("cdfilial").isNotNull())
-        .filter(F.col("cd_primario").isNotNull())
+        .withColumn(
+            "cd_primario",
+            F.coalesce(F.col("cd_primario"), F.lit("SEM_CD"))  # ← "SEM_CD" se cd_primario for nulo
+        )
         .orderBy("cdfilial")
     )
     
