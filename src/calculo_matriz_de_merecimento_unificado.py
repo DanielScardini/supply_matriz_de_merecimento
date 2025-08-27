@@ -658,155 +658,6 @@ def consolidar_medidas(df: DataFrame) -> DataFrame:
 
 # COMMAND ----------
 
-def executar_calculo_matriz_merecimento(categoria: str, 
-                                       data_inicio: str = "2024-01-01",
-                                       data_calculo: str = "2025-06-30",
-                                       sigma_meses_atipicos: float = 3.0,
-                                       sigma_outliers_cd: float = 3.0,
-                                       sigma_outliers_loja: float = 3.0,
-                                       sigma_atacado_cd: float = 1.5,
-                                       sigma_atacado_loja: float = 1.5) -> DataFrame:
-    """
-    Função principal que executa todo o cálculo da matriz de merecimento.
-    
-    Args:
-        categoria: Nome da categoria/diretoria
-        data_inicio: Data de início para filtro (formato YYYY-MM-DD)
-        data_calculo: Data específica para cálculo de merecimento (formato YYYY-MM-DD)
-        sigma_meses_atipicos: Número de desvios padrão para meses atípicos (padrão: 3.0)
-        sigma_outliers_cd: Número de desvios padrão para outliers CD (padrão: 3.0)
-        sigma_outliers_loja: Número de desvios padrão para outliers loja (padrão: 3.0)
-        sigma_atacado_cd: Número de desvios padrão para outliers CD atacado (padrão: 1.5)
-        sigma_atacado_loja: Número de desvios padrão para outliers loja atacado (padrão: 1.5)
-        
-    Returns:
-        DataFrame final com todas as medidas calculadas e merecimento
-    """
-    print(f"🚀 Iniciando cálculo da matriz de merecimento para: {categoria}")
-    print("=" * 80)
-    print(f"📊 Configuração de parâmetros sigma:")
-    print(f"   • Meses atípicos: {sigma_meses_atipicos}σ")
-    print(f"   • Outliers CD: {sigma_outliers_cd}σ")
-    print(f"   • Outliers loja: {sigma_outliers_loja}σ")
-    print(f"   • Outliers atacado CD: {sigma_atacado_cd}σ")
-    print(f"   • Outliers atacado loja: {sigma_atacado_loja}σ")
-    print("=" * 80)
-    
-    try:
-        # 1. Carregamento dos dados base (SEM grupo_de_necessidade ainda)
-        df_base = carregar_dados_base(categoria, data_inicio)
-        df_base.cache()
-        # 2. Carregamento dos mapeamentos
-        de_para_modelos, de_para_gemeos = carregar_mapeamentos_produtos(categoria)  
-
-        # 3. Aplicação dos mapeamentos
-        df_com_mapeamentos = aplicar_mapeamentos_produtos(
-            df_base, categoria, de_para_modelos, de_para_gemeos
-        )
-        # 4. AGORA determina o grupo_de_necessidade (APÓS os mapeamentos)
-        df_com_grupo = determinar_grupo_necessidade(categoria, df_com_mapeamentos)
-        df_com_grupo.cache()
-        # 5. Detecção de outliers com parâmetros sigma configuráveis
-        df_stats, df_meses_atipicos = detectar_outliers_meses_atipicos(
-            df_com_grupo, 
-            categoria,
-            sigma_meses_atipicos=sigma_meses_atipicos,
-            sigma_outliers_cd=sigma_outliers_cd,
-            sigma_outliers_loja=sigma_outliers_loja,
-            sigma_atacado_cd=sigma_atacado_cd,
-            sigma_atacado_loja=sigma_atacado_loja
-        )
-        
-        # 6. Filtragem de meses atípicos
-        df_filtrado = filtrar_meses_atipicos(df_com_grupo, df_meses_atipicos)
-        
-        # 7. Cálculo das medidas centrais
-        df_com_medidas = calcular_medidas_centrais_com_medias_aparadas(df_filtrado)
-        
-        # 8. Consolidação final
-        df_final = consolidar_medidas(df_com_medidas)
-        
-        # 9. Cálculo de merecimento por CD e filial
-        print("=" * 80)
-        print("🔄 Iniciando cálculo de merecimento...")
-        
-        # 9.1 Merecimento a nível CD
-        df_merecimento_cd = calcular_merecimento_cd(df_final, data_calculo, categoria)
-        
-        # 9.2 Merecimento interno ao CD (filial)
-        df_merecimento_interno = calcular_merecimento_interno_cd(df_final, data_calculo, categoria)
-        
-        # 9.3 Merecimento final (CD × Interno CD)
-        df_merecimento_final = calcular_merecimento_final(df_merecimento_cd, df_merecimento_interno)
-        
-        # 9.4 Join final com todas as informações
-        df_resultado_final = df_final.join(
-            df_merecimento_final.select("cdfilial", "cd_primario", "grupo_de_necessidade"),
-            on=["cdfilial", "grupo_de_necessidade"],
-            how="left"
-        )
-        
-        print("=" * 80)
-        print(f"✅ Cálculo da matriz de merecimento concluído para: {categoria}")
-        print(f"📊 Total de registros finais: {df_resultado_final.count():,}")
-        print(f"📅 Data de cálculo de merecimento: {data_calculo}")
-        print(f"📋 Fluxo executado:")
-        print(f"   1. Carregamento de dados base")
-        print(f"   2. Carregamento de mapeamentos")
-        print(f"   3. Aplicação de mapeamentos")
-        print(f"   4. Definição de grupo_de_necessidade")
-        print(f"   5. Detecção de outliers")
-        print(f"   6. Filtragem de meses atípicos")
-        print(f"   7. Cálculo de medidas centrais")
-        print(f"   8. Consolidação final")
-        print(f"   9. Cálculo de merecimento CD")
-        print(f"   10. Cálculo de merecimento interno CD")
-        print(f"   11. Cálculo de merecimento final")
-        
-        return df_resultado_final
-        
-    except Exception as e:
-        print(f"❌ Erro durante o cálculo: {str(e)}")
-        raise
-
-# COMMAND ----------
-
-df_telas = executar_calculo_matriz_merecimento("DIRETORIA DE TELAS")
-df_telas.display()
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 12. Exemplo de Uso
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### Exemplo para DIRETORIA DE TELAS
-# MAGIC
-# MAGIC ```python
-# MAGIC df_telas = executar_calculo_matriz_merecimento("DIRETORIA DE TELAS")
-# MAGIC ```
-# MAGIC
-# MAGIC ### Exemplo para DIRETORIA TELEFONIA CELULAR
-# MAGIC
-# MAGIC ```python
-# MAGIC df_telefonia = executar_calculo_matriz_merecimento("DIRETORIA TELEFONIA CELULAR")
-# MAGIC ```
-# MAGIC
-# MAGIC ### Exemplo para DIRETORIA LINHA BRANCA
-# MAGIC
-# MAGIC ```python
-# MAGIC df_linha_branca = executar_calculo_matriz_merecimento("DIRETORIA LINHA BRANCA")
-# MAGIC ```
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 13. Cálculo de Merecimento por CD e Filial
-
-# COMMAND ----------
-
 def criar_de_para_filial_cd() -> DataFrame:
     """
     Cria o mapeamento filial → CD usando dados da tabela base.
@@ -991,8 +842,153 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
 
 # COMMAND ----------
 
+def executar_calculo_matriz_merecimento(categoria: str, 
+                                       data_inicio: str = "2024-01-01",
+                                       data_calculo: str = "2025-06-30",
+                                       sigma_meses_atipicos: float = 3.0,
+                                       sigma_outliers_cd: float = 3.0,
+                                       sigma_outliers_loja: float = 3.0,
+                                       sigma_atacado_cd: float = 1.5,
+                                       sigma_atacado_loja: float = 1.5) -> DataFrame:
+    """
+    Função principal que executa todo o cálculo da matriz de merecimento.
+    
+    Args:
+        categoria: Nome da categoria/diretoria
+        data_inicio: Data de início para filtro (formato YYYY-MM-DD)
+        data_calculo: Data específica para cálculo de merecimento (formato YYYY-MM-DD)
+        sigma_meses_atipicos: Número de desvios padrão para meses atípicos (padrão: 3.0)
+        sigma_outliers_cd: Número de desvios padrão para outliers CD (padrão: 3.0)
+        sigma_outliers_loja: Número de desvios padrão para outliers loja (padrão: 3.0)
+        sigma_atacado_cd: Número de desvios padrão para outliers CD atacado (padrão: 1.5)
+        sigma_atacado_loja: Número de desvios padrão para outliers loja atacado (padrão: 1.5)
+        
+    Returns:
+        DataFrame final com todas as medidas calculadas e merecimento
+    """
+    print(f"🚀 Iniciando cálculo da matriz de merecimento para: {categoria}")
+    print("=" * 80)
+    print(f"📊 Configuração de parâmetros sigma:")
+    print(f"   • Meses atípicos: {sigma_meses_atipicos}σ")
+    print(f"   • Outliers CD: {sigma_outliers_cd}σ")
+    print(f"   • Outliers loja: {sigma_outliers_loja}σ")
+    print(f"   • Outliers atacado CD: {sigma_atacado_cd}σ")
+    print(f"   • Outliers atacado loja: {sigma_atacado_loja}σ")
+    print("=" * 80)
+    
+    try:
+        # 1. Carregamento dos dados base (SEM grupo_de_necessidade ainda)
+        df_base = carregar_dados_base(categoria, data_inicio)
+        df_base.cache()
+        # 2. Carregamento dos mapeamentos
+        de_para_modelos, de_para_gemeos = carregar_mapeamentos_produtos(categoria)  
+
+        # 3. Aplicação dos mapeamentos
+        df_com_mapeamentos = aplicar_mapeamentos_produtos(
+            df_base, categoria, de_para_modelos, de_para_gemeos
+        )
+        # 4. AGORA determina o grupo_de_necessidade (APÓS os mapeamentos)
+        df_com_grupo = determinar_grupo_necessidade(categoria, df_com_mapeamentos)
+        df_com_grupo.cache()
+        # 5. Detecção de outliers com parâmetros sigma configuráveis
+        df_stats, df_meses_atipicos = detectar_outliers_meses_atipicos(
+            df_com_grupo, 
+            categoria,
+            sigma_meses_atipicos=sigma_meses_atipicos,
+            sigma_outliers_cd=sigma_outliers_cd,
+            sigma_outliers_loja=sigma_outliers_loja,
+            sigma_atacado_cd=sigma_atacado_cd,
+            sigma_atacado_loja=sigma_atacado_loja
+        )
+        
+        # 6. Filtragem de meses atípicos
+        df_filtrado = filtrar_meses_atipicos(df_com_grupo, df_meses_atipicos)
+        
+        # 7. Cálculo das medidas centrais
+        df_com_medidas = calcular_medidas_centrais_com_medias_aparadas(df_filtrado)
+        
+        # 8. Consolidação final
+        df_final = consolidar_medidas(df_com_medidas)
+        
+        # 9. Cálculo de merecimento por CD e filial
+        print("=" * 80)
+        print("🔄 Iniciando cálculo de merecimento...")
+        
+        # 9.1 Merecimento a nível CD
+        df_merecimento_cd = calcular_merecimento_cd(df_final, data_calculo, categoria)
+        
+        # 9.2 Merecimento interno ao CD (filial)
+        df_merecimento_interno = calcular_merecimento_interno_cd(df_final, data_calculo, categoria)
+        
+        # 9.3 Merecimento final (CD × Interno CD)
+        df_merecimento_final = calcular_merecimento_final(df_merecimento_cd, df_merecimento_interno)
+        
+        # 9.4 Join final com todas as informações
+        df_resultado_final = df_final.join(
+            df_merecimento_final.select("cdfilial", "cd_primario", "grupo_de_necessidade"),
+            on=["cdfilial", "grupo_de_necessidade"],
+            how="left"
+        )
+        
+        print("=" * 80)
+        print(f"✅ Cálculo da matriz de merecimento concluído para: {categoria}")
+        print(f"📊 Total de registros finais: {df_resultado_final.count():,}")
+        print(f"📅 Data de cálculo de merecimento: {data_calculo}")
+        print(f"📋 Fluxo executado:")
+        print(f"   1. Carregamento de dados base")
+        print(f"   2. Carregamento de mapeamentos")
+        print(f"   3. Aplicação de mapeamentos")
+        print(f"   4. Definição de grupo_de_necessidade")
+        print(f"   5. Detecção de outliers")
+        print(f"   6. Filtragem de meses atípicos")
+        print(f"   7. Cálculo de medidas centrais")
+        print(f"   8. Consolidação final")
+        print(f"   9. Cálculo de merecimento CD")
+        print(f"   10. Cálculo de merecimento interno CD")
+        print(f"   11. Cálculo de merecimento final")
+        
+        return df_resultado_final
+        
+    except Exception as e:
+        print(f"❌ Erro durante o cálculo: {str(e)}")
+        raise
+
+# COMMAND ----------
+
+df_telas = executar_calculo_matriz_merecimento("DIRETORIA DE TELAS")
+df_telas.display()
+
+# COMMAND ----------
+
 # MAGIC %md
-# MAGIC ## 14. Validação e Testes
+# MAGIC ## 12. Exemplo de Uso
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Exemplo para DIRETORIA DE TELAS
+# MAGIC
+# MAGIC ```python
+# MAGIC df_telas = executar_calculo_matriz_merecimento("DIRETORIA DE TELAS")
+# MAGIC ```
+# MAGIC
+# MAGIC ### Exemplo para DIRETORIA TELEFONIA CELULAR
+# MAGIC
+# MAGIC ```python
+# MAGIC df_telefonia = executar_calculo_matriz_merecimento("DIRETORIA TELEFONIA CELULAR")
+# MAGIC ```
+# MAGIC
+# MAGIC ### Exemplo para DIRETORIA LINHA BRANCA
+# MAGIC
+# MAGIC ```python
+# MAGIC df_linha_branca = executar_calculo_matriz_merecimento("DIRETORIA LINHA BRANCA")
+# MAGIC ```
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC %md
+# MAGIC ## 13. Validação e Testes
 
 # COMMAND ----------
 
