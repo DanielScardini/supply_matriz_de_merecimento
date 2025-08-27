@@ -943,12 +943,34 @@ def executar_calculo_matriz_merecimento(categoria: str,
         # 9.3 Merecimento final (CD × Interno CD)
         df_merecimento_final = calcular_merecimento_final(df_merecimento_cd, df_merecimento_interno)
         
-        # 9.4 Join final com todas as informações
-        df_resultado_final = df_final.join(
-            df_merecimento_final.select("cdfilial", "cd_primario", "grupo_de_necessidade"),
-            on=["cdfilial", "grupo_de_necessidade"],
-            how="left"
-        )
+        # 9.4 Consolidação final: retorna apenas dados de merecimento calculados
+        print("🔄 Consolidando resultado final...")
+        
+        # Define medidas disponíveis para seleção
+        medidas_disponiveis = [
+            "Media90_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura", 
+            "Media270_Qt_venda_sem_ruptura", "Media360_Qt_venda_sem_ruptura",
+            "Mediana90_Qt_venda_sem_ruptura", "Mediana180_Qt_venda_sem_ruptura",
+            "Mediana270_Qt_venda_sem_ruptura", "Mediana360_Qt_venda_sem_ruptura",
+            "MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada180_Qt_venda_sem_ruptura",
+            "MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada360_Qt_venda_sem_ruptura"
+        ]
+        
+        # Seleciona apenas as colunas de merecimento calculadas (SKU x loja x gêmeo)
+        df_resultado_final = df_merecimento_final.select(
+            "cdfilial", "cd_primario", "grupo_de_necessidade",
+            # Colunas de merecimento CD (totais por CD + gêmeo)
+            *[F.col(f"Total_CD_{medida}") for medida in medidas_disponiveis],
+            # Colunas de percentual interno (participação da loja dentro do CD)
+            *[F.col(f"Percentual_{medida}") for medida in medidas_disponiveis],
+            # Colunas de merecimento final (CD × participação interna)
+            *[F.col(f"Merecimento_Final_{medida}") for medida in medidas_disponiveis]
+        ).distinct()
+        
+        print(f"✅ Resultado final consolidado:")
+        print(f"  • Estrutura: SKU x loja x gêmeo (sem dados granulares)")
+        print(f"  • Total de registros: {df_resultado_final.count():,}")
+        print(f"  • Colunas de merecimento: {len(medidas_disponiveis) * 3} (CD + interno + final)")
         
         print("=" * 80)
         print(f"✅ Cálculo da matriz de merecimento concluído para: {categoria}")
