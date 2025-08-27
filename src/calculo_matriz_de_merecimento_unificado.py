@@ -820,17 +820,7 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
     """
     print("🔄 Calculando merecimento final...")
     
-    # Join entre merecimento CD e interno CD
-    df_merecimento_final = (
-        df_merecimento_interno
-        .join(
-            df_merecimento_cd,
-            on=["cd_primario", "grupo_de_necessidade"],
-            how="left"
-        )
-    )
-    
-    # Calcula merecimento final para cada medida
+    # Define medidas disponíveis
     medidas_disponiveis = [
         "Media90_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura", 
         "Media270_Qt_venda_sem_ruptura", "Media360_Qt_venda_sem_ruptura",
@@ -840,15 +830,33 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
         "MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada360_Qt_venda_sem_ruptura"
     ]
     
+    # CORREÇÃO: Renomeia colunas do df_merecimento_cd para evitar conflito de nomes
+    df_merecimento_cd_renomeado = df_merecimento_cd.select(
+        "cd_primario", "grupo_de_necessidade",
+        *[F.col(f"Total_{medida}").alias(f"Total_CD_{medida}") for medida in medidas_disponiveis]
+    )
+    
+    # Join entre merecimento interno CD e CD renomeado (sem conflito de colunas)
+    df_merecimento_final = (
+        df_merecimento_interno
+        .join(
+            df_merecimento_cd_renomeado,
+            on=["cd_primario", "grupo_de_necessidade"],
+            how="left"
+        )
+    )
+    
+    # Calcula merecimento final para cada medida
     for medida in medidas_disponiveis:
         df_merecimento_final = df_merecimento_final.withColumn(
             f"Merecimento_Final_{medida}",
-            F.col(f"Total_{medida}") * F.col(f"Percentual_{medida}")
+            F.col(f"Total_CD_{medida}") * F.col(f"Percentual_{medida}")  # Usa colunas renomeadas
         )
     
     print(f"✅ Merecimento final calculado:")
     print(f"  • Total de registros: {df_merecimento_final.count():,}")
     print(f"  • Medidas calculadas: {len(medidas_disponiveis)}")
+    print(f"  • Colunas CD renomeadas para evitar conflito")
     
     return df_merecimento_final
 
