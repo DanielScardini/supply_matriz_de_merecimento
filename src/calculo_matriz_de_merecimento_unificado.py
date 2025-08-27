@@ -1188,7 +1188,12 @@ def salvar_versao_final_completa(df_merecimento: DataFrame,
         f"proporcao_factual_{medida}_percentual" for medida in medidas_disponiveis
     ]
     
-    df_proporcao_factual = df_proporcao_factual.select(*colunas_proporcao).cache()
+    df_proporcao_factual = (
+        df_proporcao_factual
+        .select(*colunas_proporcao)
+        .withColumnRenamed("CdSku", "CdSku_proporcao")  # Renomeia para evitar ambiguidade
+        .cache()
+    )
     
     print(f"✅ Proporção factual calculada para todas as medidas")
     
@@ -1285,7 +1290,7 @@ def salvar_versao_final_completa(df_merecimento: DataFrame,
     
     # Colunas de identificação
     colunas_identificacao = [
-        "CdSku", "grupo_de_necessidade", "cdfilial", "cd_primario"
+        "CdSku", "grupo_de_necessidade", "cdfilial", "cd_primario"  # CdSku vem do df_merecimento
     ]
     
     # Colunas de merecimento CD
