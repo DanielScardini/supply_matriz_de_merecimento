@@ -305,18 +305,34 @@ def aplicar_mapeamentos_produtos(df: DataFrame, categoria: str,
 
 # COMMAND ----------
 
-def detectar_outliers_meses_atipicos(df: DataFrame, categoria: str) -> tuple:
+def detectar_outliers_meses_atipicos(df: DataFrame, categoria: str, 
+                                   sigma_meses_atipicos: float = 3.0,
+                                   sigma_outliers_cd: float = 3.0,
+                                   sigma_outliers_loja: float = 3.0,
+                                   sigma_atacado_cd: float = 1.5,
+                                   sigma_atacado_loja: float = 1.5) -> tuple:
     """
-    Detecta outliers e meses atípicos baseado no grupo_de_necessidade.
+    Detecta outliers e meses atípicos baseado no grupo_de_necessidade com parâmetros sigma configuráveis.
     
     Args:
         df: DataFrame com os dados
         categoria: Nome da categoria
+        sigma_meses_atipicos: Número de desvios padrão para meses atípicos (padrão: 3.0)
+        sigma_outliers_cd: Número de desvios padrão para outliers CD (padrão: 3.0)
+        sigma_outliers_loja: Número de desvios padrão para outliers loja (padrão: 3.0)
+        sigma_atacado_cd: Número de desvios padrão para outliers CD atacado (padrão: 1.5)
+        sigma_atacado_loja: Número de desvios padrão para outliers loja atacado (padrão: 1.5)
         
     Returns:
         Tuple com (DataFrame com estatísticas, DataFrame com meses atípicos)
     """
     print(f"🔄 Detectando outliers para categoria: {categoria}")
+    print(f"📊 Parâmetros sigma configurados:")
+    print(f"   • Meses atípicos: {sigma_meses_atipicos}σ")
+    print(f"   • Outliers CD: {sigma_outliers_cd}σ")
+    print(f"   • Outliers loja: {sigma_outliers_loja}σ")
+    print(f"   • Outliers atacado CD: {sigma_atacado_cd}σ")
+    print(f"   • Outliers atacado loja: {sigma_atacado_loja}σ")
     
     # Agregação por grupo_de_necessidade e mês
     df_stats_por_grupo_mes = (
@@ -329,9 +345,6 @@ def detectar_outliers_meses_atipicos(df: DataFrame, categoria: str) -> tuple:
     
     # Janela para cálculo de estatísticas por grupo_de_necessidade
     w_stats_grupo = Window.partitionBy("grupo_de_necessidade")
-    
-    # Uso dos parâmetros configuráveis para meses atípicos
-    n_desvios = PARAMETROS_OUTLIERS["desvios_meses_atipicos"]
     
     # Cálculo de média e desvio padrão por grupo_de_necessidade
     df_stats_grupo = (
@@ -346,12 +359,12 @@ def detectar_outliers_meses_atipicos(df: DataFrame, categoria: str) -> tuple:
         )
         .withColumn(
             "limite_superior_nsigma",
-            F.col("media_qt_mercadoria") + (F.lit(n_desvios) * F.col("desvio_padrao_qt_mercadoria"))
+            F.col("media_qt_mercadoria") + (F.lit(sigma_meses_atipicos) * F.col("desvio_padrao_qt_mercadoria"))
         )
         .withColumn(
             "limite_inferior_nsigma",
             F.greatest(
-                F.col("media_qt_mercadoria") - (F.lit(n_desvios) * F.col("desvio_padrao_qt_mercadoria")),
+                F.col("media_qt_mercadoria") - (F.lit(sigma_meses_atipicos) * F.col("desvio_padrao_qt_mercadoria")),
                 F.lit(0)  # Não permite valores negativos
             )
         )
@@ -560,18 +573,36 @@ def consolidar_medidas(df: DataFrame) -> DataFrame:
 
 # COMMAND ----------
 
-def executar_calculo_matriz_merecimento(categoria: str, data_inicio: str = "2024-01-01") -> DataFrame:
+def executar_calculo_matriz_merecimento(categoria: str, 
+                                       data_inicio: str = "2024-01-01",
+                                       sigma_meses_atipicos: float = 3.0,
+                                       sigma_outliers_cd: float = 3.0,
+                                       sigma_outliers_loja: float = 3.0,
+                                       sigma_atacado_cd: float = 1.5,
+                                       sigma_atacado_loja: float = 1.5) -> DataFrame:
     """
     Função principal que executa todo o cálculo da matriz de merecimento.
     
     Args:
         categoria: Nome da categoria/diretoria
-        data_inicio: Data de início para filtro
+        data_inicio: Data de início para filtro (formato YYYY-MM-DD)
+        sigma_meses_atipicos: Número de desvios padrão para meses atípicos (padrão: 3.0)
+        sigma_outliers_cd: Número de desvios padrão para outliers CD (padrão: 3.0)
+        sigma_outliers_loja: Número de desvios padrão para outliers loja (padrão: 3.0)
+        sigma_atacado_cd: Número de desvios padrão para outliers CD atacado (padrão: 1.5)
+        sigma_atacado_loja: Número de desvios padrão para outliers loja atacado (padrão: 1.5)
         
     Returns:
         DataFrame final com todas as medidas calculadas
     """
     print(f"🚀 Iniciando cálculo da matriz de merecimento para: {categoria}")
+    print("=" * 80)
+    print(f"📊 Configuração de parâmetros sigma:")
+    print(f"   • Meses atípicos: {sigma_meses_atipicos}σ")
+    print(f"   • Outliers CD: {sigma_outliers_cd}σ")
+    print(f"   • Outliers loja: {sigma_outliers_loja}σ")
+    print(f"   • Outliers atacado CD: {sigma_atacado_cd}σ")
+    print(f"   • Outliers atacado loja: {sigma_atacado_loja}σ")
     print("=" * 80)
     
     try:
@@ -586,8 +617,16 @@ def executar_calculo_matriz_merecimento(categoria: str, data_inicio: str = "2024
             df_base, categoria, de_para_modelos, de_para_gemeos
         )
         
-        # 4. Detecção de outliers
-        df_stats, df_meses_atipicos = detectar_outliers_meses_atipicos(df_com_mapeamentos, categoria)
+        # 4. Detecção de outliers com parâmetros sigma configuráveis
+        df_stats, df_meses_atipicos = detectar_outliers_meses_atipicos(
+            df_com_mapeamentos, 
+            categoria,
+            sigma_meses_atipicos=sigma_meses_atipicos,
+            sigma_outliers_cd=sigma_outliers_cd,
+            sigma_outliers_loja=sigma_outliers_loja,
+            sigma_atacado_cd=sigma_atacado_cd,
+            sigma_atacado_loja=sigma_atacado_loja
+        )
         
         # 5. Filtragem de meses atípicos
         df_filtrado = filtrar_meses_atipicos(df_com_mapeamentos, df_meses_atipicos)

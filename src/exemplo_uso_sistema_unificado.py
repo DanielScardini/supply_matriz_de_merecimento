@@ -43,6 +43,53 @@ print(f"🎯 Percentual de corte para médias aparadas: 10%")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 2.1 Configuração de Parâmetros Sigma para Outliers
+# MAGIC
+# MAGIC O sistema permite configurar diferentes níveis de sensibilidade para detecção de outliers:
+# MAGIC
+# MAGIC **Parâmetros Configuráveis**:
+# MAGIC - **sigma_meses_atipicos**: Sensibilidade para meses atípicos (padrão: 3.0σ)
+# MAGIC - **sigma_outliers_cd**: Sensibilidade para outliers a nível CD (padrão: 3.0σ)
+# MAGIC - **sigma_outliers_loja**: Sensibilidade para outliers a nível loja (padrão: 3.0σ)
+# MAGIC - **sigma_atacado_cd**: Sensibilidade para outliers CD em lojas de atacado (padrão: 1.5σ)
+# MAGIC - **sigma_atacado_loja**: Sensibilidade para outliers loja em lojas de atacado (padrão: 1.5σ)
+# MAGIC
+# MAGIC **Guia de Sensibilidade**:
+# MAGIC - **1.0σ - 2.0σ**: Muito restritivo (detecta muitos outliers)
+# MAGIC - **2.0σ - 3.0σ**: Restritivo (detecção equilibrada)
+# MAGIC - **3.0σ - 4.0σ**: Moderado (menos sensível)
+# MAGIC - **4.0σ+**: Muito permissivo (poucos outliers detectados)
+
+# COMMAND ----------
+
+# Exemplos de configurações de sigma para diferentes cenários
+print("🔧 EXEMPLOS DE CONFIGURAÇÕES DE SIGMA:")
+print("=" * 60)
+
+print("📊 CONFIGURAÇÃO PADRÃO (3.0σ):")
+print("   • sigma_meses_atipicos: 3.0")
+print("   • sigma_outliers_cd: 3.0")
+print("   • sigma_outliers_loja: 3.0")
+print("   • sigma_atacado_cd: 1.5")
+print("   • sigma_atacado_loja: 1.5")
+
+print("\n🎯 CONFIGURAÇÃO RESTRITIVA (2.0σ):")
+print("   • sigma_meses_atipicos: 2.0")
+print("   • sigma_outliers_cd: 2.0")
+print("   • sigma_outliers_loja: 2.0")
+print("   • sigma_atacado_cd: 1.0")
+print("   • sigma_atacado_loja: 1.0")
+
+print("\n🔍 CONFIGURAÇÃO PERMISSIVA (4.0σ):")
+print("   • sigma_meses_atipicos: 4.0")
+print("   • sigma_outliers_cd: 4.0")
+print("   • sigma_outliers_loja: 4.0")
+print("   • sigma_atacado_cd: 2.0")
+print("   • sigma_atacado_loja: 2.0")
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 3. Exemplo para DIRETORIA DE TELAS
 
 # COMMAND ----------
@@ -57,8 +104,18 @@ print(f"🎯 Percentual de corte para médias aparadas: 10%")
 print("🖥️  EXECUTANDO PARA DIRETORIA DE TELAS")
 print("=" * 50)
 
-# Executa o cálculo para TELAS
+# Executa o cálculo para TELAS com parâmetros sigma padrão
 df_telas = executar_calculo_matriz_merecimento("DIRETORIA DE TELAS")
+
+# Exemplo com parâmetros sigma personalizados para TELAS
+df_telas_personalizado = executar_calculo_matriz_merecimento(
+    "DIRETORIA DE TELAS",
+    sigma_meses_atipicos=2.5,      # Mais sensível a meses atípicos
+    sigma_outliers_cd=2.8,         # Sensibilidade intermediária para CD
+    sigma_outliers_loja=3.2,       # Menos sensível para lojas
+    sigma_atacado_cd=1.2,          # Mais restritivo para atacado CD
+    sigma_atacado_loja=1.8         # Menos restritivo para atacado loja
+)
 
 # Valida os resultados
 validar_resultados(df_telas, "DIRETORIA DE TELAS")
@@ -82,8 +139,18 @@ display(df_telas.limit(10))
 print("📱 EXECUTANDO PARA DIRETORIA TELEFONIA CELULAR")
 print("=" * 50)
 
-# Executa o cálculo para TELEFONIA
+# Executa o cálculo para TELEFONIA com parâmetros sigma padrão
 df_telefonia = executar_calculo_matriz_merecimento("DIRETORIA TELEFONIA CELULAR")
+
+# Exemplo com parâmetros sigma personalizados para TELEFONIA
+df_telefonia_personalizado = executar_calculo_matriz_merecimento(
+    "DIRETORIA TELEFONIA CELULAR",
+    sigma_meses_atipicos=3.5,      # Menos sensível a meses atípicos
+    sigma_outliers_cd=3.0,         # Padrão para CD
+    sigma_outliers_loja=2.5,       # Mais sensível para lojas
+    sigma_atacado_cd=1.0,          # Muito restritivo para atacado CD
+    sigma_atacado_loja=1.3         # Restritivo para atacado loja
+)
 
 # Valida os resultados
 validar_resultados(df_telefonia, "DIRETORIA TELEFONIA CELULAR")
@@ -107,8 +174,18 @@ display(df_telefonia.limit(10))
 print("🏠 EXECUTANDO PARA DIRETORIA LINHA BRANCA")
 print("=" * 50)
 
-# Executa o cálculo para LINHA BRANCA
+# Executa o cálculo para LINHA BRANCA com parâmetros sigma padrão
 df_linha_branca = executar_calculo_matriz_merecimento("DIRETORIA LINHA BRANCA")
+
+# Exemplo com parâmetros sigma personalizados para LINHA BRANCA
+df_linha_branca_personalizado = executar_calculo_matriz_merecimento(
+    "DIRETORIA LINHA BRANCA",
+    sigma_meses_atipicos=2.0,      # Muito sensível a meses atípicos
+    sigma_outliers_cd=2.5,         # Sensível para CD
+    sigma_outliers_loja=2.8,       # Sensível para lojas
+    sigma_atacado_cd=1.5,          # Padrão para atacado CD
+    sigma_atacado_loja=1.5         # Padrão para atacado loja
+)
 
 # Valida os resultados
 validar_resultados(df_linha_branca, "DIRETORIA LINHA BRANCA")

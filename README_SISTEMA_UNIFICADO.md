@@ -88,8 +88,18 @@ from calculo_matriz_de_merecimento_unificado import (
     validar_resultados
 )
 
-# Executar para qualquer categoria
+# Executar para qualquer categoria com parâmetros padrão
 df_resultado = executar_calculo_matriz_merecimento("DIRETORIA DE TELAS")
+
+# Executar com parâmetros sigma personalizados
+df_resultado_personalizado = executar_calculo_matriz_merecimento(
+    "DIRETORIA DE TELAS",
+    sigma_meses_atipicos=2.5,      # Mais sensível a meses atípicos
+    sigma_outliers_cd=2.8,         # Sensibilidade intermediária para CD
+    sigma_outliers_loja=3.2,       # Menos sensível para lojas
+    sigma_atacado_cd=1.2,          # Mais restritivo para atacado CD
+    sigma_atacado_loja=1.8         # Menos restritivo para atacado loja
+)
 
 # Validar resultados
 validar_resultados(df_resultado, "DIRETORIA DE TELAS")
@@ -110,16 +120,34 @@ df_linha_branca = executar_calculo_matriz_merecimento("DIRETORIA LINHA BRANCA")
 
 ### Parâmetros Configuráveis
 
-```python
-# Configurações de outliers
-PARAMETROS_OUTLIERS = {
-    "desvios_meses_atipicos": 3,      # Desvios para meses atípicos
-    "desvios_historico_cd": 3,         # Desvios para outliers CD
-    "desvios_historico_loja": 3,       # Desvios para outliers loja
-    "desvios_atacado_cd": 1.5,         # Desvios para atacado CD
-    "desvios_atacado_loja": 1.5        # Desvios para atacado loja
-}
+#### Parâmetros Sigma para Outliers
 
+```python
+# Função principal com parâmetros sigma configuráveis
+def executar_calculo_matriz_merecimento(
+    categoria: str, 
+    data_inicio: str = "2024-01-01",
+    sigma_meses_atipicos: float = 3.0,      # Meses atípicos
+    sigma_outliers_cd: float = 3.0,         # Outliers CD
+    sigma_outliers_loja: float = 3.0,       # Outliers loja
+    sigma_atacado_cd: float = 1.5,          # Outliers atacado CD
+    sigma_atacado_loja: float = 1.5         # Outliers atacado loja
+):
+    # Implementação...
+```
+
+#### Guia de Sensibilidade Sigma
+
+| Faixa Sigma | Sensibilidade | Comportamento | Uso Recomendado |
+|-------------|---------------|---------------|------------------|
+| **1.0σ - 2.0σ** | Muito restritivo | Detecta muitos outliers | Dados muito limpos, alta precisão |
+| **2.0σ - 3.0σ** | Restritivo | Detecção equilibrada | **Padrão recomendado** |
+| **3.0σ - 4.0σ** | Moderado | Menos sensível | Dados com ruído moderado |
+| **4.0σ+** | Muito permissivo | Poucos outliers detectados | Dados muito ruidosos |
+
+#### Outros Parâmetros
+
+```python
 # Janelas móveis
 JANELAS_MOVEIS = [90, 180, 270, 360]
 
