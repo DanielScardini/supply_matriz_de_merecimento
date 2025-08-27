@@ -499,4 +499,4 @@ df_por_loja = df_resultado.groupBy("cdfilial").agg(
 
 **Autor**: Scardini  
 **Data**: 2025  
-**Versão**: 3.0 - Sistema Unificado de Merecimento Implementado
+**Versão**: 1.1 - Sistema Unificado de Merecimento Implementado
