@@ -865,6 +865,197 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
 
 # COMMAND ----------
 
+def calcular_metricas_erro_previsao(df_merecimento: DataFrame, 
+                                   categoria: str,
+                                   mes_analise: str = "202507",
+                                   colunas_agregacao: List[str] = None) -> DataFrame:
+    """
+    Calcula métricas de erro para avaliação da qualidade da previsão da matriz de merecimento.
+    
+    **Racional**: Compara o merecimento calculado (previsão) com as vendas reais observadas
+    para julho-2025, calculando proporção factual e sMAPE como métrica principal.
+    
+    Args:
+        df_merecimento: DataFrame com merecimento calculado
+        categoria: Nome da categoria/diretoria
+        mes_analise: Mês de análise no formato YYYYMM (padrão: julho-2025)
+        colunas_agregacao: Lista de colunas para agregação (ex: ["cdfilial"], ["cd_primario"], ["grupo_de_necessidade"])
+        
+    Returns:
+        DataFrame com métricas de erro calculadas
+    """
+    print(f"🔄 Calculando métricas de erro para categoria: {categoria}")
+    print(f"📅 Mês de análise: {mes_analise}")
+    
+    if colunas_agregacao is None:
+        colunas_agregacao = ["cdfilial"]  # Padrão: agregação por filial
+    
+    # 1. CARREGA DADOS REAIS (proporção factual) para o mês de análise
+    print("📊 Carregando dados reais de vendas para cálculo de proporção factual...")
+    
+    df_dados_reais = (
+        spark.table('databox.bcg_comum.supply_base_merecimento_diario')
+        .filter(F.col("NmAgrupamentoDiretoriaSetor") == categoria)
+        .filter(F.col("year_month") == int(mes_analise))
+        .select(
+            "cdfilial", "grupo_de_necessidade", "CdSku",
+            "QtMercadoria", "Receita", "DtAtual"
+        )
+    )
+    
+    # 2. CALCULA PROPORÇÃO FACTUAL (vendas reais observadas)
+    print("📈 Calculando proporção factual baseada em vendas reais...")
+    
+    # Janela para calcular totais por grupo de necessidade no mês
+    w_grupo_mes = Window.partitionBy("grupo_de_necessidade")
+    
+    df_proporcao_factual = (
+        df_dados_reais
+        .withColumn(
+            "total_vendas_grupo_mes",
+            F.sum("QtMercadoria").over(w_grupo_mes)
+        )
+        .withColumn(
+            "proporcao_factual",
+            F.when(
+                F.col("total_vendas_grupo_mes") > 0,
+                F.col("QtMercadoria") / F.col("total_vendas_grupo_mes")
+            ).otherwise(F.lit(0.0))
+        )
+        .withColumn(
+            "proporcao_factual_percentual",
+            F.round(F.col("proporcao_factual") * 100, 4)
+        )
+        .select(
+            "cdfilial", "grupo_de_necessidade", "CdSku",
+            "QtMercadoria", "proporcao_factual", "proporcao_factual_percentual"
+        )
+    )
+    
+    print(f"✅ Proporção factual calculada:")
+    print(f"  • Total de registros: {df_proporcao_factual.count():,}")
+    print(f"  • Grupos de necessidade: {df_proporcao_factual.select('grupo_de_necessidade').distinct().count():,}")
+    print(f"  • Filiais: {df_proporcao_factual.select('cdfilial').distinct().count():,}")
+    
+    # 3. JOIN entre merecimento calculado e proporção factual
+    print("🔗 Realizando join entre merecimento calculado e proporção factual...")
+    
+    # Seleciona apenas uma medida para comparação (média 90 dias como padrão)
+    medida_comparacao = "Merecimento_Final_Media90_Qt_venda_sem_ruptura"
+    
+    df_comparacao = (
+        df_merecimento
+        .select(
+            "cdfilial", "cd_primario", "grupo_de_necessidade",
+            F.col(medida_comparacao).alias("merecimento_calculado")
+        )
+        .join(
+            df_proporcao_factual,
+            on=["cdfilial", "grupo_de_necessidade"],
+            how="inner"
+        )
+        .withColumn(
+            "merecimento_calculado_percentual",
+            F.when(
+                F.col("merecimento_calculado") > 0,
+                F.col("merecimento_calculado") / F.sum("merecimento_calculado").over(
+                    Window.partitionBy("grupo_de_necessidade")
+                ) * 100
+            ).otherwise(F.lit(0.0))
+        )
+        .select(
+            "cdfilial", "cd_primario", "grupo_de_necessidade", "CdSku",
+            "QtMercadoria", "merecimento_calculado", "merecimento_calculado_percentual",
+            "proporcao_factual", "proporcao_factual_percentual"
+        )
+    )
+    
+    print(f"✅ Join realizado:")
+    print(f"  • Registros comparáveis: {df_comparacao.count():,}")
+    
+    # 4. CALCULA MÉTRICAS DE ERRO (sMAPE como principal)
+    print("📊 Calculando métricas de erro (sMAPE)...")
+    
+    # Parâmetros para sMAPE
+    EPSILON = 1e-12
+    
+    df_com_metricas = (
+        df_comparacao
+        .withColumn(
+            "erro_absoluto",
+            F.abs(F.col("merecimento_calculado_percentual") - F.col("proporcao_factual_percentual"))
+        )
+        .withColumn(
+            "smape_numerador",
+            F.lit(2.0) * F.col("erro_absoluto")
+        )
+        .withColumn(
+            "smape_denominador",
+            F.col("merecimento_calculado_percentual") + F.col("proporcao_factual_percentual") + F.lit(EPSILON)
+        )
+        .withColumn(
+            "smape_individual",
+            F.when(
+                F.col("smape_denominador") > 0,
+                F.col("smape_numerador") / F.col("smape_denominador") * 100
+            ).otherwise(F.lit(0.0))
+        )
+        .withColumn(
+            "erro_quadratico",
+            F.pow(F.col("merecimento_calculado_percentual") - F.col("proporcao_factual_percentual"), 2)
+        )
+    )
+    
+    # 5. AGREGAÇÃO das métricas conforme solicitado
+    print(f"📈 Agregando métricas por: {colunas_agregacao}")
+    
+    # Janela para agregação
+    w_agregacao = Window.partitionBy(*colunas_agregacao) if colunas_agregacao else Window.partitionBy(F.lit(1))
+    
+    df_metricas_agregadas = (
+        df_com_metricas
+        .withColumn(
+            "total_vendas_agregado",
+            F.sum("QtMercadoria").over(w_agregacao)
+        )
+        .withColumn(
+            "smape_agregado",
+            F.when(
+                F.col("total_vendas_agregado") > 0,
+                F.sum(F.col("smape_individual") * F.col("QtMercadoria")).over(w_agregacao) / F.col("total_vendas_agregado")
+            ).otherwise(F.lit(0.0))
+        )
+        .withColumn(
+            "rmse_agregado",
+            F.sqrt(
+                F.sum(F.col("erro_quadratico") * F.col("QtMercadoria")).over(w_agregacao) / F.col("total_vendas_agregado")
+            )
+        )
+        .withColumn(
+            "erro_medio_absoluto",
+            F.sum(F.col("erro_absoluto") * F.col("QtMercadoria")).over(w_agregacao) / F.col("total_vendas_agregado")
+        )
+        .groupBy(*colunas_agregacao)
+        .agg(
+            F.first("total_vendas_agregado").alias("total_vendas"),
+            F.first("smape_agregado").alias("sMAPE"),
+            F.first("rmse_agregado").alias("RMSE"),
+            F.first("erro_medio_absoluto").alias("MAE"),
+            F.countDistinct("CdSku").alias("total_skus"),
+            F.countDistinct("grupo_de_necessidade").alias("total_grupos_necessidade")
+        )
+        .orderBy(*colunas_agregacao)
+    )
+    
+    print(f"✅ Métricas de erro calculadas:")
+    print(f"  • Agregação por: {colunas_agregacao}")
+    print(f"  • Total de grupos: {df_metricas_agregadas.count():,}")
+    print(f"  • Métricas calculadas: sMAPE, RMSE, MAE")
+    
+    return df_metricas_agregadas
+
+# COMMAND ----------
+
 def executar_calculo_matriz_merecimento(categoria: str, 
                                        data_inicio: str = "2024-01-01",
                                        data_calculo: str = "2025-06-30",
