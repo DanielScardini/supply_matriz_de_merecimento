@@ -233,10 +233,13 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-01-01") -> Data
 
 # COMMAND ----------
 
-def carregar_mapeamentos_produtos() -> tuple:
+def carregar_mapeamentos_produtos(categoria: str) -> tuple:
     """
-    Carrega os arquivos de mapeamento de produtos.
+    Carrega os arquivos de mapeamento de produtos para a categoria específica.
     
+    Args:
+        categoria: Nome da categoria/diretoria
+        
     Returns:
         Tuple com os DataFrames de mapeamento
     """
@@ -691,7 +694,7 @@ def executar_calculo_matriz_merecimento(categoria: str,
         df_base = carregar_dados_base(categoria, data_inicio)
         df_base.cache()
         # 2. Carregamento dos mapeamentos
-        de_para_modelos, de_para_gemeos = carregar_mapeamentos_produtos()  
+        de_para_modelos, de_para_gemeos = carregar_mapeamentos_produtos(categoria)  
 
         # 3. Aplicação dos mapeamentos
         df_com_mapeamentos = aplicar_mapeamentos_produtos(
