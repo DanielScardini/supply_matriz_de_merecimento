@@ -1060,6 +1060,7 @@ def calcular_metricas_erro_previsao(df_merecimento: DataFrame,
 def salvar_versao_final_completa(df_merecimento: DataFrame, 
                                 categoria: str,
                                 mes_analise: str = "202507",
+                                data_corte_matriz: str = "2025-06-30",
                                 data_hora_execucao: str = None) -> None:
     """
     Salva versão final completa com todos os dados: SKU x grupo x filial x CD x merecimentos x métricas.
@@ -1072,6 +1073,7 @@ def salvar_versao_final_completa(df_merecimento: DataFrame,
         df_merecimento: DataFrame com merecimento calculado
         categoria: Nome da categoria/diretoria
         mes_analise: Mês de análise no formato YYYYMM (padrão: julho-2025)
+        data_corte_matriz: Data de corte para cálculo da matriz de merecimento (padrão: 2025-06-30)
         data_hora_execucao: Data/hora da execução (padrão: agora)
     """
     if data_hora_execucao is None:
@@ -1307,6 +1309,7 @@ def salvar_versao_final_completa(df_merecimento: DataFrame,
         .select(*todas_colunas)
         .withColumn("data_hora_execucao", F.lit(data_hora_execucao))
         .withColumn("mes_analise", F.lit(mes_analise))
+        .withColumn("data_corte_matriz", F.lit(data_corte_matriz))
         .withColumn("categoria", F.lit(categoria))
     )
     
@@ -1376,6 +1379,7 @@ def executar_calculo_matriz_merecimento(categoria: str,
         sigma_atacado_loja: Número de desvios padrão para outliers loja atacado (padrão: 1.5)
         salvar_versao_completa: Se True, salva versão completa com métricas no databox (padrão: False)
         mes_analise: Mês de análise para métricas no formato YYYYMM (padrão: julho-2025)
+        data_corte_matriz: Data de corte para cálculo da matriz de merecimento (padrão: 2025-06-30)
         
     Returns:
         DataFrame final com todas as medidas calculadas e merecimento
@@ -1493,7 +1497,8 @@ def executar_calculo_matriz_merecimento(categoria: str,
                 df_versao_completa = salvar_versao_final_completa(
                     df_merecimento=df_merecimento_final,
                     categoria=categoria,
-                    mes_analise=mes_analise
+                    mes_analise=mes_analise,
+                    data_corte_matriz=data_calculo
                 )
                 print("✅ Versão completa salva com sucesso!")
                 print(f"  • Tabela: databox.bcg_comum.supply_base_merecimento_diario_{categoria.replace('DIRETORIA ', '').replace(' ', '_').upper()}")
@@ -1531,7 +1536,8 @@ df_telas.display()
 # MAGIC df_telas_completo = executar_calculo_matriz_merecimento(
 # MAGIC     categoria="DIRETORIA DE TELAS",
 # MAGIC     salvar_versao_completa=True,
-# MAGIC     mes_analise="202507"  # julho-2025
+# MAGIC     mes_analise="202507",  # julho-2025
+# MAGIC     data_corte_matriz="2025-06-30"  # data de corte da matriz
 # MAGIC )
 # MAGIC ```
 # MAGIC
@@ -1545,7 +1551,8 @@ df_telas.display()
 # MAGIC df_telefonia_completo = executar_calculo_matriz_merecimento(
 # MAGIC     categoria="DIRETORIA TELEFONIA CELULAR",
 # MAGIC     salvar_versao_completa=True,
-# MAGIC     mes_analise="202507"
+# MAGIC     mes_analise="202507",
+# MAGIC     data_corte_matriz="2025-06-30"
 # MAGIC )
 # MAGIC ```
 # MAGIC
@@ -1559,7 +1566,8 @@ df_telas.display()
 # MAGIC df_linha_branca_completo = executar_calculo_matriz_merecimento(
 # MAGIC     categoria="DIRETORIA LINHA BRANCA",
 # MAGIC     salvar_versao_completa=True,
-# MAGIC     mes_analise="202507"
+# MAGIC     mes_analise="202507",
+# MAGIC     data_corte_matriz="2025-06-30"
 # MAGIC )
 # MAGIC ```
 
