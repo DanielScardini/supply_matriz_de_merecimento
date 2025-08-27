@@ -872,8 +872,8 @@ def calcular_metricas_erro_previsao(df_merecimento: DataFrame,
     """
     Calcula métricas de erro para avaliação da qualidade da previsão da matriz de merecimento.
     
-    **Racional**: Compara o merecimento calculado (previsão) com as vendas reais observadas
-    para julho-2025, calculando proporção factual e sMAPE como métrica principal.
+    **Racional**: Compara o merecimento calculado (previsão) com a demanda calculada robusta a ruptura
+    (Media90_Qt_venda_sem_ruptura) para julho-2025, calculando proporção factual e sMAPE como métrica principal.
     
     Args:
         df_merecimento: DataFrame com merecimento calculado
@@ -890,36 +890,37 @@ def calcular_metricas_erro_previsao(df_merecimento: DataFrame,
     if colunas_agregacao is None:
         colunas_agregacao = ["cdfilial"]  # Padrão: agregação por filial
     
-    # 1. CARREGA DADOS REAIS (proporção factual) para o mês de análise
-    print("📊 Carregando dados reais de vendas para cálculo de proporção factual...")
+    # 1. CARREGA DADOS DE DEMANDA CALCULADA (proporção factual) para o mês de análise
+    print("📊 Carregando dados de demanda calculada robusta a ruptura para cálculo de proporção factual...")
     
-    df_dados_reais = (
+    # Carrega dados com medidas calculadas (incluindo Media90_Qt_venda_sem_ruptura)
+    df_dados_demanda = (
         spark.table('databox.bcg_comum.supply_base_merecimento_diario')
         .filter(F.col("NmAgrupamentoDiretoriaSetor") == categoria)
         .filter(F.col("year_month") == int(mes_analise))
         .select(
             "cdfilial", "grupo_de_necessidade", "CdSku",
-            "QtMercadoria", "Receita", "DtAtual"
+            "Media90_Qt_venda_sem_ruptura", "QtMercadoria", "DtAtual"
         )
     )
     
-    # 2. CALCULA PROPORÇÃO FACTUAL (vendas reais observadas)
-    print("📈 Calculando proporção factual baseada em vendas reais...")
+    # 2. CALCULA PROPORÇÃO FACTUAL (demanda calculada robusta a ruptura com média90)
+    print("📈 Calculando proporção factual baseada em demanda calculada robusta a ruptura...")
     
     # Janela para calcular totais por grupo de necessidade no mês
     w_grupo_mes = Window.partitionBy("grupo_de_necessidade")
     
     df_proporcao_factual = (
-        df_dados_reais
+        df_dados_demanda
         .withColumn(
-            "total_vendas_grupo_mes",
-            F.sum("QtMercadoria").over(w_grupo_mes)
+            "total_demanda_grupo_mes",
+            F.sum("Media90_Qt_venda_sem_ruptura").over(w_grupo_mes)
         )
         .withColumn(
             "proporcao_factual",
             F.when(
-                F.col("total_vendas_grupo_mes") > 0,
-                F.col("QtMercadoria") / F.col("total_vendas_grupo_mes")
+                F.col("total_demanda_grupo_mes") > 0,
+                F.col("Media90_Qt_venda_sem_ruptura") / F.col("total_demanda_grupo_mes")
             ).otherwise(F.lit(0.0))
         )
         .withColumn(
@@ -928,7 +929,7 @@ def calcular_metricas_erro_previsao(df_merecimento: DataFrame,
         )
         .select(
             "cdfilial", "grupo_de_necessidade", "CdSku",
-            "QtMercadoria", "proporcao_factual", "proporcao_factual_percentual"
+            "Media90_Qt_venda_sem_ruptura", "proporcao_factual", "proporcao_factual_percentual"
         )
     )
     
@@ -965,7 +966,7 @@ def calcular_metricas_erro_previsao(df_merecimento: DataFrame,
         )
         .select(
             "cdfilial", "cd_primario", "grupo_de_necessidade", "CdSku",
-            "QtMercadoria", "merecimento_calculado", "merecimento_calculado_percentual",
+            "Media90_Qt_venda_sem_ruptura", "merecimento_calculado", "merecimento_calculado_percentual",
             "proporcao_factual", "proporcao_factual_percentual"
         )
     )
@@ -1015,29 +1016,29 @@ def calcular_metricas_erro_previsao(df_merecimento: DataFrame,
     df_metricas_agregadas = (
         df_com_metricas
         .withColumn(
-            "total_vendas_agregado",
-            F.sum("QtMercadoria").over(w_agregacao)
+            "total_demanda_agregado",
+            F.sum("Media90_Qt_venda_sem_ruptura").over(w_agregacao)
         )
         .withColumn(
             "smape_agregado",
             F.when(
-                F.col("total_vendas_agregado") > 0,
-                F.sum(F.col("smape_individual") * F.col("QtMercadoria")).over(w_agregacao) / F.col("total_vendas_agregado")
+                F.col("total_demanda_agregado") > 0,
+                F.sum(F.col("smape_individual") * F.col("Media90_Qt_venda_sem_ruptura")).over(w_agregacao) / F.col("total_demanda_agregado")
             ).otherwise(F.lit(0.0))
         )
         .withColumn(
             "rmse_agregado",
             F.sqrt(
-                F.sum(F.col("erro_quadratico") * F.col("QtMercadoria")).over(w_agregacao) / F.col("total_vendas_agregado")
+                F.sum(F.col("erro_quadratico") * F.col("Media90_Qt_venda_sem_ruptura")).over(w_agregacao) / F.col("total_demanda_agregado")
             )
         )
         .withColumn(
             "erro_medio_absoluto",
-            F.sum(F.col("erro_absoluto") * F.col("QtMercadoria")).over(w_agregacao) / F.col("total_vendas_agregado")
+            F.sum(F.col("erro_absoluto") * F.col("Media90_Qt_venda_sem_ruptura")).over(w_agregacao) / F.col("total_demanda_agregado")
         )
         .groupBy(*colunas_agregacao)
         .agg(
-            F.first("total_vendas_agregado").alias("total_vendas"),
+            F.first("total_demanda_agregado").alias("total_demanda"),
             F.first("smape_agregado").alias("sMAPE"),
             F.first("rmse_agregado").alias("RMSE"),
             F.first("erro_medio_absoluto").alias("MAE"),
