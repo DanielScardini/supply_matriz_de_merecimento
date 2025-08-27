@@ -772,8 +772,20 @@ def calcular_merecimento_interno_cd(df: DataFrame, data_calculo: str, categoria:
         "MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada360_Qt_venda_sem_ruptura"
     ]
     
-    # Calcula percentual por filial dentro de cada CD + grupo de necessidade
-    df_merecimento_interno = df_com_cd
+    # PRIMEIRO: Calcula os totais por CD + grupo de necessidade para cada filial
+    df_com_totais = df_com_cd
+    
+    for medida in medidas_disponiveis:
+        # Janela para calcular total por CD + grupo de necessidade
+        w_total = Window.partitionBy("cd_primario", "grupo_de_necessidade")
+        
+        df_com_totais = df_com_totais.withColumn(
+            f"Total_{medida}",
+            F.sum(F.col(medida)).over(w_total)
+        )
+    
+    # SEGUNDO: Calcula percentual por filial dentro de cada CD + grupo de necessidade
+    df_merecimento_interno = df_com_totais
     
     for medida in medidas_disponiveis:
         # Janela para calcular percentual por CD + grupo de necessidade
@@ -782,7 +794,7 @@ def calcular_merecimento_interno_cd(df: DataFrame, data_calculo: str, categoria:
         df_merecimento_interno = df_merecimento_interno.withColumn(
             f"Percentual_{medida}",
             F.when(F.col(f"Total_{medida}") > 0,
-                   F.col(f"Total_{medida}") / F.sum(F.col(f"Total_{medida}")).over(w_percentual))
+                   F.col(medida) / F.col(f"Total_{medida}"))  # Usa a medida original, não o total
             .otherwise(0)
         )
     
