@@ -16,15 +16,20 @@ Este sistema unifica o cálculo da matriz de merecimento para todas as categoria
 
 ### Abstração `grupo_de_necessidade`
 
-O sistema usa uma abstração chamada `grupo_de_necessidade` que se adapta automaticamente conforme a categoria:
+O sistema usa uma abstração inteligente chamada `grupo_de_necessidade` que **copia os valores reais** da coluna especificada para cada categoria:
 
-| Categoria | Coluna de Agrupamento | Tipo | Descrição |
-|-----------|----------------------|------|-----------|
-| **DIRETORIA DE TELAS** | `gemeos` | gêmeos | Produtos similares |
-| **DIRETORIA TELEFONIA CELULAR** | `gemeos` | gêmeos | Produtos similares |
-| **DIRETORIA LINHA BRANCA** | `NmEspecieGerencial` | espécie_gerencial | Categoria gerencial |
-| **DIRETORIA LINHA LEVE** | `NmEspecieGerencial` | espécie_gerencial | Categoria gerencial |
-| **DIRETORIA INFO/GAMES** | `NmEspecieGerencial` | espécie_gerencial | Categoria gerencial |
+| Categoria | Coluna de Agrupamento | Valores Copiados | Tipo | Descrição |
+|-----------|----------------------|------------------|------|-----------|
+| **DIRETORIA DE TELAS** | `gemeos` | Valores reais de `gemeos` (ex: "GRUPO_A", "GRUPO_B") | gêmeos | Produtos similares |
+| **DIRETORIA TELEFONIA CELULAR** | `gemeos` | Valores reais de `gemeos` (ex: "GRUPO_X", "GRUPO_Y") | gêmeos | Produtos similares |
+| **DIRETORIA LINHA BRANCA** | `NmEspecieGerencial` | Valores reais de `NmEspecieGerencial` (ex: "GELADEIRA", "FOGÃO") | espécie_gerencial | Categoria gerencial |
+| **DIRETORIA LINHA LEVE** | `NmEspecieGerencial` | Valores reais de `NmEspecieGerencial` (ex: "PANELA", "PRATO") | espécie_gerencial | Categoria gerencial |
+| **DIRETORIA INFO/GAMES** | `NmEspecieGerencial` | Valores reais de `NmEspecieGerencial` (ex: "NOTEBOOK", "VIDEOGAME") | espécie_gerencial | Categoria gerencial |
+
+**Como funciona**:
+- `grupo_de_necessidade` = cópia dos **valores reais** da coluna especificada
+- **NÃO** é um valor fixo, mas sim os dados originais da coluna
+- Permite agrupamento inteligente baseado nos dados reais de cada categoria
 
 ### Fluxo de Processamento
 

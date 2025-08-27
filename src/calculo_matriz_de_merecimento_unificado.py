@@ -110,12 +110,18 @@ def determinar_grupo_necessidade(categoria: str, df: DataFrame) -> DataFrame:
     """
     Determina o grupo de necessidade baseado na categoria e aplica a regra correspondente.
     
+    IMPORTANTE: Esta função COPIA os VALORES REAIS da coluna especificada para a coluna grupo_de_necessidade.
+    
+    Exemplos:
+    - Para TELAS: grupo_de_necessidade = valores reais da coluna 'gemeos' (ex: "GRUPO_A", "GRUPO_B")
+    - Para LINHA BRANCA: grupo_de_necessidade = valores reais da coluna 'NmEspecieGerencial' (ex: "GELADEIRA", "FOGÃO")
+    
     Args:
         categoria: Nome da categoria/diretoria
         df: DataFrame com os dados de vendas e estoque
         
     Returns:
-        DataFrame com a coluna grupo_de_necessidade adicionada
+        DataFrame com a coluna grupo_de_necessidade contendo os valores reais da coluna origem
     """
     if categoria not in REGRAS_AGRUPAMENTO:
         raise ValueError(f"Categoria '{categoria}' não suportada. Categorias válidas: {list(REGRAS_AGRUPAMENTO.keys())}")
@@ -131,14 +137,15 @@ def determinar_grupo_necessidade(categoria: str, df: DataFrame) -> DataFrame:
     # Aplica a regra de agrupamento
     df_com_grupo = df.withColumn(
         "grupo_de_necessidade",
-        F.col(coluna_origem)
+        F.col(coluna_origem)  # ← Copia os VALORES da coluna origem (ex: valores de 'gemeos' ou 'NmEspecieGerencial')
     ).withColumn(
         "tipo_agrupamento",
-        F.lit(regra["tipo_agrupamento"])
+        F.lit(regra["tipo_agrupamento"])  # ← Este sim é um valor fixo para identificação
     )
     
     print(f"✅ Grupo de necessidade definido para '{categoria}':")
     print(f"  • Coluna origem: {coluna_origem}")
+    print(f"  • Valores copiados: {df_com_grupo.select('grupo_de_necessidade').distinct().count()} grupos únicos")
     print(f"  • Tipo de agrupamento: {regra['tipo_agrupamento']}")
     print(f"  • Descrição: {regra['descricao']}")
     

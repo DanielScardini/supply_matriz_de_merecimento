@@ -43,7 +43,26 @@ print(f"🎯 Percentual de corte para médias aparadas: 10%")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 2.1 Configuração de Parâmetros Sigma para Outliers
+# MAGIC ## 2.1 Como Funciona o Sistema de Agrupamento
+# MAGIC
+# MAGIC O sistema usa uma abstração inteligente chamada `grupo_de_necessidade` que se adapta automaticamente:
+# MAGIC
+# MAGIC **Exemplo 1 - DIRETORIA DE TELAS:**
+# MAGIC - **Coluna origem**: `gemeos`
+# MAGIC - **Valores copiados**: Todos os valores únicos da coluna `gemeos` (ex: "GRUPO_A", "GRUPO_B", "GRUPO_C")
+# MAGIC - **Resultado**: `grupo_de_necessidade` contém os valores reais de `gemeos`
+# MAGIC
+# MAGIC **Exemplo 2 - DIRETORIA LINHA BRANCA:**
+# MAGIC - **Coluna origem**: `NmEspecieGerencial`
+# MAGIC - **Valores copiados**: Todos os valores únicos da coluna `NmEspecieGerencial` (ex: "GELADEIRA", "FOGÃO", "LAVADORA")
+# MAGIC - **Resultado**: `grupo_de_necessidade` contém os valores reais de `NmEspecieGerencial`
+# MAGIC
+# MAGIC **Resumo**: `grupo_de_necessidade` = cópia dos valores da coluna especificada para cada categoria
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 2.2 Configuração de Parâmetros Sigma para Outliers
 # MAGIC
 # MAGIC O sistema permite configurar diferentes níveis de sensibilidade para detecção de outliers:
 # MAGIC
