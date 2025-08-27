@@ -1364,7 +1364,8 @@ def executar_calculo_matriz_merecimento(categoria: str,
                                        sigma_atacado_cd: float = 1.5,
                                        sigma_atacado_loja: float = 1.5,
                                        salvar_versao_completa: bool = False,
-                                       mes_analise: str = "202507") -> DataFrame:
+                                       mes_analise: str = "202507",
+                                       data_corte_matriz: str = "2025-06-30") -> DataFrame:
     """
     Função principal que executa todo o cálculo da matriz de merecimento.
     
@@ -1498,7 +1499,7 @@ def executar_calculo_matriz_merecimento(categoria: str,
                     df_merecimento=df_merecimento_final,
                     categoria=categoria,
                     mes_analise=mes_analise,
-                    data_corte_matriz=data_calculo
+                    data_corte_matriz=data_corte_matriz
                 )
                 print("✅ Versão completa salva com sucesso!")
                 print(f"  • Tabela: databox.bcg_comum.supply_base_merecimento_diario_{categoria.replace('DIRETORIA ', '').replace(' ', '_').upper()}")
