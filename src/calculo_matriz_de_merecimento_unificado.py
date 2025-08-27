@@ -157,6 +157,8 @@ def determinar_grupo_necessidade(categoria: str, df: DataFrame) -> DataFrame:
     
     regra = REGRAS_AGRUPAMENTO[categoria]
     coluna_origem = regra["coluna_grupo_necessidade"]
+
+    df_com_gdn = aplicar_mapeamentos_produtos(df)
     
     # Verifica se a coluna existe no DataFrame
     colunas_df = df.columns
@@ -223,6 +225,8 @@ def carregar_dados_base(categoria: str, data_inicio: data_inicio) -> DataFrame:
     print(f"  • Período: {data_inicio} até {df_com_grupo.agg(F.max('DtAtual')).collect()[0][0]}")
     
     return df_com_grupo
+
+carregar_dados_base('DIRETORIA DE TELAS', data_inicio).display()
 
 # COMMAND ----------
 
@@ -717,33 +721,35 @@ categoria = "DIRETORIA DE TELAS"
 # 1. Carregamento dos dados base
 df_base = carregar_dados_base(categoria, data_inicio)
 
-# 2. Carregamento dos mapeamentos
-de_para_modelos, de_para_gemeos = carregar_mapeamentos_produtos()
+# # 2. Carregamento dos mapeamentos
+# de_para_modelos, de_para_gemeos = carregar_mapeamentos_produtos()
 
-# 3. Aplicação dos mapeamentos
-df_com_mapeamentos = aplicar_mapeamentos_produtos(
-    df_base, categoria, de_para_modelos, de_para_gemeos
-)
+# # 3. Aplicação dos mapeamentos
+# df_com_mapeamentos = aplicar_mapeamentos_produtos(
+#     df_base, categoria, de_para_modelos, de_para_gemeos
+# )
 
-# 4. Detecção de outliers com parâmetros sigma configuráveis
-df_stats, df_meses_atipicos = detectar_outliers_meses_atipicos(
-    df_com_mapeamentos, 
-    categoria,
-    sigma_meses_atipicos=2,
-    sigma_outliers_cd=sigma_outliers_cd,
-    sigma_outliers_loja=sigma_outliers_loja,
-    sigma_atacado_cd=sigma_atacado_cd,
-    sigma_atacado_loja=sigma_atacado_loja
-)
 
-# 5. Filtragem de meses atípicos
-df_filtrado = filtrar_meses_atipicos(df_com_mapeamentos, df_meses_atipicos)
+df_base.display()
+# # 4. Detecção de outliers com parâmetros sigma configuráveis
+# df_stats, df_meses_atipicos = detectar_outliers_meses_atipicos(
+#     df_com_mapeamentos, 
+#     categoria,
+#     sigma_meses_atipicos=2,
+#     sigma_outliers_cd=1.5,
+#     sigma_outliers_loja=2,
+#     sigma_atacado_cd=2,
+#     sigma_atacado_loja=2
+# )
 
-# 6. Cálculo das medidas centrais
-df_com_medidas = calcular_medidas_centrais_com_medias_aparadas(df_filtrado)
+# # 5. Filtragem de meses atípicos
+# df_filtrado = filtrar_meses_atipicos(df_com_mapeamentos, df_meses_atipicos)
 
-# 7. Consolidação final
-df_final = consolidar_medidas(df_com_medidas)
+# # 6. Cálculo das medidas centrais
+# df_com_medidas = calcular_medidas_centrais_com_medias_aparadas(df_filtrado)
+
+# # 7. Consolidação final
+# df_final = consolidar_medidas(df_com_medidas)
 
 # COMMAND ----------
 
