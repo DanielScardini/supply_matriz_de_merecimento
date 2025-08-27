@@ -1102,19 +1102,30 @@ def salvar_versao_final_completa(df_merecimento: DataFrame,
     # 1. CACHE ESTRATÉGICO: Carrega dados de demanda calculada com cache
     print("📊 Carregando dados de demanda calculada com cache estratégico...")
     
+    # NOTA: A tabela base não tem grupo_de_necessidade, então vamos usar os dados do df_merecimento
     df_dados_demanda = (
-        spark.table('databox.bcg_comum.supply_base_merecimento_diario')
-        .filter(F.col("NmAgrupamentoDiretoriaSetor") == categoria)
-        .filter(F.col("year_month") == int(mes_analise))
+        df_merecimento
         .select(
             "cdfilial", "grupo_de_necessidade", "CdSku",
-            "Media90_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura",
-            "Media270_Qt_venda_sem_ruptura", "Media360_Qt_venda_sem_ruptura",
-            "Mediana90_Qt_venda_sem_ruptura", "Mediana180_Qt_venda_sem_ruptura",
-            "Mediana270_Qt_venda_sem_ruptura", "Mediana360_Qt_venda_sem_ruptura",
-            "MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada180_Qt_venda_sem_ruptura",
-            "MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada360_Qt_venda_sem_ruptura"
+            "Total_CD_Media90_Qt_venda_sem_ruptura", "Total_CD_Media180_Qt_venda_sem_ruptura",
+            "Total_CD_Media270_Qt_venda_sem_ruptura", "Total_CD_Media360_Qt_venda_sem_ruptura",
+            "Total_CD_Mediana90_Qt_venda_sem_ruptura", "Total_CD_Mediana180_Qt_venda_sem_ruptura",
+            "Total_CD_Mediana270_Qt_venda_sem_ruptura", "Total_CD_Mediana360_Qt_venda_sem_ruptura",
+            "Total_CD_MediaAparada90_Qt_venda_sem_ruptura", "Total_CD_MediaAparada180_Qt_venda_sem_ruptura",
+            "Total_CD_MediaAparada270_Qt_venda_sem_ruptura", "Total_CD_MediaAparada360_Qt_venda_sem_ruptura"
         )
+        .withColumnRenamed("Total_CD_Media90_Qt_venda_sem_ruptura", "Media90_Qt_venda_sem_ruptura")
+        .withColumnRenamed("Total_CD_Media180_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura")
+        .withColumnRenamed("Total_CD_Media270_Qt_venda_sem_ruptura", "Media270_Qt_venda_sem_ruptura")
+        .withColumnRenamed("Total_CD_Media360_Qt_venda_sem_ruptura", "Media360_Qt_venda_sem_ruptura")
+        .withColumnRenamed("Total_CD_Mediana90_Qt_venda_sem_ruptura", "Mediana90_Qt_venda_sem_ruptura")
+        .withColumnRenamed("Total_CD_Mediana180_Qt_venda_sem_ruptura", "Mediana180_Qt_venda_sem_ruptura")
+        .withColumnRenamed("Total_CD_Mediana270_Qt_venda_sem_ruptura", "Mediana270_Qt_venda_sem_ruptura")
+        .withColumnRenamed("Total_CD_Mediana360_Qt_venda_sem_ruptura", "Mediana360_Qt_venda_sem_ruptura")
+        .withColumnRenamed("Total_CD_MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada90_Qt_venda_sem_ruptura")
+        .withColumnRenamed("Total_CD_MediaAparada180_Qt_venda_sem_ruptura", "MediaAparada180_Qt_venda_sem_ruptura")
+        .withColumnRenamed("Total_CD_MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada270_Qt_venda_sem_ruptura")
+        .withColumnRenamed("Total_CD_MediaAparada360_Qt_venda_sem_ruptura", "MediaAparada360_Qt_venda_sem_ruptura")
         .cache()  # Cache estratégico para múltiplos usos
     )
     
