@@ -400,10 +400,6 @@ print("Distribuição da matriz por tipo de filial:")
 
 # COMMAND ----------
 
-df_matriz_telefonia.count()
-
-# COMMAND ----------
-
 df_matriz_telefonia_metricas = (
     df_matriz_telefonia
     .join(
@@ -423,6 +419,14 @@ df_matriz_telefonia_metricas = (
 
 print("Dados consolidados para análise de métricas:")
 df_matriz_telefonia_metricas.limit(1).display()
+
+# COMMAND ----------
+
+# Escrevendo DataFrame como tabela Delta
+df_pct_telefonia.write \
+    .format("delta") \
+    .mode("overwrite") \
+    .saveAsTable("databox.bcg_comum.supply_proporcao_demanda_real_telefonia")
 
 # COMMAND ----------
 

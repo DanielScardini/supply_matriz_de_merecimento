@@ -309,6 +309,17 @@ df_pct_telas.limit(1).display()
 
 # COMMAND ----------
 
+(
+    df_pct_telas
+    .write
+    .format("delta")
+    .mode("overwrite")
+    .saveAsTable("databox.bcg_comum.supply_demanda_proporcao_telas")
+
+)
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 7. Carregamento da Matriz de Merecimento Atual
 # MAGIC

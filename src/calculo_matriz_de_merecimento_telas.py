@@ -49,7 +49,7 @@ spark = SparkSession.builder.appName("calculo_matriz_merecimento").getOrCreate()
 
 df_vendas_estoque_telefonia = (
     spark.table('databox.bcg_comum.supply_base_merecimento_diario')
-    .filter(F.col("NmAgrupamentoDiretoriaSetor") == 'DIRETORIA TELEFONIA CELULAR')
+    .filter(F.col("NmAgrupamentoDiretoriaSetor") == 'DIRETORIA DE TELAS')
     .filter(F.col("DtAtual") >= "2024-01-01")
     .withColumn(
         "year_month",
@@ -205,9 +205,9 @@ print("✅ Estatísticas por gêmeo-mês calculadas")
 
 # Configuração de parâmetros para detecção de outliers
 PARAMETROS_OUTLIERS = {
-    "desvios_meses_atipicos": 2,  # Desvios para meses atípicos
-    "desvios_historico_cd": 2,     # Desvios para outliers históricos a nível CD
-    "desvios_historico_loja": 2,   # Desvios para outliers históricos a nível loja
+    "desvios_meses_atipicos": 3,  # Desvios para meses atípicos
+    "desvios_historico_cd": 3,     # Desvios para outliers históricos a nível CD
+    "desvios_historico_loja": 3,   # Desvios para outliers históricos a nível loja
     "desvios_atacado_cd": 1.5,     # Desvios para outliers CD em lojas de atacado
     "desvios_atacado_loja": 1.5    # Desvios para outliers loja em lojas de atacado
 }
@@ -217,7 +217,7 @@ lojas_atacado = (
     spark.table('databox.bcg_comum.supply_base_merecimento_diario')
     .select("CdFilial")
     .distinct()
-    .withColumn("flag_atacado", F.lit(1))  # Por enquanto, todas as lojas são consideradas
+    .withColumn("flag_atacado", F.lit(0))  # Por enquanto, todas as lojas são consideradas
     .cache()
 )
 
@@ -369,10 +369,6 @@ print("✅ Mapeamento de filiais para CD carregado")
 # MAGIC - **Meses atípicos**: Por gêmeo específico
 # MAGIC - **Outliers históricos**: Por gêmeo-CD e gêmeo-loja com parâmetros configuráveis
 # MAGIC - **Flag de atacado**: Lojas com vendas atacado recebem tratamento diferenciado
-
-# COMMAND ----------
-
-
 
 # COMMAND ----------
 
@@ -890,9 +886,33 @@ df_proporcoes_internas = (
 
 # COMMAND ----------
 
+# Join com merecimentos CD-gêmeo para obter as colunas de merecimento
+df_proporcoes_com_merecimento = (
+    df_proporcoes_internas
+    .join(
+        df_merecimento_cd_gemeo_final.select(
+            "Cd_primario", "gemeos",
+            "Merecimento_Media90", "Merecimento_Media180", "Merecimento_Media270", "Merecimento_Media360",
+            "Merecimento_Mediana90", "Merecimento_Mediana180", "Merecimento_Mediana270", "Merecimento_Mediana360"
+        ),
+        on=["Cd_primario", "gemeos"],
+        how="left"
+    )
+    .fillna(0, subset=[
+        "Merecimento_Media90", "Merecimento_Media180", "Merecimento_Media270", "Merecimento_Media360",
+        "Merecimento_Mediana90", "Merecimento_Mediana180", "Merecimento_Mediana270", "Merecimento_Mediana360"
+    ])
+)
+
+print("✅ Join com merecimentos CD-gêmeo concluído")
+print(f"  • Total de registros: {df_proporcoes_com_merecimento.count()}")
+print(f"  • Colunas disponíveis: {', '.join(df_proporcoes_com_merecimento.columns)}")
+
+# COMMAND ----------
+
 # Cálculo do merecimento final
 df_merecimento_final_filial_gemeo = (
-    df_proporcoes_internas
+    df_proporcoes_com_merecimento  # ← MUDANÇA AQUI: usar df_proporcoes_com_merecimento em vez de df_proporcoes_internas
     .withColumn("MerecimentoFinal_Media90", F.round(F.col("Merecimento_Media90") * F.col("ProporcaoInterna_Media90"), 6))
     .withColumn("MerecimentoFinal_Media180", F.round(F.col("Merecimento_Media180") * F.col("ProporcaoInterna_Media180"), 6))
     .withColumn("MerecimentoFinal_Media270", F.round(F.col("Merecimento_Media270") * F.col("ProporcaoInterna_Media270"), 6))
@@ -907,233 +927,122 @@ print("✅ Matriz de merecimento final calculada com sucesso!")
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ## 10. Cálculo e Avaliação das Métricas da Matriz de Merecimento
-# MAGIC
-# MAGIC Nesta etapa, calculamos métricas robustas para avaliar a qualidade das alocações
-# MAGIC da matriz de merecimento calculada, comparando com dados reais de demanda.
-# MAGIC
-# MAGIC **Métricas Calculadas:**
-# MAGIC - **wMAPE**: Weighted Mean Absolute Percentage Error ponderado por volume
-# MAGIC - **SE (Share Error)**: Erro na distribuição de participações entre filiais
-# MAGIC - **Cross Entropy**: Medida de divergência entre distribuições reais e previstas
-# MAGIC - **KL Divergence**: Divergência de Kullback-Leibler para comparação
+from pyspark.sql import functions as F, Window
+from typing import List, Optional
+
+def add_allocation_metrics(
+    df,
+    y_col: str,
+    yhat_col: str,
+    group_cols: Optional[List[str]] = None,
+    epsilon: float = 1e-12
+):
+    if group_cols is None:
+        group_cols = []
+
+    w = Window.partitionBy(*group_cols) if group_cols else Window.partitionBy(F.lit(1))
+    y, yhat = F.col(y_col).cast("double"), F.col(yhat_col).cast("double")
+
+    # Totais
+    Y_tot    = F.sum(y).over(w)
+    Yhat_tot = F.sum(yhat).over(w)
+
+    # Shares
+    p    = F.when(Y_tot    > 0, y    / Y_tot   ).otherwise(F.lit(0.0))
+    phat = F.when(Yhat_tot > 0, yhat / Yhat_tot).otherwise(F.lit(0.0))
+
+    # Erros
+    abs_err = F.abs(y - yhat)
+    mae_weighted_by_y = abs_err * y
+
+    # sMAPE componentes
+    smape_num = 2.0 * abs_err
+    smape_den = F.when((y + yhat) > 0, y + yhat).otherwise(F.lit(0.0))
+
+    # Distribuição
+    cross_entropy_term = F.when((p > 0) & (phat > 0), -p * F.log(phat + F.lit(epsilon))).otherwise(F.lit(0.0))
+    kl_term            = F.when((p > 0) & (phat > 0),  p * F.log((p + F.lit(epsilon)) / (phat + F.lit(epsilon)))).otherwise(F.lit(0.0))
+
+    # Share
+    abs_err_share = F.abs(p - phat)
+    wmape_share   = abs_err_share * y  # ponderado por volume real
+
+    base = (df
+        .withColumn("__y__", y).withColumn("__yhat__", yhat)
+        .withColumn("__p__", p).withColumn("__phat__", phat)
+        .withColumn("__abs_err__", abs_err)
+        .withColumn("__mae_w_by_y__", mae_weighted_by_y)
+        .withColumn("__smape_num__", smape_num)
+        .withColumn("__smape_den__", smape_den)
+        .withColumn("__kl_term__", kl_term)
+        .withColumn("__cross_entropy_term__", cross_entropy_term)
+        .withColumn("__abs_err_share__", abs_err_share)
+        .withColumn("__wmape_share__", wmape_share)
+    )
+
+    agg = base.groupBy(*group_cols) if group_cols else base.groupBy()
+    res = (agg.agg(
+            F.sum("__abs_err__").alias("_sum_abs_err"),
+            F.sum("__mae_w_by_y__").alias("_sum_mae_w_by_y"),
+            F.sum("__y__").alias("_sum_y"),
+            F.sum("__yhat__").alias("_sum_yhat"),
+            F.sum("__smape_num__").alias("_sum_smape_num"),
+            F.sum("__smape_den__").alias("_sum_smape_den"),
+            F.sum(F.abs(F.col("__p__") - F.col("__phat__"))).alias("_SE"),
+            F.sum("__kl_term__").alias("_KL"),
+            F.sum("__cross_entropy_term__").alias("_cross_entropy"),
+            F.sum("__wmape_share__").alias("_num_wmape_share")
+        )
+        # WMAPE (%)
+        .withColumn("wMAPE_perc", F.round(F.when(F.col("_sum_y") > 0, F.col("_sum_abs_err")/F.col("_sum_y")*100).otherwise(0.0), 4))
+        # sMAPE (%)
+        .withColumn("sMAPE_perc", F.round(F.when(F.col("_sum_smape_den") > 0, F.col("_sum_smape_num")/F.col("_sum_smape_den")*100).otherwise(0.0), 4))
+        # MAE ponderado
+        .withColumn("MAE_weighted_by_y", F.round(F.when(F.col("_sum_y") > 0, F.col("_sum_mae_w_by_y")/F.col("_sum_y")).otherwise(0.0), 4))
+        # Shares
+        .withColumn("SE_pp", F.round(F.col("_SE") * 100, 4))
+        .withColumn("wMAPE_share_perc", F.round(F.when(F.col("_sum_y") > 0, F.col("_num_wmape_share")/F.col("_sum_y")*100).otherwise(0.0), 4))
+        # Distribuição
+        .withColumn("Cross_entropy", F.when(F.col("_sum_y") > 0, F.col("_cross_entropy")).otherwise(F.lit(0.0)))
+        .withColumn("KL_divergence", F.when((F.col("_sum_y") > 0) & (F.col("_sum_yhat") > 0), F.col("_KL")).otherwise(F.lit(0.0)))
+        .select(*(group_cols if group_cols else []),
+                "wMAPE_perc","sMAPE_perc","MAE_weighted_by_y",
+                "SE_pp","wMAPE_share_perc",
+                "Cross_entropy","KL_divergence")
+    )
+    return res
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ### 10.1 Importação das Funções de Métricas
-# MAGIC
-# MAGIC Importamos as funções de métricas para avaliação da matriz de merecimento.
-
-# COMMAND ----------
-
-# Importação das funções de métricas
-from metricas_matriz_merecimento import (
-    add_allocation_metrics,
-    calculate_line_metrics,
-    validate_metrics_data,
-    generate_metrics_summary
+df_telas_pct = (
+    spark.table('databox.bcg_comum.supply_demanda_proporcao_telas')
+    .fillna("SEM_GRUPO", subset=["gemeos"])
+    .select("gemeos", "CdFIlial", "pct_demanda_perc")
+    .dropDuplicates()
 )
 
-print("✅ Funções de métricas importadas com sucesso!")
-
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ### 10.2 Preparação dos Dados para Cálculo de Métricas
-# MAGIC
-# MAGIC Preparamos os dados para comparação entre a matriz calculada e dados reais de demanda.
-
-# COMMAND ----------
-
-# Preparação dos dados para cálculo de métricas
-# Vamos usar as médias móveis como proxy de demanda real para comparação
-df_para_metricas = (
+df_merecimento_final = (
     df_merecimento_final_filial_gemeo
-    .select(
-        "CdFilial", "Cd_primario", "gemeos",
-        # Merecimentos calculados (valores previstos)
-        "MerecimentoFinal_Media90", "MerecimentoFinal_Media180", 
-        "MerecimentoFinal_Media270", "MerecimentoFinal_Media360",
-        "MerecimentoFinal_Mediana90", "MerecimentoFinal_Mediana180",
-        "MerecimentoFinal_Mediana270", "MerecimentoFinal_Mediana360"
-    )
-    .join(
-        df_medidas_demanda_com_cd.select(
-            "CdFilial", "Cd_primario", "gemeos",
-            # Demandas reais (valores observados)
-            "Media90_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura",
-            "Media270_Qt_venda_sem_ruptura", "Media360_Qt_venda_sem_ruptura",
-            "Mediana90_Qt_venda_sem_ruptura", "Mediana180_Qt_venda_sem_ruptura",
-            "Mediana270_Qt_venda_sem_ruptura", "Mediana360_Qt_venda_sem_ruptura"
-        ),
-        on=["CdFilial", "Cd_primario", "gemeos"],
-        how="inner"
-    )
-    .fillna(0)
+    .select("gemeos", "CdFilial", "MerecimentoFinal_Media90", "MerecimentoFinal_Media180", "MerecimentoFinal_Media270")
+    .dropDuplicates()
+    .join(df_telas_pct, ["gemeos", "CdFilial"], "inner")
 )
 
-print("✅ Dados preparados para cálculo de métricas:")
-print(f"  • Total de registros: {df_para_metricas.count()}")
-print(f"  • Colunas disponíveis: {', '.join(df_para_metricas.columns)}")
+# COMMAND ----------
+
+# Métricas agregadas sobre dados FILTRADOS
+df_agg_metrics = add_allocation_metrics(
+    df=df_merecimento_final,
+    y_col="pct_demanda_perc",     
+    yhat_col="MerecimentoFinal_Media90",  
+    group_cols=["CdFilial"]            
+).dropna(subset=["CdFilial"])
+
+print("Métricas agregadas calculadas (sobre dados filtrados):")
+df_agg_metrics.display()
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ### 10.3 Cálculo das Métricas por Métrica de Demanda
-# MAGIC
-# MAGIC Calculamos as métricas para cada uma das 8 métricas de demanda (4 médias + 4 medianas).
-
-# COMMAND ----------
-
-# Lista de métricas para análise
-metricas_analise = [
-    ("Media90", "MerecimentoFinal_Media90", "Media90_Qt_venda_sem_ruptura"),
-    ("Media180", "MerecimentoFinal_Media180", "Media180_Qt_venda_sem_ruptura"),
-    ("Media270", "MerecimentoFinal_Media270", "Media270_Qt_venda_sem_ruptura"),
-    ("Media360", "MerecimentoFinal_Media360", "Media360_Qt_venda_sem_ruptura"),
-    ("Mediana90", "MerecimentoFinal_Mediana90", "Mediana90_Qt_venda_sem_ruptura"),
-    ("Mediana180", "MerecimentoFinal_Mediana180", "Mediana180_Qt_venda_sem_ruptura"),
-    ("Mediana270", "MerecimentoFinal_Mediana270", "Mediana270_Qt_venda_sem_ruptura"),
-    ("Mediana360", "MerecimentoFinal_Mediana360", "Mediana360_Qt_venda_sem_ruptura")
-]
-
-# Dicionário para armazenar resultados das métricas
-resultados_metricas = {}
-
-print("📊 CALCULANDO MÉTRICAS PARA CADA ABORDAGEM DE DEMANDA:")
-print("=" * 80)
-
-for nome_metrica, col_merecimento, col_demanda in metricas_analise:
-    print(f"\n🔍 Calculando métricas para: {nome_metrica}")
-    
-    try:
-        # Validar dados para esta métrica
-        df_metrica = df_para_metricas.select(
-            "CdFilial", "Cd_primario", "gemeos", col_merecimento, col_demanda
-        ).filter(F.col(col_demanda) > 0)  # Filtrar apenas registros com demanda > 0
-        
-        is_valid, message = validate_metrics_data(
-            df_metrica,
-            y_col=col_demanda,
-            yhat_col=col_merecimento
-        )
-        
-        if is_valid:
-            # Calcular métricas agregadas
-            df_metrics_agg = add_allocation_metrics(
-                df=df_metrica,
-                y_col=col_demanda,
-                yhat_col=col_merecimento,
-                group_cols=["Cd_primario", "gemeos"]
-            )
-            
-            # Calcular métricas linha a linha
-            df_metrics_line = calculate_line_metrics(
-                df=df_metrica,
-                y_col=col_demanda,
-                yhat_col=col_merecimento,
-                group_cols=["Cd_primario", "gemeos"]
-            )
-            
-            # Armazenar resultados
-            resultados_metricas[nome_metrica] = {
-                "agregadas": df_metrics_agg,
-                "linha_linha": df_metrics_line,
-                "total_registros": df_metrica.count()
-            }
-            
-            print(f"  ✅ {nome_metrica}: {df_metrica.count()} registros processados")
-            
-            # Mostrar resumo das métricas agregadas
-            df_resumo = generate_metrics_summary(df_metrics_agg, group_cols=["Cd_primario"])
-            print(f"  📈 Métricas calculadas para {df_resumo.count()} CDs")
-            
-        else:
-            print(f"  ❌ {nome_metrica}: {message}")
-            
-    except Exception as e:
-        print(f"  ❌ {nome_metrica}: Erro no cálculo - {str(e)}")
-
-print(f"\n✅ Cálculo de métricas concluído para {len(resultados_metricas)} abordagens de demanda")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### 10.4 Resumo Geral das Métricas
-# MAGIC
-# MAGIC Apresentamos um resumo geral das métricas calculadas para todas as abordagens.
-
-# COMMAND ----------
-
-print("📋 RESUMO GERAL DAS MÉTRICAS CALCULADAS:")
-print("=" * 80)
-
-for nome_metrica, dados in resultados_metricas.items():
-    print(f"\n🔍 {nome_metrica}:")
-    print(f"  • Total de registros: {dados['total_registros']}")
-    
-    # Resumo das métricas agregadas
-    df_agg = dados['agregadas']
-    if df_agg.count() > 0:
-        # Calcular médias das métricas principais
-        metricas_principais = df_agg.select(
-            F.avg("wMAPE_perc").alias("avg_wMAPE"),
-            F.avg("SE_pp").alias("avg_SE"),
-            F.avg("Cross_entropy").alias("avg_Cross_entropy"),
-            F.avg("KL_divergence").alias("avg_KL")
-        ).collect()[0]
-        
-        print(f"  • wMAPE médio: {metricas_principais['avg_wMAPE']:.2f}%")
-        print(f"  • Share Error médio: {metricas_principais['avg_SE']:.2f} pp")
-        print(f"  • Cross Entropy médio: {metricas_principais['avg_Cross_entropy']:.4f}")
-        print(f"  • KL Divergence médio: {metricas_principais['avg_KL']:.4f}")
-
-print(f"\n✅ Análise de métricas concluída para {len(resultados_metricas)} abordagens de demanda")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### 10.5 Exportação dos Resultados das Métricas
-# MAGIC
-# MAGIC Exportamos os resultados das métricas para análise posterior.
-
-# COMMAND ----------
-
-# Exportação dos resultados das métricas
-for nome_metrica, dados in resultados_metricas.items():
-    try:
-        # Exportar métricas agregadas
-        dados['agregadas'].write.mode("overwrite").saveAsTable(
-            f"metricas_matriz_merecimento_{nome_metrica.lower()}_agregadas"
-        )
-        
-        # Exportar métricas linha a linha
-        dados['linha_linha'].write.mode("overwrite").saveAsTable(
-            f"metricas_matriz_merecimento_{nome_metrica.lower()}_linha_linha"
-        )
-        
-        print(f"✅ {nome_metrica}: Métricas exportadas para tabelas Delta")
-        
-    except Exception as e:
-        print(f"❌ {nome_metrica}: Erro na exportação - {str(e)}")
-
-print("\n✅ Exportação das métricas concluída!")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 11. Conclusão
-# MAGIC
-# MAGIC Implementamos com sucesso o cálculo da matriz de merecimento em duas camadas com:
-# MAGIC - **Detecção automática de outliers** por gêmeo específico
-# MAGIC - **Múltiplas abordagens de médias móveis** para demanda robusta
-# MAGIC - **Cálculo de merecimento** a nível CD-gêmeo e distribuição interna
-# MAGIC - **Avaliação completa de métricas** para todas as abordagens de demanda
-# MAGIC
-# MAGIC **Próximos passos recomendados:**
-# MAGIC 1. Analisar as métricas por CD e gêmeo para identificar oportunidades de melhoria
-# MAGIC 2. Comparar performance entre diferentes abordagens de demanda (médias vs. medianas)
-# MAGIC 3. Implementar monitoramento contínuo das métricas para acompanhamento da evolução
-# MAGIC 4. Ajustar parâmetros de outliers conforme necessário para otimização
+df_agg_metrics.agg(F.median('sMAPE_perc')).display()
