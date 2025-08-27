@@ -659,7 +659,8 @@ def consolidar_medidas(df: DataFrame) -> DataFrame:
 # COMMAND ----------
 
 def executar_calculo_matriz_merecimento(categoria: str, 
-                                       data_inicio: str = data_inicio,
+                                       data_inicio: str = "2024-01-01",
+                                       data_calculo: str = "2025-06-30",
                                        sigma_meses_atipicos: float = 3.0,
                                        sigma_outliers_cd: float = 3.0,
                                        sigma_outliers_loja: float = 3.0,
@@ -671,6 +672,7 @@ def executar_calculo_matriz_merecimento(categoria: str,
     Args:
         categoria: Nome da categoria/diretoria
         data_inicio: Data de início para filtro (formato YYYY-MM-DD)
+        data_calculo: Data específica para cálculo de merecimento (formato YYYY-MM-DD)
         sigma_meses_atipicos: Número de desvios padrão para meses atípicos (padrão: 3.0)
         sigma_outliers_cd: Número de desvios padrão para outliers CD (padrão: 3.0)
         sigma_outliers_loja: Número de desvios padrão para outliers loja (padrão: 3.0)
@@ -678,7 +680,7 @@ def executar_calculo_matriz_merecimento(categoria: str,
         sigma_atacado_loja: Número de desvios padrão para outliers loja atacado (padrão: 1.5)
         
     Returns:
-        DataFrame final com todas as medidas calculadas
+        DataFrame final com todas as medidas calculadas e merecimento
     """
     print(f"🚀 Iniciando cálculo da matriz de merecimento para: {categoria}")
     print("=" * 80)
@@ -724,9 +726,30 @@ def executar_calculo_matriz_merecimento(categoria: str,
         # 8. Consolidação final
         df_final = consolidar_medidas(df_com_medidas)
         
+        # 9. Cálculo de merecimento por CD e filial
+        print("=" * 80)
+        print("🔄 Iniciando cálculo de merecimento...")
+        
+        # 9.1 Merecimento a nível CD
+        df_merecimento_cd = calcular_merecimento_cd(df_final, data_calculo, categoria)
+        
+        # 9.2 Merecimento interno ao CD (filial)
+        df_merecimento_interno = calcular_merecimento_interno_cd(df_final, data_calculo, categoria)
+        
+        # 9.3 Merecimento final (CD × Interno CD)
+        df_merecimento_final = calcular_merecimento_final(df_merecimento_cd, df_merecimento_interno)
+        
+        # 9.4 Join final com todas as informações
+        df_resultado_final = df_final.join(
+            df_merecimento_final.select("cdfilial", "cd_primario", "grupo_de_necessidade"),
+            on=["cdfilial", "grupo_de_necessidade"],
+            how="left"
+        )
+        
         print("=" * 80)
         print(f"✅ Cálculo da matriz de merecimento concluído para: {categoria}")
-        print(f"📊 Total de registros finais: {df_final.count():,}")
+        print(f"📊 Total de registros finais: {df_resultado_final.count():,}")
+        print(f"📅 Data de cálculo de merecimento: {data_calculo}")
         print(f"📋 Fluxo executado:")
         print(f"   1. Carregamento de dados base")
         print(f"   2. Carregamento de mapeamentos")
@@ -736,8 +759,11 @@ def executar_calculo_matriz_merecimento(categoria: str,
         print(f"   6. Filtragem de meses atípicos")
         print(f"   7. Cálculo de medidas centrais")
         print(f"   8. Consolidação final")
+        print(f"   9. Cálculo de merecimento CD")
+        print(f"   10. Cálculo de merecimento interno CD")
+        print(f"   11. Cálculo de merecimento final")
         
-        return df_final
+        return df_resultado_final
         
     except Exception as e:
         print(f"❌ Erro durante o cálculo: {str(e)}")
@@ -777,7 +803,196 @@ df_telas.display()
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 13. Validação e Testes
+# MAGIC ## 13. Cálculo de Merecimento por CD e Filial
+
+# COMMAND ----------
+
+def criar_de_para_filial_cd() -> DataFrame:
+    """
+    Cria o mapeamento filial → CD usando dados da tabela base.
+    
+    Returns:
+        DataFrame com mapeamento filial → CD
+    """
+    print("🔄 Criando de-para filial → CD...")
+    
+    # Carrega dados da tabela base para criar mapeamento
+    df_base = spark.table('databox.bcg_comum.supply_base_merecimento_diario')
+    
+    # Cria mapeamento filial → CD
+    de_para_filial_cd = (
+        df_base
+        .select("cdfilial", "cd_primario")
+        .distinct()
+        .filter(F.col("cdfilial").isNotNull())
+        .filter(F.col("cd_primario").isNotNull())
+        .orderBy("cdfilial")
+    )
+    
+    print(f"✅ De-para filial → CD criado:")
+    print(f"  • Total de filiais: {de_para_filial_cd.count():,}")
+    print(f"  • CDs únicos: {de_para_filial_cd.select('cd_primario').distinct().count():,}")
+    
+    return de_para_filial_cd
+
+# COMMAND ----------
+
+def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) -> DataFrame:
+    """
+    Calcula o merecimento a nível CD por grupo de necessidade.
+    
+    Args:
+        df: DataFrame com medidas calculadas
+        data_calculo: Data específica para o cálculo (YYYY-MM-DD)
+        categoria: Nome da categoria
+        
+    Returns:
+        DataFrame com merecimento CD por grupo_de_necessidade
+    """
+    print(f"🔄 Calculando merecimento CD para categoria: {categoria}")
+    print(f"📅 Data de cálculo: {data_calculo}")
+    
+    # Filtra dados para a data específica
+    df_data_calculo = df.filter(F.col("DtAtual") == data_calculo)
+    
+    # Agrega por CD e grupo de necessidade para cada medida
+    medidas_disponiveis = [
+        "Media90_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura", 
+        "Media270_Qt_venda_sem_ruptura", "Media360_Qt_venda_sem_ruptura",
+        "Mediana90_Qt_venda_sem_ruptura", "Mediana180_Qt_venda_sem_ruptura",
+        "Mediana270_Qt_venda_sem_ruptura", "Mediana360_Qt_venda_sem_ruptura",
+        "MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada180_Qt_venda_sem_ruptura",
+        "MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada360_Qt_venda_sem_ruptura"
+    ]
+    
+    # Adiciona de-para filial → CD
+    de_para_filial_cd = criar_de_para_filial_cd()
+    df_com_cd = df_data_calculo.join(de_para_filial_cd, on="cdfilial", how="left")
+    
+    # Agrega por CD e grupo de necessidade
+    colunas_agregacao = ["cd_primario", "grupo_de_necessidade"] + medidas_disponiveis
+    
+    df_merecimento_cd = (
+        df_com_cd
+        .groupBy("cd_primario", "grupo_de_necessidade")
+        .agg(*[
+            F.sum(F.col(medida)).alias(f"Total_{medida}")
+            for medida in medidas_disponiveis
+        ])
+    )
+    
+    print(f"✅ Merecimento CD calculado:")
+    print(f"  • CDs: {df_merecimento_cd.select('cd_primario').distinct().count():,}")
+    print(f"  • Grupos de necessidade: {df_merecimento_cd.select('grupo_de_necessidade').distinct().count():,}")
+    
+    return df_merecimento_cd
+
+# COMMAND ----------
+
+def calcular_merecimento_interno_cd(df: DataFrame, data_calculo: str, categoria: str) -> DataFrame:
+    """
+    Calcula o merecimento interno ao CD (filial) por grupo de necessidade.
+    
+    Args:
+        df: DataFrame com medidas calculadas
+        data_calculo: Data específica para o cálculo
+        categoria: Nome da categoria
+        
+    Returns:
+        DataFrame com percentual de merecimento por loja dentro do CD
+    """
+    print(f"🔄 Calculando merecimento interno CD para categoria: {categoria}")
+    print(f"📅 Data de cálculo: {data_calculo}")
+    
+    # Filtra dados para a data específica
+    df_data_calculo = df.filter(F.col("DtAtual") == data_calculo)
+    
+    # Adiciona de-para filial → CD
+    de_para_filial_cd = criar_de_para_filial_cd()
+    df_com_cd = df_data_calculo.join(de_para_filial_cd, on="cdfilial", how="left")
+    
+    # Mesmas medidas disponíveis
+    medidas_disponiveis = [
+        "Media90_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura", 
+        "Media270_Qt_venda_sem_ruptura", "Media360_Qt_venda_sem_ruptura",
+        "Mediana90_Qt_venda_sem_ruptura", "Mediana180_Qt_venda_sem_ruptura",
+        "Mediana270_Qt_venda_sem_ruptura", "Mediana360_Qt_venda_sem_ruptura",
+        "MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada180_Qt_venda_sem_ruptura",
+        "MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada360_Qt_venda_sem_ruptura"
+    ]
+    
+    # Calcula percentual por filial dentro de cada CD + grupo de necessidade
+    df_merecimento_interno = df_com_cd
+    
+    for medida in medidas_disponiveis:
+        # Janela para calcular percentual por CD + grupo de necessidade
+        w_percentual = Window.partitionBy("cd_primario", "grupo_de_necessidade")
+        
+        df_merecimento_interno = df_merecimento_interno.withColumn(
+            f"Percentual_{medida}",
+            F.when(F.col(f"Total_{medida}") > 0,
+                   F.col(f"Total_{medida}") / F.sum(F.col(f"Total_{medida}")).over(w_percentual))
+            .otherwise(0)
+        )
+    
+    print(f"✅ Merecimento interno CD calculado:")
+    print(f"  • Filiais: {df_merecimento_interno.select('cdfilial').distinct().count():,}")
+    print(f"  • CDs: {df_merecimento_interno.select('cd_primario').distinct().count():,}")
+    
+    return df_merecimento_interno
+
+# COMMAND ----------
+
+def calcular_merecimento_final(df_merecimento_cd: DataFrame, 
+                              df_merecimento_interno: DataFrame) -> DataFrame:
+    """
+    Calcula o merecimento final combinando CD e interno CD.
+    
+    Args:
+        df_merecimento_cd: Merecimento a nível CD
+        df_merecimento_interno: Merecimento interno ao CD
+        
+    Returns:
+        DataFrame com merecimento final (CD × Interno CD)
+    """
+    print("🔄 Calculando merecimento final...")
+    
+    # Join entre merecimento CD e interno CD
+    df_merecimento_final = (
+        df_merecimento_interno
+        .join(
+            df_merecimento_cd,
+            on=["cd_primario", "grupo_de_necessidade"],
+            how="left"
+        )
+    )
+    
+    # Calcula merecimento final para cada medida
+    medidas_disponiveis = [
+        "Media90_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura", 
+        "Media270_Qt_venda_sem_ruptura", "Media360_Qt_venda_sem_ruptura",
+        "Mediana90_Qt_venda_sem_ruptura", "Mediana180_Qt_venda_sem_ruptura",
+        "Mediana270_Qt_venda_sem_ruptura", "Mediana360_Qt_venda_sem_ruptura",
+        "MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada180_Qt_venda_sem_ruptura",
+        "MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada360_Qt_venda_sem_ruptura"
+    ]
+    
+    for medida in medidas_disponiveis:
+        df_merecimento_final = df_merecimento_final.withColumn(
+            f"Merecimento_Final_{medida}",
+            F.col(f"Total_{medida}") * F.col(f"Percentual_{medida}")
+        )
+    
+    print(f"✅ Merecimento final calculado:")
+    print(f"  • Total de registros: {df_merecimento_final.count():,}")
+    print(f"  • Medidas calculadas: {len(medidas_disponiveis)}")
+    
+    return df_merecimento_final
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 14. Validação e Testes
 
 # COMMAND ----------
 
