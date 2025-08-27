@@ -1057,6 +1057,283 @@ def calcular_metricas_erro_previsao(df_merecimento: DataFrame,
 
 # COMMAND ----------
 
+def salvar_versao_final_completa(df_merecimento: DataFrame, 
+                                categoria: str,
+                                mes_analise: str = "202507",
+                                data_hora_execucao: str = None) -> None:
+    """
+    Salva versão final completa com todos os dados: SKU x grupo x filial x CD x merecimentos x métricas.
+    
+    Args:
+        df_merecimento: DataFrame com merecimento calculado
+        categoria: Nome da categoria/diretoria
+        mes_analise: Mês de análise no formato YYYYMM (padrão: julho-2025)
+        data_hora_execucao: Data/hora da execução (padrão: agora)
+    """
+    if data_hora_execucao is None:
+        data_hora_execucao = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    print(f"💾 Salvando versão final completa para categoria: {categoria}")
+    print(f"📅 Mês de análise: {mes_analise}")
+    print(f"🕐 Data/hora execução: {data_hora_execucao}")
+    
+    # 1. CACHE ESTRATÉGICO: Carrega dados de demanda calculada com cache
+    print("📊 Carregando dados de demanda calculada com cache estratégico...")
+    
+    df_dados_demanda = (
+        spark.table('databox.bcg_comum.supply_base_merecimento_diario')
+        .filter(F.col("NmAgrupamentoDiretoriaSetor") == categoria)
+        .filter(F.col("year_month") == int(mes_analise))
+        .select(
+            "cdfilial", "grupo_de_necessidade", "CdSku",
+            "Media90_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura",
+            "Media270_Qt_venda_sem_ruptura", "Media360_Qt_venda_sem_ruptura",
+            "Mediana90_Qt_venda_sem_ruptura", "Mediana180_Qt_venda_sem_ruptura",
+            "Mediana270_Qt_venda_sem_ruptura", "Mediana360_Qt_venda_sem_ruptura",
+            "MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada180_Qt_venda_sem_ruptura",
+            "MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada360_Qt_venda_sem_ruptura"
+        )
+        .cache()  # Cache estratégico para múltiplos usos
+    )
+    
+    print(f"✅ Dados de demanda carregados e cacheados:")
+    print(f"  • Total de registros: {df_dados_demanda.count():,}")
+    
+    # 2. BROADCAST JOIN: Cria mapeamento filial → CD com broadcast para performance
+    print("🔄 Criando mapeamento filial → CD com broadcast join...")
+    
+    de_para_filial_cd = (
+        df_dados_demanda
+        .select("cdfilial", "grupo_de_necessidade")
+        .distinct()
+        .join(
+            df_merecimento.select("cdfilial", "cd_primario").distinct(),
+            on="cdfilial",
+            how="inner"
+        )
+        .cache()  # Cache para múltiplos joins
+    )
+    
+    # 3. CALCULA PROPORÇÃO FACTUAL para todas as medidas
+    print("📈 Calculando proporção factual para todas as medidas...")
+    
+    medidas_disponiveis = [
+        "Media90_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura", 
+        "Media270_Qt_venda_sem_ruptura", "Media360_Qt_venda_sem_ruptura",
+        "Mediana90_Qt_venda_sem_ruptura", "Mediana180_Qt_venda_sem_ruptura",
+        "Mediana270_Qt_venda_sem_ruptura", "Mediana360_Qt_venda_sem_ruptura",
+        "MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada180_Qt_venda_sem_ruptura",
+        "MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada360_Qt_venda_sem_ruptura"
+    ]
+    
+    # Janela para calcular totais por grupo de necessidade no mês
+    w_grupo_mes = Window.partitionBy("grupo_de_necessidade")
+    
+    df_proporcao_factual = df_dados_demanda
+    for medida in medidas_disponiveis:
+        df_proporcao_factual = (
+            df_proporcao_factual
+            .withColumn(
+                f"total_{medida}_grupo_mes",
+                F.sum(F.col(medida)).over(w_grupo_mes)
+            )
+            .withColumn(
+                f"proporcao_factual_{medida}",
+                F.when(
+                    F.col(f"total_{medida}_grupo_mes") > 0,
+                    F.col(medida) / F.col(f"total_{medida}_grupo_mes")
+                ).otherwise(F.lit(0.0))
+            )
+            .withColumn(
+                f"proporcao_factual_{medida}_percentual",
+                F.round(F.col(f"proporcao_factual_{medida}") * 100, 4)
+            )
+        )
+    
+    # Seleciona apenas colunas necessárias
+    colunas_proporcao = ["cdfilial", "grupo_de_necessidade", "CdSku"] + [
+        f"proporcao_factual_{medida}_percentual" for medida in medidas_disponiveis
+    ]
+    
+    df_proporcao_factual = df_proporcao_factual.select(*colunas_proporcao).cache()
+    
+    print(f"✅ Proporção factual calculada para todas as medidas")
+    
+    # 4. JOIN COMPLETO com BROADCAST para performance
+    print("🔗 Realizando join completo com otimizações de performance...")
+    
+    # BROADCAST JOIN: df_proporcao_factual é pequeno, pode ser broadcast
+    df_proporcao_factual_broadcast = F.broadcast(df_proporcao_factual)
+    
+    df_versao_final = (
+        df_merecimento
+        .join(
+            df_proporcao_factual_broadcast,
+            on=["cdfilial", "grupo_de_necessidade"],
+            how="inner"
+        )
+        .join(
+            de_para_filial_cd,
+            on=["cdfilial", "grupo_de_necessidade"],
+            how="inner"
+        )
+    )
+    
+    print(f"✅ Join completo realizado:")
+    print(f"  • Registros finais: {df_versao_final.count():,}")
+    
+    # 5. CALCULA sMAPE para cada medida
+    print("📊 Calculando sMAPE para cada medida...")
+    
+    EPSILON = 1e-12
+    
+    df_com_smape = df_versao_final
+    for medida in medidas_disponiveis:
+        # Calcula percentual do merecimento calculado
+        df_com_smape = (
+            df_com_smape
+            .withColumn(
+                f"merecimento_{medida}_percentual",
+                F.when(
+                    F.col(f"Merecimento_Final_{medida}") > 0,
+                    F.col(f"Merecimento_Final_{medida}") / F.sum(f"Merecimento_Final_{medida}").over(
+                        Window.partitionBy("grupo_de_necessidade")
+                    ) * 100
+                ).otherwise(F.lit(0.0))
+            )
+            .withColumn(
+                f"erro_absoluto_{medida}",
+                F.abs(F.col(f"merecimento_{medida}_percentual") - F.col(f"proporcao_factual_{medida}_percentual"))
+            )
+            .withColumn(
+                f"smape_{medida}",
+                F.when(
+                    (F.col(f"merecimento_{medida}_percentual") + F.col(f"proporcao_factual_{medida}_percentual")) > 0,
+                    F.lit(2.0) * F.col(f"erro_absoluto_{medida}") / 
+                    (F.col(f"merecimento_{medida}_percentual") + F.col(f"proporcao_factual_{medida}_percentual") + F.lit(EPSILON)) * 100
+                ).otherwise(F.lit(0.0))
+            )
+        )
+    
+    # 6. CALCULA MELHOR sMAPE e MELHOR MEDIDA
+    print("🏆 Calculando melhor sMAPE e melhor medida...")
+    
+    # Cria array com todas as medidas para encontrar o melhor
+    colunas_smape = [f"smape_{medida}" for medida in medidas_disponiveis]
+    
+    df_com_melhor_smape = df_com_smape
+    for medida in medidas_disponiveis:
+        df_com_melhor_smape = (
+            df_com_melhor_smape
+            .withColumn(
+                f"is_melhor_{medida}",
+                F.when(
+                    F.col(f"smape_{medida}") == F.least(*[F.col(f"smape_{m}") for m in medidas_disponiveis]),
+                    F.lit(True)
+                ).otherwise(F.lit(False))
+            )
+        )
+    
+    # 7. PREPARA COLUNAS FINAIS
+    print("📋 Preparando colunas finais...")
+    
+    # Colunas de identificação
+    colunas_identificacao = [
+        "CdSku", "grupo_de_necessidade", "cdfilial", "cd_primario"
+    ]
+    
+    # Colunas de merecimento CD
+    colunas_merecimento_cd = [
+        f"Total_CD_{medida}" for medida in medidas_disponiveis
+    ]
+    
+    # Colunas de percentual da loja no CD
+    colunas_percentual_loja = [
+        f"Percentual_{medida}" for medida in medidas_disponiveis
+    ]
+    
+    # Colunas de merecimento final
+    colunas_merecimento_final = [
+        f"Merecimento_Final_{medida}" for medida in medidas_disponiveis
+    ]
+    
+    # Colunas de proporção factual
+    colunas_proporcao_factual = [
+        f"proporcao_factual_{medida}_percentual" for medida in medidas_disponiveis
+    ]
+    
+    # Colunas de sMAPE
+    colunas_smape = [
+        f"smape_{medida}" for medida in medidas_disponiveis
+    ]
+    
+    # Colunas de melhor sMAPE
+    colunas_melhor_smape = [
+        f"is_melhor_{medida}" for medida in medidas_disponiveis
+    ]
+    
+    # Todas as colunas finais
+    todas_colunas = (
+        colunas_identificacao + 
+        colunas_merecimento_cd + 
+        colunas_percentual_loja + 
+        colunas_merecimento_final + 
+        colunas_proporcao_factual + 
+        colunas_smape + 
+        colunas_melhor_smape
+    )
+    
+    # Adiciona colunas de metadados
+    df_final_completo = (
+        df_com_melhor_smape
+        .select(*todas_colunas)
+        .withColumn("data_hora_execucao", F.lit(data_hora_execucao))
+        .withColumn("mes_analise", F.lit(mes_analise))
+        .withColumn("categoria", F.lit(categoria))
+    )
+    
+    # 8. SALVA NO DATABOX com modo APPEND
+    print("💾 Salvando no databox com modo APPEND...")
+    
+    # Normaliza nome da categoria para o nome da tabela
+    categoria_normalizada = (
+        categoria
+        .replace("DIRETORIA ", "")
+        .replace(" ", "_")
+        .upper()
+    )
+    
+    nome_tabela = f"databox.bcg_comum.supply_base_merecimento_diario_{categoria_normalizada}"
+    
+    # Salva com modo APPEND
+    (
+        df_final_completo
+        .write
+        .format("delta")
+        .mode("append")
+        .option("mergeSchema", "true")
+        .saveAsTable(nome_tabela)
+    )
+    
+    print(f"✅ Versão final salva com sucesso!")
+    print(f"  • Tabela: {nome_tabela}")
+    print(f"  • Modo: APPEND")
+    print(f"  • Total de registros: {df_final_completo.count():,}")
+    print(f"  • Colunas: {len(df_final_completo.columns)}")
+    print(f"  • Medidas incluídas: {len(medidas_disponiveis)}")
+    
+    # 9. LIMPEZA DE CACHE para liberar memória
+    print("🧹 Limpando caches para liberar memória...")
+    df_dados_demanda.unpersist()
+    df_proporcao_factual.unpersist()
+    de_para_filial_cd.unpersist()
+    
+    print("✅ Cache limpo e memória liberada")
+    
+    return df_final_completo
+
+# COMMAND ----------
+
 def executar_calculo_matriz_merecimento(categoria: str, 
                                        data_inicio: str = "2024-01-01",
                                        data_calculo: str = "2025-06-30",
@@ -1064,7 +1341,9 @@ def executar_calculo_matriz_merecimento(categoria: str,
                                        sigma_outliers_cd: float = 3.0,
                                        sigma_outliers_loja: float = 3.0,
                                        sigma_atacado_cd: float = 1.5,
-                                       sigma_atacado_loja: float = 1.5) -> DataFrame:
+                                       sigma_atacado_loja: float = 1.5,
+                                       salvar_versao_completa: bool = False,
+                                       mes_analise: str = "202507") -> DataFrame:
     """
     Função principal que executa todo o cálculo da matriz de merecimento.
     
@@ -1077,6 +1356,8 @@ def executar_calculo_matriz_merecimento(categoria: str,
         sigma_outliers_loja: Número de desvios padrão para outliers loja (padrão: 3.0)
         sigma_atacado_cd: Número de desvios padrão para outliers CD atacado (padrão: 1.5)
         sigma_atacado_loja: Número de desvios padrão para outliers loja atacado (padrão: 1.5)
+        salvar_versao_completa: Se True, salva versão completa com métricas no databox (padrão: False)
+        mes_analise: Mês de análise para métricas no formato YYYYMM (padrão: julho-2025)
         
     Returns:
         DataFrame final com todas as medidas calculadas e merecimento
@@ -1184,6 +1465,25 @@ def executar_calculo_matriz_merecimento(categoria: str,
         print(f"   10. Cálculo de merecimento interno CD")
         print(f"   11. Cálculo de merecimento final")
         
+        # 12. SALVA VERSÃO COMPLETA se solicitado
+        if salvar_versao_completa:
+            print("=" * 80)
+            print("💾 SALVANDO VERSÃO COMPLETA COM MÉTRICAS...")
+            print("=" * 80)
+            
+            try:
+                df_versao_completa = salvar_versao_final_completa(
+                    df_merecimento=df_merecimento_final,
+                    categoria=categoria,
+                    mes_analise=mes_analise
+                )
+                print("✅ Versão completa salva com sucesso!")
+                print(f"  • Tabela: databox.bcg_comum.supply_base_merecimento_diario_{categoria.replace('DIRETORIA ', '').replace(' ', '_').upper()}")
+                print(f"  • Modo: APPEND")
+            except Exception as e:
+                print(f"❌ Erro ao salvar versão completa: {str(e)}")
+                print("⚠️  Continuando com resultado padrão...")
+        
         return df_resultado_final
         
     except Exception as e:
@@ -1206,19 +1506,43 @@ df_telas.display()
 # MAGIC ### Exemplo para DIRETORIA DE TELAS
 # MAGIC
 # MAGIC ```python
+# MAGIC # Cálculo padrão
 # MAGIC df_telas = executar_calculo_matriz_merecimento("DIRETORIA DE TELAS")
+# MAGIC 
+# MAGIC # Cálculo com salvamento da versão completa
+# MAGIC df_telas_completo = executar_calculo_matriz_merecimento(
+# MAGIC     categoria="DIRETORIA DE TELAS",
+# MAGIC     salvar_versao_completa=True,
+# MAGIC     mes_analise="202507"  # julho-2025
+# MAGIC )
 # MAGIC ```
 # MAGIC
 # MAGIC ### Exemplo para DIRETORIA TELEFONIA CELULAR
 # MAGIC
 # MAGIC ```python
+# MAGIC # Cálculo padrão
 # MAGIC df_telefonia = executar_calculo_matriz_merecimento("DIRETORIA TELEFONIA CELULAR")
+# MAGIC 
+# MAGIC # Cálculo com salvamento da versão completa
+# MAGIC df_telefonia_completo = executar_calculo_matriz_merecimento(
+# MAGIC     categoria="DIRETORIA TELEFONIA CELULAR",
+# MAGIC     salvar_versao_completa=True,
+# MAGIC     mes_analise="202507"
+# MAGIC )
 # MAGIC ```
 # MAGIC
 # MAGIC ### Exemplo para DIRETORIA LINHA BRANCA
 # MAGIC
 # MAGIC ```python
+# MAGIC # Cálculo padrão
 # MAGIC df_linha_branca = executar_calculo_matriz_merecimento("DIRETORIA LINHA BRANCA")
+# MAGIC 
+# MAGIC # Cálculo com salvamento da versão completa
+# MAGIC df_linha_branca_completo = executar_calculo_matriz_merecimento(
+# MAGIC     categoria="DIRETORIA LINHA BRANCA",
+# MAGIC     salvar_versao_completa=True,
+# MAGIC     mes_analise="202507"
+# MAGIC )
 # MAGIC ```
 
 # COMMAND ----------
