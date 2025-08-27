@@ -667,7 +667,7 @@ def save_merecimento_table(df: DataFrame, table_name: str) -> None:
 # Salvar tabela final
 save_merecimento_table(
     df_merecimento_base_cd_loja, 
-    "databox.bcg_comum.supply_base_merecimento_diario"
+    "databox.bcg_comum.supply_base_merecimento_diario_v2"
 )
 
 # COMMAND ----------
