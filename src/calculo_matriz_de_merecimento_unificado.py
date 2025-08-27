@@ -1064,6 +1064,10 @@ def salvar_versao_final_completa(df_merecimento: DataFrame,
     """
     Salva versão final completa com todos os dados: SKU x grupo x filial x CD x merecimentos x métricas.
     
+    **Colunas de melhor sMAPE:**
+    - melhor_sMAPE: Valor numérico do melhor sMAPE (menor erro)
+    - medida_melhor_sMAPE: Nome da medida que produziu o melhor sMAPE
+    
     Args:
         df_merecimento: DataFrame com merecimento calculado
         categoria: Nome da categoria/diretoria
@@ -1221,16 +1225,29 @@ def salvar_versao_final_completa(df_merecimento: DataFrame,
     # Cria array com todas as medidas para encontrar o melhor
     colunas_smape = [f"smape_{medida}" for medida in medidas_disponiveis]
     
-    df_com_melhor_smape = df_com_smape
+    # Calcula o melhor sMAPE (menor valor) para cada registro
+    df_com_melhor_smape = (
+        df_com_smape
+        .withColumn(
+            "melhor_sMAPE",
+            F.least(*[F.col(f"smape_{medida}") for medida in medidas_disponiveis])
+        )
+        .withColumn(
+            "medida_melhor_sMAPE",
+            F.lit("")  # Inicializa com string vazia
+        )
+    )
+    
+    # Identifica qual medida deu o melhor sMAPE para cada registro
     for medida in medidas_disponiveis:
         df_com_melhor_smape = (
             df_com_melhor_smape
             .withColumn(
-                f"is_melhor_{medida}",
+                "medida_melhor_sMAPE",
                 F.when(
-                    F.col(f"smape_{medida}") == F.least(*[F.col(f"smape_{m}") for m in medidas_disponiveis]),
-                    F.lit(True)
-                ).otherwise(F.lit(False))
+                    F.col(f"smape_{medida}") == F.col("melhor_sMAPE"),
+                    F.lit(medida)  # ← Nome da medida que deu o melhor sMAPE
+                ).otherwise(F.col("medida_melhor_sMAPE"))
             )
         )
     
@@ -1267,9 +1284,10 @@ def salvar_versao_final_completa(df_merecimento: DataFrame,
         f"smape_{medida}" for medida in medidas_disponiveis
     ]
     
-    # Colunas de melhor sMAPE
+    # Colunas de melhor sMAPE e medida
     colunas_melhor_smape = [
-        f"is_melhor_{medida}" for medida in medidas_disponiveis
+        "melhor_sMAPE",           # Valor do melhor sMAPE
+        "medida_melhor_sMAPE"     # Nome da medida que deu o melhor sMAPE
     ]
     
     # Todas as colunas finais
