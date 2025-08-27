@@ -36,12 +36,41 @@
 
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F, Window
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import pandas as pd
 from typing import List, Optional, Dict, Any
 
 # Inicialização do Spark
 spark = SparkSession.builder.appName("calculo_matriz_merecimento_unificado").getOrCreate()
+
+hoje = datetime.now() - timedelta(days=1)
+hoje_str = hoje.strftime("%Y-%m-%d")
+hoje_int = int(hoje.strftime("%Y%m%d"))
+
+# COMMAND ----------
+
+def get_data_inicio(min_meses: int = 18, hoje: datetime | None = None) -> datetime:
+    """
+    Retorna 1º de janeiro mais recente que esteja a pelo menos `min_meses` meses de 'hoje'.
+    Recuará vários anos se preciso.
+    """
+    if hoje is None:
+        hoje_d = date.today()
+    else:
+        hoje_d = hoje.date() if isinstance(hoje, datetime) else hoje
+
+    ano = hoje_d.year
+    while True:
+        jan = date(ano, 1, 1)
+        diff_meses = (hoje_d.year - jan.year) * 12 + (hoje_d.month - jan.month)
+        if diff_meses >= min_meses:
+            # retorna como datetime para compatibilidade com seu uso
+            return datetime(jan.year, jan.month, jan.day)
+        ano -= 1
+
+data_inicio = get_data_inicio()
+data_inicio_int = int(data_inicio.strftime("%Y%m%d"))
+
 
 # COMMAND ----------
 
@@ -158,7 +187,7 @@ def determinar_grupo_necessidade(categoria: str, df: DataFrame) -> DataFrame:
 
 # COMMAND ----------
 
-def carregar_dados_base(categoria: str, data_inicio: str = "2024-01-01") -> DataFrame:
+def carregar_dados_base(categoria: str, data_inicio: data_inicio) -> DataFrame:
     """
     Carrega os dados base para a categoria especificada.
     
@@ -191,7 +220,7 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-01-01") -> Data
     
     print(f"✅ Dados carregados para '{categoria}':")
     print(f"  • Total de registros: {df_com_grupo.count():,}")
-    print(f"  • Período: {data_inicio} até {df_com_grupo.agg(F.max("DtAtual")).collect()[0][0]}")
+    print(f"  • Período: {data_inicio} até {df_com_grupo.agg(F.max('DtAtual')).collect()[0][0]}")
     
     return df_com_grupo
 
@@ -251,7 +280,10 @@ def carregar_mapeamentos_produtos() -> tuple:
         de_para_gemeos_tecnologia = None
     
     print("✅ Mapeamentos de produtos carregados")
-    return de_para_modelos_tecnologia, de_para_gemeos_tecnologia
+    return (
+        de_para_modelos_tecnologia.rename(columns={"codigo_item": "CdSku"})[['CdSku', 'modelos']], 
+        de_para_gemeos_tecnologia.rename(columns={"sku_loja": "CdSku"})[['CdSku', 'gemeos']]
+    )
 
 # COMMAND ----------
 
@@ -458,6 +490,51 @@ def filtrar_meses_atipicos(df: DataFrame, df_meses_atipicos: DataFrame) -> DataF
 
 # COMMAND ----------
 
+
+def add_media_aparada_rolling(
+    df,
+    janelas,
+    col_val="QtMercadoria",
+    col_ord="DtAtual",
+    grupos=("CdSku","CdFilial"),
+    alpha=0.10,          # porcentagem aparada em cada cauda
+    min_obs=10           # mínimo de observações na janela
+):
+    out = df
+    for dias in janelas:
+        w = Window.partitionBy(*grupos).orderBy(F.col(col_ord)).rowsBetween(-dias, 0)
+
+        # quantis dinâmicos por janela
+        ql = F.percentile_approx(F.col(col_val), F.lit(alpha)).over(w)
+        qh = F.percentile_approx(F.col(col_val), F.lit(1 - alpha)).over(w)
+
+        out = (
+            out
+            .withColumn(f"_ql_{dias}", ql)
+            .withColumn(f"_qh_{dias}", qh)
+        )
+
+        # contagem total na janela
+        cnt = F.count(F.col(col_val)).over(w)
+
+        # soma e contagem apenas dentro dos quantis [ql, qh]
+        cond = (F.col(col_val) >= F.col(f"_ql_{dias}")) & (F.col(col_val) <= F.col(f"_qh_{dias}"))
+        sum_trim = F.sum(F.when(cond, F.col(col_val))).over(w)
+        cnt_trim = F.sum(F.when(cond, F.lit(1)).otherwise(F.lit(0))).over(w)
+
+        # média aparada com fallback para média simples quando janela < min_obs
+        mean_simple = F.avg(F.col(col_val)).over(w)
+        mean_trim = sum_trim / F.when(cnt_trim > 0, cnt_trim).otherwise(F.lit(None))
+
+        out = out.withColumn(
+            f"MediaAparada{dias}_Qt_venda_sem_ruptura",
+            F.when(cnt >= F.lit(min_obs), mean_trim).otherwise(mean_simple)
+        ).drop(f"_ql_{dias}", f"_qh_{dias}")
+
+    return out
+
+# COMMAND ----------
+
 def calcular_medidas_centrais_com_medias_aparadas(df: DataFrame) -> DataFrame:
     """
     Calcula todas as medidas centrais incluindo médias aparadas.
@@ -495,38 +572,17 @@ def calcular_medidas_centrais_com_medias_aparadas(df: DataFrame) -> DataFrame:
         )
     
     # Cálculo das médias móveis aparadas
-    df_com_medias_aparadas = df_com_medianas
-    for dias in JANELAS_MOVEIS:
-        # Para médias aparadas, usamos uma abordagem robusta baseada em percentis
-        # Calculamos a média excluindo os valores extremos (outliers)
-        df_com_medias_aparadas = df_com_medias_aparadas.withColumn(
-            f"MediaAparada{dias}_Qt_venda_sem_ruptura",
-            F.expr(f"""
-                CASE 
-                    WHEN count(*) OVER (
-                        PARTITION BY CdSku, CdFilial 
-                        ORDER BY DtAtual 
-                        ROWS BETWEEN {dias} PRECEDING AND CURRENT ROW
-                    ) >= 10
-                    THEN (
-                        -- Usa a mediana como aproximação da média aparada para janelas grandes
-                        percentile_approx(QtMercadoria, 0.5) OVER (
-                            PARTITION BY CdSku, CdFilial 
-                            ORDER BY DtAtual 
-                            ROWS BETWEEN {dias} PRECEDING AND CURRENT ROW
-                        )
-                    )
-                    ELSE (
-                        -- Para janelas pequenas, usa a média normal
-                        avg(QtMercadoria) OVER (
-                            PARTITION BY CdSku, CdFilial 
-                            ORDER BY DtAtual 
-                            ROWS BETWEEN {dias} PRECEDING AND CURRENT ROW
-                        )
-                    )
-                END
-            """)
+    df_com_medias_aparadas = (
+        add_media_aparada_rolling(
+            df_com_medianas,
+            janelas=JANELAS_MOVEIS,
+            col_val="QtMercadoria",
+            col_ord="DtAtual",
+            grupos=("CdSku","CdFilial"),
+            alpha=0.10,
+            min_obs=10
         )
+    )
     
     print("✅ Medidas centrais calculadas:")
     print(f"  • Médias móveis normais: {JANELAS_MOVEIS} dias")
@@ -581,7 +637,7 @@ def consolidar_medidas(df: DataFrame) -> DataFrame:
 # COMMAND ----------
 
 def executar_calculo_matriz_merecimento(categoria: str, 
-                                       data_inicio: str = "2024-01-01",
+                                       data_inicio: str = data_inicio,
                                        sigma_meses_atipicos: float = 3.0,
                                        sigma_outliers_cd: float = 3.0,
                                        sigma_outliers_loja: float = 3.0,
@@ -656,6 +712,46 @@ def executar_calculo_matriz_merecimento(categoria: str,
 
 # COMMAND ----------
 
+categoria = "DIRETORIA DE TELAS"
+
+# 1. Carregamento dos dados base
+df_base = carregar_dados_base(categoria, data_inicio)
+
+# 2. Carregamento dos mapeamentos
+de_para_modelos, de_para_gemeos = carregar_mapeamentos_produtos()
+
+# 3. Aplicação dos mapeamentos
+df_com_mapeamentos = aplicar_mapeamentos_produtos(
+    df_base, categoria, de_para_modelos, de_para_gemeos
+)
+
+# 4. Detecção de outliers com parâmetros sigma configuráveis
+df_stats, df_meses_atipicos = detectar_outliers_meses_atipicos(
+    df_com_mapeamentos, 
+    categoria,
+    sigma_meses_atipicos=2,
+    sigma_outliers_cd=sigma_outliers_cd,
+    sigma_outliers_loja=sigma_outliers_loja,
+    sigma_atacado_cd=sigma_atacado_cd,
+    sigma_atacado_loja=sigma_atacado_loja
+)
+
+# 5. Filtragem de meses atípicos
+df_filtrado = filtrar_meses_atipicos(df_com_mapeamentos, df_meses_atipicos)
+
+# 6. Cálculo das medidas centrais
+df_com_medidas = calcular_medidas_centrais_com_medias_aparadas(df_filtrado)
+
+# 7. Consolidação final
+df_final = consolidar_medidas(df_com_medidas)
+
+# COMMAND ----------
+
+df_telas = executar_calculo_matriz_merecimento("DIRETORIA DE TELAS")
+df_telas.display()
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 12. Exemplo de Uso
 
@@ -663,19 +759,19 @@ def executar_calculo_matriz_merecimento(categoria: str,
 
 # MAGIC %md
 # MAGIC ### Exemplo para DIRETORIA DE TELAS
-# MAGIC 
+# MAGIC
 # MAGIC ```python
 # MAGIC df_telas = executar_calculo_matriz_merecimento("DIRETORIA DE TELAS")
 # MAGIC ```
-# MAGIC 
+# MAGIC
 # MAGIC ### Exemplo para DIRETORIA TELEFONIA CELULAR
-# MAGIC 
+# MAGIC
 # MAGIC ```python
 # MAGIC df_telefonia = executar_calculo_matriz_merecimento("DIRETORIA TELEFONIA CELULAR")
 # MAGIC ```
-# MAGIC 
+# MAGIC
 # MAGIC ### Exemplo para DIRETORIA LINHA BRANCA
-# MAGIC 
+# MAGIC
 # MAGIC ```python
 # MAGIC df_linha_branca = executar_calculo_matriz_merecimento("DIRETORIA LINHA BRANCA")
 # MAGIC ```
@@ -728,7 +824,7 @@ def validar_resultados(df: DataFrame, categoria: str) -> None:
 
 # MAGIC %md
 # MAGIC ## 14. Execução de Teste
-
+# MAGIC
 # MAGIC %md
 # MAGIC Descomente a linha abaixo para executar um teste com a categoria desejada:
 
