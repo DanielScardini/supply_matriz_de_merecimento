@@ -226,8 +226,6 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-01-01") -> Data
     
     return df_base
 
-carregar_dados_base('DIRETORIA DE TELAS', data_inicio).display()
-
 # COMMAND ----------
 
 # MAGIC %md
@@ -691,18 +689,17 @@ def executar_calculo_matriz_merecimento(categoria: str,
     try:
         # 1. Carregamento dos dados base (SEM grupo_de_necessidade ainda)
         df_base = carregar_dados_base(categoria, data_inicio)
-        
+        df_base.cache()
         # 2. Carregamento dos mapeamentos
-        de_para_modelos, de_para_gemeos = carregar_mapeamentos_produtos()
-        
-        # 3. Aplicação dos mapeamentos (ANTES de determinar grupo_de_necessidade)
+        de_para_modelos, de_para_gemeos = carregar_mapeamentos_produtos()  
+
+        # 3. Aplicação dos mapeamentos
         df_com_mapeamentos = aplicar_mapeamentos_produtos(
             df_base, categoria, de_para_modelos, de_para_gemeos
         )
-        
         # 4. AGORA determina o grupo_de_necessidade (APÓS os mapeamentos)
         df_com_grupo = determinar_grupo_necessidade(categoria, df_com_mapeamentos)
-        
+        df_com_grupo.cache()
         # 5. Detecção de outliers com parâmetros sigma configuráveis
         df_stats, df_meses_atipicos = detectar_outliers_meses_atipicos(
             df_com_grupo, 
@@ -741,43 +738,6 @@ def executar_calculo_matriz_merecimento(categoria: str,
     except Exception as e:
         print(f"❌ Erro durante o cálculo: {str(e)}")
         raise
-
-# COMMAND ----------
-
-categoria = "DIRETORIA DE TELAS"
-
-# 1. Carregamento dos dados base
-df_base = carregar_dados_base(categoria, data_inicio)
-
-# # 2. Carregamento dos mapeamentos
-# de_para_modelos, de_para_gemeos = carregar_mapeamentos_produtos()
-
-# # 3. Aplicação dos mapeamentos
-# df_com_mapeamentos = aplicar_mapeamentos_produtos(
-#     df_base, categoria, de_para_modelos, de_para_gemeos
-# )
-
-
-df_base.display()
-# # 4. Detecção de outliers com parâmetros sigma configuráveis
-# df_stats, df_meses_atipicos = detectar_outliers_meses_atipicos(
-#     df_com_mapeamentos, 
-#     categoria,
-#     sigma_meses_atipicos=2,
-#     sigma_outliers_cd=1.5,
-#     sigma_outliers_loja=2,
-#     sigma_atacado_cd=2,
-#     sigma_atacado_loja=2
-# )
-
-# # 5. Filtragem de meses atípicos
-# df_filtrado = filtrar_meses_atipicos(df_com_mapeamentos, df_meses_atipicos)
-
-# # 6. Cálculo das medidas centrais
-# df_com_medidas = calcular_medidas_centrais_com_medias_aparadas(df_filtrado)
-
-# # 7. Consolidação final
-# df_final = consolidar_medidas(df_com_medidas)
 
 # COMMAND ----------
 
