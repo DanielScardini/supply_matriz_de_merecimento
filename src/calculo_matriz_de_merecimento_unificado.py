@@ -1548,8 +1548,26 @@ def executar_calculo_matriz_merecimento(categoria: str,
 
 # COMMAND ----------
 
-df_telas = executar_calculo_matriz_merecimento("DIRETORIA DE TELAS")
-df_telas.display()
+# MAGIC %md
+# MAGIC ## 12. Execução da Matriz de Merecimento
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Execução para DIRETORIA DE TELAS com Versão Completa
+
+# COMMAND ----------
+
+# Cálculo com salvamento da versão completa
+df_telas_completo = executar_calculo_matriz_merecimento(
+    categoria="DIRETORIA DE TELAS",
+    salvar_versao_completa=True,
+    mes_analise="202507",  # julho-2025
+    data_corte_matriz="2025-06-30"  # data de corte da matriz
+)
+
+# Exibir resultado
+df_telas_completo.display()
 
 # COMMAND ----------
 
