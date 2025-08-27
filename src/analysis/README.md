@@ -10,8 +10,7 @@ Esta pasta contém notebooks de análise e utilitários para o sistema de matriz
 
 ### 📊 **Métricas e Utilitários**
 - **`metricas_matriz_merecimento.py`**: Cálculo de métricas para avaliação da matriz
-- **`exemplo_uso_metricas.py`**: Exemplos práticos de uso das métricas
-- **`Preparacao_tabelas_Matriz_merecimento.py`**: Preparação e limpeza de tabelas para o cálculo
+- **`Preparacao_tabelas_Matriz_merecimento.py`**: Preparação e limpeza de tabelas para o cálculo (movido para src/)
 
 ## 🎯 **Como Usar**
 
@@ -29,23 +28,12 @@ Esta pasta contém notebooks de análise e utilitários para o sistema de matriz
 
 ### **Para Preparação de Dados**
 ```python
-# Execute Preparacao_tabelas_Matriz_merecimento.py para preparar tabelas base
+# Execute Preparacao_tabelas_Matriz_merecimento.py na pasta src/ para preparar tabelas base
 ```
 
 ## 🔗 **Integração com Sistema Unificado**
 
-Os notebooks de análise podem ser integrados com o sistema unificado:
-
-```python
-# Import do sistema unificado
-from ..calculo_matriz_de_merecimento_unificado import (
-    executar_calculo_matriz_merecimento,
-    validar_resultados
-)
-
-# Uso das funções
-df_resultado = executar_calculo_matriz_merecimento("DIRETORIA DE TELAS")
-```
+Os notebooks de análise podem ser integrados com o sistema unificado redefinindo as funções necessárias ou copiando o código relevante.
 
 ## 📊 **Tabelas Utilizadas**
 

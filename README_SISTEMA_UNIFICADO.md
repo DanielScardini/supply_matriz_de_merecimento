@@ -77,15 +77,13 @@ Para cada janela móvel (90, 180, 270, 360 dias):
 ```
 src/
 ├── calculo_matriz_de_merecimento_unificado.py    # Sistema principal unificado
-├── exemplo_uso_sistema_unificado.py              # Exemplos de uso do sistema
+├── Preparacao_tabelas_Matriz_merecimento.py     # Preparação de dados para matriz
 ├── analysis/                                     # Notebooks de análise e utilitários
 │   ├── __init__.py                              # Pacote Python
 │   ├── README.md                                # Documentação da pasta analysis
 │   ├── Analise_demanda_matriz_telas.py          # Análise para telas
 │   ├── Analise_demanda_matriz_antiga.py         # Análise da matriz antiga
-│   ├── metricas_matriz_merecimento.py           # Cálculo de métricas
-│   ├── exemplo_uso_metricas.py                  # Exemplos de métricas
-│   └── Preparacao_tabelas_Matriz_merecimento.py # Preparação de dados
+│   └── metricas_matriz_merecimento.py           # Cálculo de métricas
 └── ...                                          # Outros arquivos
 ```
 
@@ -288,13 +286,11 @@ def analisar_medias_aparadas(df: DataFrame, categoria: str):
 
 ### Arquivos Relacionados
 
-- `exemplo_uso_sistema_unificado.py`: Exemplos práticos do sistema unificado
 - `src/analysis/`: Pasta com notebooks de análise e utilitários
   - `Analise_demanda_matriz_telas.py`: Análise de efetividade para telas
   - `Analise_demanda_matriz_antiga.py`: Análise da matriz antiga
   - `metricas_matriz_merecimento.py`: Métricas de avaliação
-  - `exemplo_uso_metricas.py`: Exemplos de uso das métricas
-  - `Preparacao_tabelas_Matriz_merecimento.py`: Preparação de dados
+- `Preparacao_tabelas_Matriz_merecimento.py`: Preparação de dados (em src/)
 
 ### Dependências
 
