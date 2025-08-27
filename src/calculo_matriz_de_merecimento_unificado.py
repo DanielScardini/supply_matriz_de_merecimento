@@ -158,7 +158,8 @@ def determinar_grupo_necessidade(categoria: str, df: DataFrame) -> DataFrame:
     regra = REGRAS_AGRUPAMENTO[categoria]
     coluna_origem = regra["coluna_grupo_necessidade"]
 
-    df_com_gdn = aplicar_mapeamentos_produtos(df)
+    # Removido: chamada incorreta que causava erro de argumentos
+    # df_com_gdn = aplicar_mapeamentos_produtos(df)
     
     # Verifica se a coluna existe no DataFrame
     colunas_df = df.columns
