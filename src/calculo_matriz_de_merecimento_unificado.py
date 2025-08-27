@@ -186,10 +186,13 @@ def determinar_grupo_necessidade(categoria: str, df: DataFrame) -> DataFrame:
 
 # MAGIC %md
 # MAGIC ## 4. Carregamento dos Dados Base
+# MAGIC
+# MAGIC **IMPORTANTE**: Os dados são carregados SEM o grupo_de_necessidade ainda.
+# MAGIC O grupo_de_necessidade é definido APÓS a aplicação dos mapeamentos para evitar referência circular.
 
 # COMMAND ----------
 
-def carregar_dados_base(categoria: str, data_inicio: data_inicio) -> DataFrame:
+def carregar_dados_base(categoria: str, data_inicio: str = "2024-01-01") -> DataFrame:
     """
     Carrega os dados base para a categoria especificada.
     
@@ -198,7 +201,7 @@ def carregar_dados_base(categoria: str, data_inicio: data_inicio) -> DataFrame:
         data_inicio: Data de início para filtro (formato YYYY-MM-DD)
         
     Returns:
-        DataFrame com os dados carregados e grupo_de_necessidade definido
+        DataFrame com os dados carregados (SEM grupo_de_necessidade ainda)
     """
     print(f"🔄 Carregando dados para categoria: {categoria}")
     
@@ -214,17 +217,14 @@ def carregar_dados_base(categoria: str, data_inicio: data_inicio) -> DataFrame:
         .fillna(0, subset=["Receita", "QtMercadoria", "TeveVenda"])
     )
     
-    # Aplica a regra de agrupamento específica da categoria
-    df_com_grupo = determinar_grupo_necessidade(categoria, df_base)
-    
     # Cache para otimização
-    df_com_grupo.cache()
+    df_base.cache()
     
     print(f"✅ Dados carregados para '{categoria}':")
-    print(f"  • Total de registros: {df_com_grupo.count():,}")
-    print(f"  • Período: {data_inicio} até {df_com_grupo.agg(F.max('DtAtual')).collect()[0][0]}")
+    print(f"  • Total de registros: {df_base.count():,}")
+    print(f"  • Período: {data_inicio} até {df_base.agg(F.max('DtAtual')).collect()[0][0]}")
     
-    return df_com_grupo
+    return df_base
 
 carregar_dados_base('DIRETORIA DE TELAS', data_inicio).display()
 
@@ -637,6 +637,22 @@ def consolidar_medidas(df: DataFrame) -> DataFrame:
 
 # MAGIC %md
 # MAGIC ## 11. Função Principal de Execução
+# MAGIC
+# MAGIC **FLUXO CORRIGIDO PARA EVITAR REFERÊNCIA CIRCULAR:**
+# MAGIC
+# MAGIC 1. **Carregamento de dados base** (sem grupo_de_necessidade)
+# MAGIC 2. **Carregamento de mapeamentos** de produtos
+# MAGIC 3. **Aplicação de mapeamentos** (joins com tabelas de referência)
+# MAGIC 4. **Definição de grupo_de_necessidade** (APÓS os mapeamentos)
+# MAGIC 5. **Detecção de outliers** usando grupo_de_necessidade
+# MAGIC 6. **Filtragem de meses atípicos**
+# MAGIC 7. **Cálculo de medidas centrais**
+# MAGIC 8. **Consolidação final**
+# MAGIC
+# MAGIC **Por que esta ordem?**
+# MAGIC - Evita referência circular entre mapeamentos e grupo_de_necessidade
+# MAGIC - Garante que todas as colunas necessárias estejam disponíveis
+# MAGIC - Permite uso correto do grupo_de_necessidade nas etapas subsequentes
 
 # COMMAND ----------
 
@@ -673,20 +689,23 @@ def executar_calculo_matriz_merecimento(categoria: str,
     print("=" * 80)
     
     try:
-        # 1. Carregamento dos dados base
+        # 1. Carregamento dos dados base (SEM grupo_de_necessidade ainda)
         df_base = carregar_dados_base(categoria, data_inicio)
         
         # 2. Carregamento dos mapeamentos
         de_para_modelos, de_para_gemeos = carregar_mapeamentos_produtos()
         
-        # 3. Aplicação dos mapeamentos
+        # 3. Aplicação dos mapeamentos (ANTES de determinar grupo_de_necessidade)
         df_com_mapeamentos = aplicar_mapeamentos_produtos(
             df_base, categoria, de_para_modelos, de_para_gemeos
         )
         
-        # 4. Detecção de outliers com parâmetros sigma configuráveis
+        # 4. AGORA determina o grupo_de_necessidade (APÓS os mapeamentos)
+        df_com_grupo = determinar_grupo_necessidade(categoria, df_com_mapeamentos)
+        
+        # 5. Detecção de outliers com parâmetros sigma configuráveis
         df_stats, df_meses_atipicos = detectar_outliers_meses_atipicos(
-            df_com_mapeamentos, 
+            df_com_grupo, 
             categoria,
             sigma_meses_atipicos=sigma_meses_atipicos,
             sigma_outliers_cd=sigma_outliers_cd,
@@ -695,18 +714,27 @@ def executar_calculo_matriz_merecimento(categoria: str,
             sigma_atacado_loja=sigma_atacado_loja
         )
         
-        # 5. Filtragem de meses atípicos
-        df_filtrado = filtrar_meses_atipicos(df_com_mapeamentos, df_meses_atipicos)
+        # 6. Filtragem de meses atípicos
+        df_filtrado = filtrar_meses_atipicos(df_com_grupo, df_meses_atipicos)
         
-        # 6. Cálculo das medidas centrais
+        # 7. Cálculo das medidas centrais
         df_com_medidas = calcular_medidas_centrais_com_medias_aparadas(df_filtrado)
         
-        # 7. Consolidação final
+        # 8. Consolidação final
         df_final = consolidar_medidas(df_com_medidas)
         
         print("=" * 80)
         print(f"✅ Cálculo da matriz de merecimento concluído para: {categoria}")
         print(f"📊 Total de registros finais: {df_final.count():,}")
+        print(f"📋 Fluxo executado:")
+        print(f"   1. Carregamento de dados base")
+        print(f"   2. Carregamento de mapeamentos")
+        print(f"   3. Aplicação de mapeamentos")
+        print(f"   4. Definição de grupo_de_necessidade")
+        print(f"   5. Detecção de outliers")
+        print(f"   6. Filtragem de meses atípicos")
+        print(f"   7. Cálculo de medidas centrais")
+        print(f"   8. Consolidação final")
         
         return df_final
         
