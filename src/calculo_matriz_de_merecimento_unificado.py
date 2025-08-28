@@ -24,8 +24,15 @@
 # MAGIC
 # MAGIC **Múltiplas Médias Móveis**:
 # MAGIC - **Médias Móveis Normais**: 90, 180, 270, 360 dias
-# MAGIC - **Medianas Móveis**: 90, 180, 270, 360 dias
-# MAGIC - **Médias Móveis Aparadas (10%)**: 90, 180, 270, 360 dias
+# MAGIC - **Médias Móveis Aparadas**: 90, 180, 270, 360 dias (10% de corte)
+# MAGIC 
+# MAGIC **Conceito de "Factual" (Demanda Real)**:
+# MAGIC - **Proporção Factual**: Representa a demanda real observada (robusta a ruptura) 
+# MAGIC   como proporção do total do grupo de necessidade
+# MAGIC - **Base de Cálculo**: Usa as medidas calculadas (médias e médias aparadas) 
+# MAGIC   para representar a demanda histórica real
+# MAGIC - **Comparação**: O merecimento calculado é comparado com a proporção factual 
+# MAGIC   para avaliar a qualidade da previsão
 
 # COMMAND ----------
 
@@ -569,18 +576,10 @@ def calcular_medidas_centrais_com_medias_aparadas(df: DataFrame) -> DataFrame:
             F.avg("QtMercadoria").over(janelas[dias])
         )
     
-    # Cálculo das medianas móveis
-    df_com_medianas = df_com_medias
-    for dias in JANELAS_MOVEIS:
-        df_com_medianas = df_com_medianas.withColumn(
-            f"Mediana{dias}_Qt_venda_sem_ruptura",
-            F.expr(f"percentile_approx(QtMercadoria, 0.5)").over(janelas[dias])
-        )
-    
     # Cálculo das médias móveis aparadas
     df_com_medias_aparadas = (
         add_media_aparada_rolling(
-            df_com_medianas,
+            df_com_medias,
             janelas=JANELAS_MOVEIS,
             col_val="QtMercadoria",
             col_ord="DtAtual",
@@ -592,7 +591,6 @@ def calcular_medidas_centrais_com_medias_aparadas(df: DataFrame) -> DataFrame:
     
     print("✅ Medidas centrais calculadas:")
     print(f"  • Médias móveis normais: {JANELAS_MOVEIS} dias")
-    print(f"  • Medianas móveis: {JANELAS_MOVEIS} dias")
     print(f"  • Médias móveis aparadas ({PERCENTUAL_CORTE_MEDIAS_APARADAS*100}%): {JANELAS_MOVEIS} dias")
     
     return df_com_medias_aparadas
@@ -618,7 +616,6 @@ def consolidar_medidas(df: DataFrame) -> DataFrame:
     
     # Seleção das colunas essenciais
     colunas_medias = [f"Media{dias}_Qt_venda_sem_ruptura" for dias in JANELAS_MOVEIS]
-    colunas_medianas = [f"Mediana{dias}_Qt_venda_sem_ruptura" for dias in JANELAS_MOVEIS]
     colunas_medias_aparadas = [f"MediaAparada{dias}_Qt_venda_sem_ruptura" for dias in JANELAS_MOVEIS]
     
     df_consolidado = (
@@ -626,10 +623,9 @@ def consolidar_medidas(df: DataFrame) -> DataFrame:
             "DtAtual", "CdSku", "CdFilial", "grupo_de_necessidade", "year_month",
             "QtMercadoria", "Receita", "FlagRuptura", "tipo_agrupamento",
             *colunas_medias,
-            *colunas_medianas,
             *colunas_medias_aparadas
         )
-        .fillna(0, subset=colunas_medias + colunas_medianas + colunas_medias_aparadas)
+        .fillna(0, subset=colunas_medias + colunas_medias_aparadas)
     )
     
     print("✅ Medidas consolidadas")
@@ -713,8 +709,6 @@ def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) ->
     medidas_disponiveis = [
         "Media90_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura", 
         "Media270_Qt_venda_sem_ruptura", "Media360_Qt_venda_sem_ruptura",
-        "Mediana90_Qt_venda_sem_ruptura", "Mediana180_Qt_venda_sem_ruptura",
-        "Mediana270_Qt_venda_sem_ruptura", "Mediana360_Qt_venda_sem_ruptura",
         "MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada180_Qt_venda_sem_ruptura",
         "MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada360_Qt_venda_sem_ruptura"
     ]
@@ -769,8 +763,6 @@ def calcular_merecimento_interno_cd(df: DataFrame, data_calculo: str, categoria:
     medidas_disponiveis = [
         "Media90_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura", 
         "Media270_Qt_venda_sem_ruptura", "Media360_Qt_venda_sem_ruptura",
-        "Mediana90_Qt_venda_sem_ruptura", "Mediana180_Qt_venda_sem_ruptura",
-        "Mediana270_Qt_venda_sem_ruptura", "Mediana360_Qt_venda_sem_ruptura",
         "MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada180_Qt_venda_sem_ruptura",
         "MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada360_Qt_venda_sem_ruptura"
     ]
@@ -827,8 +819,6 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
     medidas_disponiveis = [
         "Media90_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura", 
         "Media270_Qt_venda_sem_ruptura", "Media360_Qt_venda_sem_ruptura",
-        "Mediana90_Qt_venda_sem_ruptura", "Mediana180_Qt_venda_sem_ruptura",
-        "Mediana270_Qt_venda_sem_ruptura", "Mediana360_Qt_venda_sem_ruptura",
         "MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada180_Qt_venda_sem_ruptura",
         "MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada360_Qt_venda_sem_ruptura"
     ]
@@ -901,8 +891,6 @@ def calcular_metricas_erro_previsao(df_merecimento: DataFrame,
             "cdfilial", "grupo_de_necessidade", "CdSku",
             "Total_CD_Media90_Qt_venda_sem_ruptura", "Total_CD_Media180_Qt_venda_sem_ruptura",
             "Total_CD_Media270_Qt_venda_sem_ruptura", "Total_CD_Media360_Qt_venda_sem_ruptura",
-            "Total_CD_Mediana90_Qt_venda_sem_ruptura", "Total_CD_Mediana180_Qt_venda_sem_ruptura",
-            "Total_CD_Mediana270_Qt_venda_sem_ruptura", "Total_CD_Mediana360_Qt_venda_sem_ruptura",
             "Total_CD_MediaAparada90_Qt_venda_sem_ruptura", "Total_CD_MediaAparada180_Qt_venda_sem_ruptura",
             "Total_CD_MediaAparada270_Qt_venda_sem_ruptura", "Total_CD_MediaAparada360_Qt_venda_sem_ruptura"
         )
@@ -910,10 +898,6 @@ def calcular_metricas_erro_previsao(df_merecimento: DataFrame,
         .withColumnRenamed("Total_CD_Media180_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura")
         .withColumnRenamed("Total_CD_Media270_Qt_venda_sem_ruptura", "Media270_Qt_venda_sem_ruptura")
         .withColumnRenamed("Total_CD_Media360_Qt_venda_sem_ruptura", "Media360_Qt_venda_sem_ruptura")
-        .withColumnRenamed("Total_CD_Mediana90_Qt_venda_sem_ruptura", "Mediana90_Qt_venda_sem_ruptura")
-        .withColumnRenamed("Total_CD_Mediana180_Qt_venda_sem_ruptura", "Mediana180_Qt_venda_sem_ruptura")
-        .withColumnRenamed("Total_CD_Mediana270_Qt_venda_sem_ruptura", "Mediana270_Qt_venda_sem_ruptura")
-        .withColumnRenamed("Total_CD_Mediana360_Qt_venda_sem_ruptura", "Mediana360_Qt_venda_sem_ruptura")
         .withColumnRenamed("Total_CD_MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada90_Qt_venda_sem_ruptura")
         .withColumnRenamed("Total_CD_MediaAparada180_Qt_venda_sem_ruptura", "MediaAparada180_Qt_venda_sem_ruptura")
         .withColumnRenamed("Total_CD_MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada270_Qt_venda_sem_ruptura")
@@ -1109,8 +1093,6 @@ def salvar_versao_final_completa(df_merecimento: DataFrame,
             "cdfilial", "grupo_de_necessidade", "CdSku",
             "Total_CD_Media90_Qt_venda_sem_ruptura", "Total_CD_Media180_Qt_venda_sem_ruptura",
             "Total_CD_Media270_Qt_venda_sem_ruptura", "Total_CD_Media360_Qt_venda_sem_ruptura",
-            "Total_CD_Mediana90_Qt_venda_sem_ruptura", "Total_CD_Mediana180_Qt_venda_sem_ruptura",
-            "Total_CD_Mediana270_Qt_venda_sem_ruptura", "Total_CD_Mediana360_Qt_venda_sem_ruptura",
             "Total_CD_MediaAparada90_Qt_venda_sem_ruptura", "Total_CD_MediaAparada180_Qt_venda_sem_ruptura",
             "Total_CD_MediaAparada270_Qt_venda_sem_ruptura", "Total_CD_MediaAparada360_Qt_venda_sem_ruptura"
         )
@@ -1118,10 +1100,7 @@ def salvar_versao_final_completa(df_merecimento: DataFrame,
         .withColumnRenamed("Total_CD_Media180_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura")
         .withColumnRenamed("Total_CD_Media270_Qt_venda_sem_ruptura", "Media270_Qt_venda_sem_ruptura")
         .withColumnRenamed("Total_CD_Media360_Qt_venda_sem_ruptura", "Media360_Qt_venda_sem_ruptura")
-        .withColumnRenamed("Total_CD_Mediana90_Qt_venda_sem_ruptura", "Mediana90_Qt_venda_sem_ruptura")
-        .withColumnRenamed("Total_CD_Mediana180_Qt_venda_sem_ruptura", "Mediana180_Qt_venda_sem_ruptura")
-        .withColumnRenamed("Total_CD_Mediana270_Qt_venda_sem_ruptura", "Mediana270_Qt_venda_sem_ruptura")
-        .withColumnRenamed("Total_CD_Mediana360_Qt_venda_sem_ruptura", "Mediana360_Qt_venda_sem_ruptura")
+
         .withColumnRenamed("Total_CD_MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada90_Qt_venda_sem_ruptura")
         .withColumnRenamed("Total_CD_MediaAparada180_Qt_venda_sem_ruptura", "MediaAparada180_Qt_venda_sem_ruptura")
         .withColumnRenamed("Total_CD_MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada270_Qt_venda_sem_ruptura")
@@ -1154,8 +1133,6 @@ def salvar_versao_final_completa(df_merecimento: DataFrame,
     medidas_disponiveis = [
         "Media90_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura", 
         "Media270_Qt_venda_sem_ruptura", "Media360_Qt_venda_sem_ruptura",
-        "Mediana90_Qt_venda_sem_ruptura", "Mediana180_Qt_venda_sem_ruptura",
-        "Mediana270_Qt_venda_sem_ruptura", "Mediana360_Qt_venda_sem_ruptura",
         "MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada180_Qt_venda_sem_ruptura",
         "MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada360_Qt_venda_sem_ruptura"
     ]
@@ -1551,8 +1528,6 @@ def executar_calculo_matriz_merecimento(categoria: str,
         medidas_disponiveis = [
             "Media90_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura", 
             "Media270_Qt_venda_sem_ruptura", "Media360_Qt_venda_sem_ruptura",
-            "Mediana90_Qt_venda_sem_ruptura", "Mediana180_Qt_venda_sem_ruptura",
-            "Mediana270_Qt_venda_sem_ruptura", "Mediana360_Qt_venda_sem_ruptura",
             "MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada180_Qt_venda_sem_ruptura",
             "MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada360_Qt_venda_sem_ruptura"
         ]
@@ -1619,7 +1594,318 @@ def executar_calculo_matriz_merecimento(categoria: str,
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 12. Execução da Matriz de Merecimento
+# MAGIC ### Exemplo de Uso da Função de Weighted sMAPE
+
+# COMMAND ----------
+
+def exemplo_uso_weighted_smape(categoria: str = "DIRETORIA DE TELAS"):
+    """
+    Exemplo de uso da função de cálculo de weighted sMAPE.
+    
+    Args:
+        categoria: Nome da categoria para teste
+    """
+    print(f"🚀 Exemplo de uso da função de weighted sMAPE para: {categoria}")
+    print("=" * 80)
+    
+    try:
+        # 1. Executa o cálculo da matriz de merecimento
+        print("📊 Passo 1: Calculando matriz de merecimento...")
+        df_matriz = executar_calculo_matriz_merecimento(
+            categoria=categoria,
+            salvar_versao_completa=True,
+            mes_analise="202507",
+            data_corte_matriz="2025-06-30"
+        )
+        
+        print(f"✅ Matriz calculada: {df_matriz.count():,} registros")
+        
+        # 2. Calcula o weighted sMAPE agregado
+        print("\n📊 Passo 2: Calculando weighted sMAPE agregado...")
+        df_smape = calcular_weighted_smape_agregado(
+            df=df_matriz,
+            categoria=categoria
+        )
+        
+        print(f"✅ Weighted sMAPE calculado: {df_smape.count():,} registros")
+        
+        # 3. Exibe resultados
+        print("\n📊 Passo 3: Exibindo resultados...")
+        print("🔍 Resultados por nível de agregação:")
+        
+        for nivel in ["GRUPO_NECESSIDADE", "GRUPO_NECESSIDADE_LOJA", "LOJA", "CATEGORIA_INTEIRA"]:
+            df_nivel = df_smape.filter(F.col("nivel_agregacao") == nivel)
+            count = df_nivel.count()
+            print(f"  • {nivel}: {count:,} registros")
+        
+        print("\n✅ Exemplo concluído com sucesso!")
+        return df_smape
+        
+    except Exception as e:
+        print(f"❌ Erro durante o exemplo: {str(e)}")
+        raise
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Executar Exemplo (Descomente para testar)
+
+# COMMAND ----------
+
+# EXECUTAR EXEMPLO (descomente para testar)
+# df_smape_exemplo = exemplo_uso_weighted_smape("DIRETORIA DE TELAS")
+# display(df_smape_exemplo)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 12. Função de Cálculo de Weighted sMAPE
+
+# COMMAND ----------
+
+def calcular_weighted_smape_agregado(df: DataFrame, 
+                                   categoria: str,
+                                   medidas_disponiveis: List[str] = None) -> DataFrame:
+    """
+    Calcula o weighted sMAPE agregado para diferentes níveis de agrupamento.
+    
+    **Níveis de agregação calculados:**
+    1. **Grupo de necessidade**: Agregação por grupo_de_necessidade
+    2. **Grupo de necessidade x Loja**: Agregação por grupo_de_necessidade + cdfilial
+    3. **Loja**: Agregação por cdfilial
+    4. **Categoria inteira**: Agregação total da categoria
+    
+    **Fórmula do weighted sMAPE:**
+    - sMAPE = Σ(|y_true - y_pred| * peso) / Σ(peso) * 100
+    - Onde peso = quantidade de demanda da medida (ex: Media90_Qt_venda_sem_ruptura)
+    
+    Args:
+        df: DataFrame com merecimento calculado, proporção factual e quantidade de demanda
+        categoria: Nome da categoria/diretoria
+        medidas_disponiveis: Lista de medidas disponíveis (padrão: todas as medidas)
+        
+    Returns:
+        DataFrame com weighted sMAPE calculado para todos os níveis de agregação
+    """
+    print(f"📊 Calculando weighted sMAPE agregado para categoria: {categoria}")
+    
+    if medidas_disponiveis is None:
+        medidas_disponiveis = [
+            "Media90_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura", 
+            "Media270_Qt_venda_sem_ruptura", "Media360_Qt_venda_sem_ruptura",
+            "MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada180_Qt_venda_sem_ruptura",
+            "MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada360_Qt_venda_sem_ruptura"
+        ]
+    
+    print(f"🔍 Medidas disponíveis: {len(medidas_disponiveis)}")
+    print(f"📊 Total de registros: {df.count():,}")
+    
+    # 1. PREPARAÇÃO DOS DADOS: Garante que temos as colunas necessárias
+    print("🔄 Preparando dados para cálculo de weighted sMAPE...")
+    
+    # Verifica se temos as colunas necessárias
+    colunas_necessarias = []
+    for medida in medidas_disponiveis:
+        colunas_necessarias.extend([
+            f"merecimento_{medida}_percentual",
+            f"proporcao_factual_{medida}_percentual"
+        ])
+    
+    # Filtra apenas registros com dados válidos
+    df_valido = df.filter(
+        F.col("merecimento_Media90_Qt_venda_sem_ruptura_percentual").isNotNull() &
+        F.col("proporcao_factual_Media90_Qt_venda_sem_ruptura_percentual").isNotNull()
+    )
+    
+    print(f"✅ Dados preparados:")
+    print(f"  • Registros válidos: {df_valido.count():,}")
+    print(f"  • Colunas necessárias: {len(colunas_necessarias)}")
+    
+    # 2. CÁLCULO DO WEIGHTED SMAPE PARA CADA MEDIDA
+    print("📈 Calculando weighted sMAPE para cada medida...")
+    
+    df_com_smape = df_valido
+    
+    for medida in medidas_disponiveis:
+        # Calcula o erro absoluto
+        df_com_smape = df_com_smape.withColumn(
+            f"erro_absoluto_{medida}",
+            F.abs(F.col(f"merecimento_{medida}_percentual") - F.col(f"proporcao_factual_{medida}_percentual"))
+        )
+        
+        # Calcula o peso (quantidade de demanda da medida)
+        df_com_smape = df_com_smape.withColumn(
+            f"peso_{medida}",
+            F.col(medida)
+        )
+        
+        # Calcula o produto erro * peso
+        df_com_smape = df_com_smape.withColumn(
+            f"erro_peso_{medida}",
+            F.col(f"erro_absoluto_{medida}") * F.col(f"peso_{medida}")
+        )
+    
+    print(f"✅ Cálculos intermediários concluídos para {len(medidas_disponiveis)} medidas")
+    
+    # 3. AGREGAÇÃO POR DIFERENTES NÍVEIS
+    print("🔄 Calculando agregações por diferentes níveis...")
+    
+    # 3.1 AGREGAÇÃO POR GRUPO DE NECESSIDADE
+    print("📊 Agregação por grupo de necessidade...")
+    
+    df_smape_grupo = df_com_smape.groupBy("grupo_de_necessidade").agg(
+        *[
+            F.sum(F.col(f"erro_peso_{medida}")).alias(f"soma_erro_peso_{medida}"),
+            F.sum(F.col(f"peso_{medida}")).alias(f"soma_peso_{medida}")
+            for medida in medidas_disponiveis
+        ]
+    )
+    
+    # Calcula weighted sMAPE para cada grupo de necessidade
+    for medida in medidas_disponiveis:
+        df_smape_grupo = df_smape_grupo.withColumn(
+            f"weighted_smape_{medida}",
+            F.when(
+                F.col(f"soma_peso_{medida}") > 0,
+                F.round(F.col(f"soma_erro_peso_{medida}") / F.col(f"soma_peso_{medida}") * 100, 4)
+            ).otherwise(F.lit(0.0))
+        )
+    
+    # 3.2 AGREGAÇÃO POR GRUPO DE NECESSIDADE x LOJA
+    print("📊 Agregação por grupo de necessidade x loja...")
+    
+    df_smape_grupo_loja = df_com_smape.groupBy("grupo_de_necessidade", "cdfilial").agg(
+        *[
+            F.sum(F.col(f"erro_peso_{medida}")).alias(f"soma_erro_peso_{medida}"),
+            F.sum(F.col(f"peso_{medida}")).alias(f"soma_peso_{medida}")
+            for medida in medidas_disponiveis
+        ]
+    )
+    
+    # Calcula weighted sMAPE para cada grupo de necessidade x loja
+    for medida in medidas_disponiveis:
+        df_smape_grupo_loja = df_smape_grupo_loja.withColumn(
+            f"weighted_smape_{medida}",
+            F.when(
+                F.col(f"soma_peso_{medida}") > 0,
+                F.round(F.col(f"soma_erro_peso_{medida}") / F.col(f"soma_peso_{medida}") * 100, 4)
+            ).otherwise(F.lit(0.0))
+        )
+    
+    # 3.3 AGREGAÇÃO POR LOJA
+    print("📊 Agregação por loja...")
+    
+    df_smape_loja = df_com_smape.groupBy("cdfilial").agg(
+        *[
+            F.sum(F.col(f"erro_peso_{medida}")).alias(f"soma_erro_peso_{medida}"),
+            F.sum(F.col(f"peso_{medida}")).alias(f"soma_peso_{medida}")
+            for medida in medidas_disponiveis
+        ]
+    )
+    
+    # Calcula weighted sMAPE para cada loja
+    for medida in medidas_disponiveis:
+        df_smape_loja = df_smape_loja.withColumn(
+            f"weighted_smape_{medida}",
+            F.when(
+                F.col(f"soma_peso_{medida}") > 0,
+                F.round(F.col(f"soma_erro_peso_{medida}") / F.col(f"soma_peso_{medida}") * 100, 4)
+            ).otherwise(F.lit(0.0))
+        )
+    
+    # 3.4 AGREGAÇÃO DA CATEGORIA INTEIRA
+    print("📊 Agregação da categoria inteira...")
+    
+    df_smape_categoria = df_com_smape.agg(
+        *[
+            F.sum(F.col(f"erro_peso_{medida}")).alias(f"soma_erro_peso_{medida}"),
+            F.sum(F.col(f"peso_{medida}")).alias(f"soma_peso_{medida}")
+            for medida in medidas_disponiveis
+        ]
+    )
+    
+    # Calcula weighted sMAPE para a categoria inteira
+    for medida in medidas_disponiveis:
+        df_smape_categoria = df_smape_categoria.withColumn(
+            f"weighted_smape_{medida}",
+            F.when(
+                F.col(f"soma_peso_{medida}") > 0,
+                F.round(F.col(f"soma_erro_peso_{medida}") / F.col(f"soma_peso_{medida}") * 100, 4)
+            ).otherwise(F.lit(0.0))
+        )
+    
+    # Adiciona identificador de nível
+    df_smape_categoria = df_smape_categoria.withColumn("nivel_agregacao", F.lit("CATEGORIA_INTEIRA"))
+    
+    # 4. CONSOLIDAÇÃO DOS RESULTADOS
+    print("🔄 Consolidando resultados de weighted sMAPE...")
+    
+    # Adiciona identificadores de nível para cada agregação
+    df_smape_grupo = df_smape_grupo.withColumn("nivel_agregacao", F.lit("GRUPO_NECESSIDADE"))
+    df_smape_grupo_loja = df_smape_grupo_loja.withColumn("nivel_agregacao", F.lit("GRUPO_NECESSIDADE_LOJA"))
+    df_smape_loja = df_smape_loja.withColumn("nivel_agregacao", F.lit("LOJA"))
+    
+    # Seleciona apenas as colunas de weighted sMAPE e identificadores
+    colunas_smape = ["nivel_agregacao"] + [f"weighted_smape_{medida}" for medida in medidas_disponiveis]
+    
+    df_smape_grupo_final = df_smape_grupo.select("nivel_agregacao", "grupo_de_necessidade", *colunas_smape[1:])
+    df_smape_grupo_loja_final = df_smape_grupo_loja.select("nivel_agregacao", "grupo_de_necessidade", "cdfilial", *colunas_smape[1:])
+    df_smape_loja_final = df_smape_loja.select("nivel_agregacao", "cdfilial", *colunas_smape[1:])
+    df_smape_categoria_final = df_smape_categoria.select(*colunas_smape)
+    
+    # Union de todos os resultados
+    df_smape_final = (
+        df_smape_grupo_final
+        .unionByName(df_smape_grupo_loja_final, allowMissingColumns=True)
+        .unionByName(df_smape_loja_final, allowMissingColumns=True)
+        .unionByName(df_smape_categoria_final, allowMissingColumns=True)
+    )
+    
+    print(f"✅ Weighted sMAPE calculado com sucesso!")
+    print(f"📊 Resultados consolidados:")
+    print(f"  • Total de registros: {df_smape_final.count():,}")
+    print(f"  • Níveis de agregação: 4 (grupo, grupo+loja, loja, categoria)")
+    print(f"  • Medidas calculadas: {len(medidas_disponiveis)}")
+    
+    # 5. EXIBE RESULTADOS RESUMIDOS
+    print("\n" + "="*80)
+    print("📊 RESUMO DO WEIGHTED SMAPE POR NÍVEL DE AGREGAÇÃO")
+    print("="*80)
+    
+    # Resumo por nível de agregação
+    for nivel in ["GRUPO_NECESSIDADE", "GRUPO_NECESSIDADE_LOJA", "LOJA", "CATEGORIA_INTEIRA"]:
+        df_nivel = df_smape_final.filter(F.col("nivel_agregacao") == nivel)
+        print(f"\n🔍 {nivel}:")
+        
+        if nivel == "CATEGORIA_INTEIRA":
+            # Para categoria inteira, mostra apenas os valores
+            for medida in medidas_disponiveis:
+                valor = df_nivel.select(f"weighted_smape_{medida}").first()[0]
+                print(f"  • {medida}: {valor:.4f}%")
+        else:
+            # Para outros níveis, mostra estatísticas
+            for medida in medidas_disponiveis:
+                stats = df_nivel.select(
+                    F.avg(f"weighted_smape_{medida}").alias("media"),
+                    F.stddev(f"weighted_smape_{medida}").alias("desvio"),
+                    F.min(f"weighted_smape_{medida}").alias("minimo"),
+                    F.max(f"weighted_smape_{medida}").alias("maximo")
+                ).first()
+                
+                print(f"  • {medida}:")
+                print(f"    - Média: {stats['media']:.4f}%")
+                print(f"    - Desvio: {stats['desvio']:.4f}%")
+                print(f"    - Min: {stats['minimo']:.4f}%")
+                print(f"    - Max: {stats['maximo']:.4f}%")
+    
+    print("="*80)
+    
+    return df_smape_final
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 13. Execução da Matriz de Merecimento
 
 # COMMAND ----------
 
@@ -1696,7 +1982,7 @@ df_telas_completo.display()
 
 # MAGIC %md
 # MAGIC %md
-# MAGIC ## 13. Validação e Testes
+# MAGIC ## 14. Validação e Testes
 
 # COMMAND ----------
 
@@ -1724,10 +2010,9 @@ def validar_resultados(df: DataFrame, categoria: str) -> None:
     
     # Verificação de valores nulos
     colunas_medias = [f"Media{dias}_Qt_venda_sem_ruptura" for dias in JANELAS_MOVEIS]
-    colunas_medianas = [f"Mediana{dias}_Qt_venda_sem_ruptura" for dias in JANELAS_MOVEIS]
     colunas_medias_aparadas = [f"MediaAparada{dias}_Qt_venda_sem_ruptura" for dias in JANELAS_MOVEIS]
     
-    todas_colunas_medidas = colunas_medias + colunas_medianas + colunas_medias_aparadas
+    todas_colunas_medidas = colunas_medias + colunas_medias_aparadas
     
     print("\n🔍 Verificação de valores nulos:")
     for coluna in todas_colunas_medidas:
@@ -1740,7 +2025,7 @@ def validar_resultados(df: DataFrame, categoria: str) -> None:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 14. Execução de Teste
+# MAGIC ## 15. Execução de Teste
 # MAGIC
 # MAGIC %md
 # MAGIC Descomente a linha abaixo para executar um teste com a categoria desejada:
