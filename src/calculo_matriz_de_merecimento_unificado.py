@@ -1197,7 +1197,12 @@ def salvar_versao_final_completa(df_merecimento: DataFrame,
         .cache()
     )
     
+    # Debug: verifica colunas de proporção factual
     print(f"✅ Proporção factual calculada para todas as medidas")
+    print(f"🔍 Debug proporção factual:")
+    print(f"  • Colunas esperadas: {colunas_proporcao}")
+    print(f"  • Colunas disponíveis: {df_proporcao_factual.columns}")
+    print(f"  • Total de registros: {df_proporcao_factual.count():,}")
     
     # 4. JOIN COMPLETO com BROADCAST para performance
     print("🔗 Realizando join completo com otimizações de performance...")
@@ -1359,6 +1364,18 @@ def salvar_versao_final_completa(df_merecimento: DataFrame,
     print(f"  • Colunas de sMAPE: {[col for col in df_final_completo.columns if col.startswith('smape_')]}")
     print(f"  • Colunas de proporção factual: {[col for col in df_final_completo.columns if col.startswith('proporcao_factual_')]}")
     print(f"  • Colunas de merecimento final: {[col for col in df_final_completo.columns if col.startswith('Merecimento_Final_')]}")
+    
+    # Debug adicional: mostra todas as colunas disponíveis
+    print(f"🔍 Todas as colunas disponíveis:")
+    for i, col in enumerate(df_final_completo.columns):
+        print(f"  {i+1:2d}. {col}")
+    
+    # Debug: mostra medidas disponíveis e colunas esperadas
+    print(f"🔍 Debug de medidas e colunas:")
+    print(f"  • Medidas disponíveis: {medidas_disponiveis}")
+    print(f"  • Colunas de proporção factual esperadas: {colunas_proporcao_factual}")
+    print(f"  • Colunas de sMAPE esperadas: {colunas_smape}")
+    print(f"  • Todas as colunas finais: {todas_colunas}")
     
     # 8. SALVA NO DATABOX com modo APPEND
     print("💾 Salvando no databox com modo APPEND...")
