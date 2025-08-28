@@ -89,6 +89,7 @@ def load_estoque_loja_data(spark: SparkSession) -> DataFrame:
             "DsCurvaAbcLoja",
             "StLinha",
             "DsObrigatorio",
+            "DsVoltagem",
             F.col("DsTipoEntrega").alias("TipoEntrega"),
             F.col("CdEstoqueFilialAbastecimento").alias("QtdEstoqueCDVinculado"),
             (F.col("VrTotalVv")/F.col("VrVndCmv")).alias("DDE"),
