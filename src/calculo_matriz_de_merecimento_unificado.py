@@ -1144,7 +1144,6 @@ def salvar_versao_final_completa(df_merecimento: DataFrame,
             on="cdfilial",
             how="inner"
         )
-        .withColumnRenamed("cd_primario", "cd_primario_mapeamento")  # Renomeia para evitar ambiguidade
         .cache()  # Cache para múltiplos joins
     )
     
@@ -1204,10 +1203,16 @@ def salvar_versao_final_completa(df_merecimento: DataFrame,
     # BROADCAST JOIN: df_proporcao_factual é pequeno, pode ser broadcast
     df_proporcao_factual_broadcast = F.broadcast(df_proporcao_factual)
     
+    # Renomeia colunas antes do join para evitar ambiguidade
+    df_proporcao_factual_renomeado = (
+        df_proporcao_factual_broadcast
+        .withColumnRenamed("CdSku", "CdSku_proporcao")
+    )
+    
     df_versao_final = (
         df_merecimento
         .join(
-            df_proporcao_factual_broadcast,
+            df_proporcao_factual_renomeado,
             on=["cdfilial", "grupo_de_necessidade"],
             how="inner"
         )
