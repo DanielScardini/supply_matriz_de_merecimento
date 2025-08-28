@@ -1144,6 +1144,7 @@ def salvar_versao_final_completa(df_merecimento: DataFrame,
             on="cdfilial",
             how="inner"
         )
+        .withColumnRenamed("cd_primario", "cd_primario_mapeamento")  # Renomeia para evitar ambiguidade
         .cache()  # Cache para múltiplos joins
     )
     
