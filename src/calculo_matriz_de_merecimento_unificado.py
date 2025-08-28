@@ -668,7 +668,7 @@ def criar_de_para_filial_cd() -> DataFrame:
     print("🔄 Criando de-para filial → CD...")
     
     # Carrega dados da tabela base para criar mapeamento
-    df_base = spark.table('databox.bcg_comum.supply_base_merecimento_diario')
+    df_base = spark.table('databox.bcg_comum.supply_base_merecimento_diario_v2')
     
     # Cria mapeamento filial → CD
     de_para_filial_cd = (
@@ -1628,9 +1628,22 @@ def executar_calculo_matriz_merecimento(categoria: str,
 
 # COMMAND ----------
 
+# # Cálculo com salvamento da versão completa
+# df_telas_completo = executar_calculo_matriz_merecimento(
+#     categoria="DIRETORIA DE TELAS",
+#     salvar_versao_completa=True,
+#     mes_analise="202507",  # julho-2025
+#     data_corte_matriz="2025-06-30"  # data de corte da matriz
+# )
+
+# # Exibir resultado
+# df_telas_completo.display()
+
+# COMMAND ----------
+
 # Cálculo com salvamento da versão completa
 df_telas_completo = executar_calculo_matriz_merecimento(
-    categoria="DIRETORIA DE TELAS",
+    categoria="DIRETORIA TELEFONIA CELULAR",
     salvar_versao_completa=True,
     mes_analise="202507",  # julho-2025
     data_corte_matriz="2025-06-30"  # data de corte da matriz
@@ -1638,6 +1651,10 @@ df_telas_completo = executar_calculo_matriz_merecimento(
 
 # Exibir resultado
 df_telas_completo.display()
+
+# COMMAND ----------
+
+spark.table('databox.bcg_comum.supply_base_merecimento_diario_TELEFONIA_CELULAR')
 
 # COMMAND ----------
 
