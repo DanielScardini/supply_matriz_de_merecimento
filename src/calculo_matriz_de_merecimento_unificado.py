@@ -1610,7 +1610,7 @@ def executar_calculo_matriz_merecimento(categoria: str,
                 print(f"❌ Erro ao salvar versão completa: {str(e)}")
                 print("⚠️  Continuando com resultado padrão...")
         
-        return df_resultado_final
+        return df_versao_completa
         
     except Exception as e:
         print(f"❌ Erro durante o cálculo: {str(e)}")
