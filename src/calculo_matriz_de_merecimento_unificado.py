@@ -216,7 +216,6 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-01-01") -> Data
             F.date_format(F.col("DtAtual"), "yyyyMM").cast("int")
         )
         .fillna(0, subset=["Receita", "QtMercadoria", "TeveVenda"])
-        .limit(10000)  # Limit para testes mais rápidos
     )
     
     # Cache para otimização
@@ -1653,7 +1652,7 @@ df_telas_completo.display()
 # MAGIC ```python
 # MAGIC # Cálculo padrão
 # MAGIC df_telas = executar_calculo_matriz_merecimento("DIRETORIA DE TELAS")
-# MAGIC 
+# MAGIC
 # MAGIC # Cálculo com salvamento da versão completa
 # MAGIC df_telas_completo = executar_calculo_matriz_merecimento(
 # MAGIC     categoria="DIRETORIA DE TELAS",
@@ -1668,7 +1667,7 @@ df_telas_completo.display()
 # MAGIC ```python
 # MAGIC # Cálculo padrão
 # MAGIC df_telefonia = executar_calculo_matriz_merecimento("DIRETORIA TELEFONIA CELULAR")
-# MAGIC 
+# MAGIC
 # MAGIC # Cálculo com salvamento da versão completa
 # MAGIC df_telefonia_completo = executar_calculo_matriz_merecimento(
 # MAGIC     categoria="DIRETORIA TELEFONIA CELULAR",
@@ -1683,7 +1682,7 @@ df_telas_completo.display()
 # MAGIC ```python
 # MAGIC # Cálculo padrão
 # MAGIC df_linha_branca = executar_calculo_matriz_merecimento("DIRETORIA LINHA BRANCA")
-# MAGIC 
+# MAGIC
 # MAGIC # Cálculo com salvamento da versão completa
 # MAGIC df_linha_branca_completo = executar_calculo_matriz_merecimento(
 # MAGIC     categoria="DIRETORIA LINHA BRANCA",
