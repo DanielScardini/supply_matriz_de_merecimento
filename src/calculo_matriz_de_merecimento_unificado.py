@@ -216,6 +216,7 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-01-01") -> Data
             F.date_format(F.col("DtAtual"), "yyyyMM").cast("int")
         )
         .fillna(0, subset=["Receita", "QtMercadoria", "TeveVenda"])
+        .limit(10000)  # Limit para testes mais rápidos
     )
     
     # Cache para otimização
@@ -1351,6 +1352,13 @@ def salvar_versao_final_completa(df_merecimento: DataFrame,
         .withColumn("data_corte_matriz", F.lit(data_corte_matriz))
         .withColumn("categoria", F.lit(categoria))
     )
+    
+    # Debug: mostra colunas disponíveis
+    print(f"🔍 Colunas disponíveis no resultado final:")
+    print(f"  • Total de colunas: {len(df_final_completo.columns)}")
+    print(f"  • Colunas de sMAPE: {[col for col in df_final_completo.columns if col.startswith('smape_')]}")
+    print(f"  • Colunas de proporção factual: {[col for col in df_final_completo.columns if col.startswith('proporcao_factual_')]}")
+    print(f"  • Colunas de merecimento final: {[col for col in df_final_completo.columns if col.startswith('Merecimento_Final_')]}")
     
     # 8. SALVA NO DATABOX com modo APPEND
     print("💾 Salvando no databox com modo APPEND...")
