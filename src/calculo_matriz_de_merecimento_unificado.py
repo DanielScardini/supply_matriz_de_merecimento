@@ -664,7 +664,7 @@ def criar_de_para_filial_cd() -> DataFrame:
     print("🔄 Criando de-para filial → CD...")
     
     # Carrega dados da tabela base para criar mapeamento
-    df_base = spark.table('databox.bcg_comum.supply_base_merecimento_diario')
+    df_base = spark.table('databox.bcg_comum.supply_base_merecimento_diario_v2')
     
     # Cria mapeamento filial → CD
     de_para_filial_cd = (
@@ -1585,7 +1585,7 @@ def executar_calculo_matriz_merecimento(categoria: str,
                 print(f"❌ Erro ao salvar versão completa: {str(e)}")
                 print("⚠️  Continuando com resultado padrão...")
         
-        return df_resultado_final
+        return df_versao_completa
         
     except Exception as e:
         print(f"❌ Erro durante o cálculo: {str(e)}")
@@ -1914,9 +1914,22 @@ def calcular_weighted_smape_agregado(df: DataFrame,
 
 # COMMAND ----------
 
+# # Cálculo com salvamento da versão completa
+# df_telas_completo = executar_calculo_matriz_merecimento(
+#     categoria="DIRETORIA DE TELAS",
+#     salvar_versao_completa=True,
+#     mes_analise="202507",  # julho-2025
+#     data_corte_matriz="2025-06-30"  # data de corte da matriz
+# )
+
+# # Exibir resultado
+# df_telas_completo.display()
+
+# COMMAND ----------
+
 # Cálculo com salvamento da versão completa
 df_telas_completo = executar_calculo_matriz_merecimento(
-    categoria="DIRETORIA DE TELAS",
+    categoria="DIRETORIA TELEFONIA CELULAR",
     salvar_versao_completa=True,
     mes_analise="202507",  # julho-2025
     data_corte_matriz="2025-06-30"  # data de corte da matriz
@@ -1924,6 +1937,10 @@ df_telas_completo = executar_calculo_matriz_merecimento(
 
 # Exibir resultado
 df_telas_completo.display()
+
+# COMMAND ----------
+
+spark.table('databox.bcg_comum.supply_base_merecimento_diario_TELEFONIA_CELULAR')
 
 # COMMAND ----------
 

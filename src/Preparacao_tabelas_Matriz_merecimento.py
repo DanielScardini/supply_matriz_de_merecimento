@@ -29,28 +29,30 @@ hoje_int = int(hoje.strftime("%Y%m%d"))
 
 # COMMAND ----------
 
-def get_data_inicio(min_meses: int = 18, hoje: datetime | None = None) -> datetime:
+def get_data_inicio(hoje: datetime | date | None = None) -> datetime:
     """
-    Retorna 1º de janeiro mais recente que esteja a pelo menos `min_meses` meses de 'hoje'.
-    Recuará vários anos se preciso.
+    Retorna datetime no dia 1 do mês que está 12 meses antes de 'hoje'.
     """
     if hoje is None:
         hoje_d = date.today()
+    elif isinstance(hoje, datetime):
+        hoje_d = hoje.date()
     else:
-        hoje_d = hoje.date() if isinstance(hoje, datetime) else hoje
+        hoje_d = hoje
 
-    ano = hoje_d.year
-    while True:
-        jan = date(ano, 1, 1)
-        diff_meses = (hoje_d.year - jan.year) * 12 + (hoje_d.month - jan.month)
-        if diff_meses >= min_meses:
-            # retorna como datetime para compatibilidade com seu uso
-            return datetime(jan.year, jan.month, jan.day)
+    total_meses = hoje_d.year * 12 + hoje_d.month - 12
+    ano = total_meses // 12
+    mes = total_meses % 12
+    if mes == 0:
         ano -= 1
+        mes = 12
 
+    return datetime(ano, mes, 1)
+
+# exemplo de uso
 data_inicio = get_data_inicio()
 data_inicio_int = int(data_inicio.strftime("%Y%m%d"))
-
+print(data_inicio, data_inicio_int)
 
 # COMMAND ----------
 
@@ -87,6 +89,7 @@ def load_estoque_loja_data(spark: SparkSession) -> DataFrame:
             "DsCurvaAbcLoja",
             "StLinha",
             "DsObrigatorio",
+            "DsVoltagem",
             F.col("DsTipoEntrega").alias("TipoEntrega"),
             F.col("CdEstoqueFilialAbastecimento").alias("QtdEstoqueCDVinculado"),
             (F.col("VrTotalVv")/F.col("VrVndCmv")).alias("DDE"),
