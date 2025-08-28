@@ -1216,15 +1216,41 @@ def salvar_versao_final_completa(df_merecimento: DataFrame,
         .withColumnRenamed("CdSku", "CdSku_proporcao")
     )
     
-    df_versao_final = (
+    # DROP DUPLICATES nas chaves únicas ANTES dos joins para evitar multiplicações
+    print("🧹 Removendo duplicatas nas chaves únicas antes dos joins...")
+    
+    df_merecimento_limpo = (
         df_merecimento
+        .dropDuplicates(["CdSku", "grupo_de_necessidade", "cdfilial", "cd_primario"])
+        .cache()
+    )
+    
+    df_proporcao_factual_limpo = (
+        df_proporcao_factual_renomeado
+        .dropDuplicates(["cdfilial", "grupo_de_necessidade"])
+        .cache()
+    )
+    
+    de_para_filial_cd_limpo = (
+        de_para_filial_cd
+        .dropDuplicates(["cdfilial", "grupo_de_necessidade"])
+        .cache()
+    )
+    
+    print(f"✅ Duplicatas removidas:")
+    print(f"  • df_merecimento: {df_merecimento.count():,} → {df_merecimento_limpo.count():,}")
+    print(f"  • df_proporcao_factual: {df_proporcao_factual_renomeado.count():,} → {df_proporcao_factual_limpo.count():,}")
+    print(f"  • de_para_filial_cd: {de_para_filial_cd.count():,} → {de_para_filial_cd_limpo.count():,}")
+    
+    df_versao_final = (
+        df_merecimento_limpo
         .join(
-            df_proporcao_factual_renomeado,
+            df_proporcao_factual_limpo,
             on=["cdfilial", "grupo_de_necessidade"],
             how="inner"
         )
         .join(
-            de_para_filial_cd,
+            de_para_filial_cd_limpo,
             on=["cdfilial", "grupo_de_necessidade"],
             how="inner"
         )
@@ -1357,6 +1383,19 @@ def salvar_versao_final_completa(df_merecimento: DataFrame,
         .withColumn("data_corte_matriz", F.lit(data_corte_matriz))
         .withColumn("categoria", F.lit(categoria))
     )
+    
+    # DROP DUPLICATES FINAL nas chaves únicas para garantir resultado limpo
+    print("🧹 Removendo duplicatas finais nas chaves únicas...")
+    registros_antes = df_final_completo.count()
+    
+    df_final_completo = (
+        df_final_completo
+        .dropDuplicates(["CdSku", "grupo_de_necessidade", "cdfilial", "cd_primario"])
+        .cache()
+    )
+    
+    registros_depois = df_final_completo.count()
+    print(f"✅ Duplicatas finais removidas: {registros_antes:,} → {registros_depois:,} (removidos: {registros_antes - registros_depois:,})")
     
     # Debug: mostra colunas disponíveis
     print(f"🔍 Colunas disponíveis no resultado final:")
