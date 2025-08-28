@@ -720,13 +720,15 @@ def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) ->
     # Agrega por CD e grupo de necessidade
     colunas_agregacao = ["cd_primario", "grupo_de_necessidade"] + medidas_disponiveis
     
+    # Cria lista de expressões de agregação
+    aggs_cd = []
+    for medida in medidas_disponiveis:
+        aggs_cd.append(F.sum(F.col(medida)).alias(f"Total_{medida}"))
+    
     df_merecimento_cd = (
         df_com_cd
         .groupBy("cd_primario", "grupo_de_necessidade")
-        .agg(*[
-            F.sum(F.col(medida)).alias(f"Total_{medida}")
-            for medida in medidas_disponiveis
-        ])
+        .agg(*aggs_cd)
     )
     
     print(f"✅ Merecimento CD calculado:")
@@ -824,10 +826,11 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
     ]
     
     # CORREÇÃO: Renomeia colunas do df_merecimento_cd para evitar conflito de nomes
-    df_merecimento_cd_renomeado = df_merecimento_cd.select(
-        "cd_primario", "grupo_de_necessidade",
-        *[F.col(f"Total_{medida}").alias(f"Total_CD_{medida}") for medida in medidas_disponiveis]
-    )
+    colunas_renomeadas = ["cd_primario", "grupo_de_necessidade"]
+    for medida in medidas_disponiveis:
+        colunas_renomeadas.append(F.col(f"Total_{medida}").alias(f"Total_CD_{medida}"))
+    
+    df_merecimento_cd_renomeado = df_merecimento_cd.select(*colunas_renomeadas)
     
     # Join entre merecimento interno CD e CD renomeado (sem conflito de colunas)
     df_merecimento_final = (
@@ -1275,11 +1278,13 @@ def salvar_versao_final_completa(df_merecimento: DataFrame,
     colunas_smape = [f"smape_{medida}" for medida in medidas_disponiveis]
     
     # Calcula o melhor sMAPE (menor valor) para cada registro
+    colunas_smape_least = [F.col(f"smape_{medida}") for medida in medidas_disponiveis]
+    
     df_com_melhor_smape = (
         df_com_smape
         .withColumn(
             "melhor_sMAPE",
-            F.least(*[F.col(f"smape_{medida}") for medida in medidas_disponiveis])
+            F.least(*colunas_smape_least)
         )
         .withColumn(
             "medida_melhor_sMAPE",
@@ -1533,14 +1538,18 @@ def executar_calculo_matriz_merecimento(categoria: str,
         ]
         
         # Seleciona apenas as colunas de merecimento calculadas (SKU x loja x gêmeo)
+        colunas_totais_cd = [F.col(f"Total_CD_{medida}") for medida in medidas_disponiveis]
+        colunas_percentual = [F.col(f"Percentual_{medida}") for medida in medidas_disponiveis]
+        colunas_merecimento_final = [F.col(f"Merecimento_Final_{medida}") for medida in medidas_disponiveis]
+        
         df_resultado_final = df_merecimento_final.select(
             "cdfilial", "cd_primario", "grupo_de_necessidade",
             # Colunas de merecimento CD (totais por CD + gêmeo)
-            *[F.col(f"Total_CD_{medida}") for medida in medidas_disponiveis],
+            *colunas_totais_cd,
             # Colunas de percentual interno (participação da loja dentro do CD)
-            *[F.col(f"Percentual_{medida}") for medida in medidas_disponiveis],
+            *colunas_percentual,
             # Colunas de merecimento final (CD × participação interna)
-            *[F.col(f"Merecimento_Final_{medida}") for medida in medidas_disponiveis]
+            *colunas_merecimento_final
         ).distinct()
         
         print(f"✅ Resultado final consolidado:")
@@ -1753,13 +1762,15 @@ def calcular_weighted_smape_agregado(df: DataFrame,
     # 3.1 AGREGAÇÃO POR GRUPO DE NECESSIDADE
     print("📊 Agregação por grupo de necessidade...")
     
-    df_smape_grupo = df_com_smape.groupBy("grupo_de_necessidade").agg(
-        *[
+    # Cria lista de expressões de agregação
+    aggs_grupo = []
+    for medida in medidas_disponiveis:
+        aggs_grupo.extend([
             F.sum(F.col(f"erro_peso_{medida}")).alias(f"soma_erro_peso_{medida}"),
             F.sum(F.col(f"peso_{medida}")).alias(f"soma_peso_{medida}")
-            for medida in medidas_disponiveis
-        ]
-    )
+        ])
+    
+    df_smape_grupo = df_com_smape.groupBy("grupo_de_necessidade").agg(*aggs_grupo)
     
     # Calcula weighted sMAPE para cada grupo de necessidade
     for medida in medidas_disponiveis:
@@ -1774,13 +1785,15 @@ def calcular_weighted_smape_agregado(df: DataFrame,
     # 3.2 AGREGAÇÃO POR GRUPO DE NECESSIDADE x LOJA
     print("📊 Agregação por grupo de necessidade x loja...")
     
-    df_smape_grupo_loja = df_com_smape.groupBy("grupo_de_necessidade", "cdfilial").agg(
-        *[
+    # Cria lista de expressões de agregação para grupo + loja
+    aggs_grupo_loja = []
+    for medida in medidas_disponiveis:
+        aggs_grupo_loja.extend([
             F.sum(F.col(f"erro_peso_{medida}")).alias(f"soma_erro_peso_{medida}"),
             F.sum(F.col(f"peso_{medida}")).alias(f"soma_peso_{medida}")
-            for medida in medidas_disponiveis
-        ]
-    )
+        ])
+    
+    df_smape_grupo_loja = df_com_smape.groupBy("grupo_de_necessidade", "cdfilial").agg(*aggs_grupo_loja)
     
     # Calcula weighted sMAPE para cada grupo de necessidade x loja
     for medida in medidas_disponiveis:
@@ -1795,13 +1808,15 @@ def calcular_weighted_smape_agregado(df: DataFrame,
     # 3.3 AGREGAÇÃO POR LOJA
     print("📊 Agregação por loja...")
     
-    df_smape_loja = df_com_smape.groupBy("cdfilial").agg(
-        *[
+    # Cria lista de expressões de agregação para loja
+    aggs_loja = []
+    for medida in medidas_disponiveis:
+        aggs_loja.extend([
             F.sum(F.col(f"erro_peso_{medida}")).alias(f"soma_erro_peso_{medida}"),
             F.sum(F.col(f"peso_{medida}")).alias(f"soma_peso_{medida}")
-            for medida in medidas_disponiveis
-        ]
-    )
+        ])
+    
+    df_smape_loja = df_com_smape.groupBy("cdfilial").agg(*aggs_loja)
     
     # Calcula weighted sMAPE para cada loja
     for medida in medidas_disponiveis:
@@ -1816,13 +1831,15 @@ def calcular_weighted_smape_agregado(df: DataFrame,
     # 3.4 AGREGAÇÃO DA CATEGORIA INTEIRA
     print("📊 Agregação da categoria inteira...")
     
-    df_smape_categoria = df_com_smape.agg(
-        *[
+    # Cria lista de expressões de agregação para categoria
+    aggs_categoria = []
+    for medida in medidas_disponiveis:
+        aggs_categoria.extend([
             F.sum(F.col(f"erro_peso_{medida}")).alias(f"soma_erro_peso_{medida}"),
             F.sum(F.col(f"peso_{medida}")).alias(f"soma_peso_{medida}")
-            for medida in medidas_disponiveis
-        ]
-    )
+        ])
+    
+    df_smape_categoria = df_com_smape.agg(*aggs_categoria)
     
     # Calcula weighted sMAPE para a categoria inteira
     for medida in medidas_disponiveis:
