@@ -230,7 +230,7 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-01-01") -> Data
     
     print(f"✅ Dados carregados para '{categoria}':")
     print(f"  • Total de registros: {df_base.count():,}")
-    print(f"  • Período: {data_inicio} até {df_base.agg(F.max('DtAtual')).collect()[0][0]}")
+    print(f"  • Período: {data_inicio} até {df_base.agg(F.max('DtAtual')).limit(1).collect()[0][0]}")
     
     return df_base
 
@@ -1935,12 +1935,13 @@ df_telas_completo = executar_calculo_matriz_merecimento(
     data_corte_matriz="2025-06-30"  # data de corte da matriz
 )
 
-# Exibir resultado
-df_telas_completo.display()
+# Exibir resultado (limitado para agilizar)
+df_telas_completo.limit(1000).display()
 
 # COMMAND ----------
 
-spark.table('databox.bcg_comum.supply_base_merecimento_diario_TELEFONIA_CELULAR')
+# Verificação da base de merecimento (limitado para agilizar)
+spark.table('databox.bcg_comum.supply_base_merecimento_diario_TELEFONIA_CELULAR').limit(1000).display()
 
 # COMMAND ----------
 
