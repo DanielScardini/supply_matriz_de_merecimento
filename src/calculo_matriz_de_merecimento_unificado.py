@@ -1144,6 +1144,7 @@ def salvar_versao_final_completa(df_merecimento: DataFrame,
             on="cdfilial",
             how="inner"
         )
+        .withColumnRenamed("cd_primario", "cd_primario_mapeamento")  # Renomeia para evitar ambiguidade
         .cache()  # Cache para múltiplos joins
     )
     
@@ -1290,7 +1291,7 @@ def salvar_versao_final_completa(df_merecimento: DataFrame,
     
     # Colunas de identificação
     colunas_identificacao = [
-        "CdSku", "grupo_de_necessidade", "cdfilial", "cd_primario"  # CdSku vem do df_merecimento
+        "CdSku", "grupo_de_necessidade", "cdfilial", "cd_primario"  # CdSku e cd_primario vêm do df_merecimento
     ]
     
     # Colunas de merecimento CD
