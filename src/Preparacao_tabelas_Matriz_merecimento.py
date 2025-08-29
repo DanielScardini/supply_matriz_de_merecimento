@@ -1159,3 +1159,491 @@ print("💾 Resultados da comparação salvos com sucesso!")
 # MAGIC - `supply_comparacao_merecimento_ranking_calculo_matriz`: Ranking detalhado por SKU
 # MAGIC - `supply_comparacao_merecimento_resumo_calculo_matriz`: Resumo estatístico geral
 # MAGIC - `supply_comparacao_merecimento_setor_curva_calculo_matriz`: Análise por setor e curva ABC
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 🔄 Processamento Incremental em Lotes de Meses
+
+# COMMAND ----------
+
+def get_monthly_batches(start_date: datetime, end_date: datetime, batch_size_months: int = 3) -> List[tuple]:
+    """
+    Gera lotes de meses para processamento incremental.
+    
+    Args:
+        start_date: Data de início
+        end_date: Data de fim
+        batch_size_months: Tamanho do lote em meses (recomendado: 3-4)
+        
+    Returns:
+        Lista de tuplas (data_inicio_lote, data_fim_lote) para cada lote
+    """
+    batches = []
+    current_date = start_date
+    
+    while current_date < end_date:
+        # Calcular fim do lote
+        if current_date.month + batch_size_months > 12:
+            # Ajustar para o próximo ano
+            next_year = current_date.year + ((current_date.month + batch_size_months - 1) // 12)
+            next_month = ((current_date.month + batch_size_months - 1) % 12) + 1
+            batch_end = datetime(next_year, next_month, 1) - timedelta(days=1)
+        else:
+            batch_end = datetime(current_date.year, current_date.month + batch_size_months, 1) - timedelta(days=1)
+        
+        # Garantir que não ultrapasse a data final
+        if batch_end > end_date:
+            batch_end = end_date
+            
+        batches.append((current_date, batch_end))
+        
+        # Próximo lote
+        current_date = batch_end + timedelta(days=1)
+    
+    return batches
+
+def check_existing_data_for_period(spark: SparkSession, table_name: str, start_date: datetime, end_date: datetime) -> bool:
+    """
+    Verifica se já existem dados para o período especificado.
+    
+    Args:
+        spark: Sessão do Spark
+        table_name: Nome da tabela a verificar
+        start_date: Data de início do período
+        end_date: Data de fim do período
+        
+    Returns:
+        True se existem dados, False caso contrário
+    """
+    try:
+        # Verificar se a tabela existe
+        existing_data = (
+            spark.read.table(table_name)
+            .filter(
+                (F.col("DtAtual") >= start_date.strftime("%Y-%m-%d")) &
+                (F.col("DtAtual") <= end_date.strftime("%Y-%m-%d"))
+            )
+            .select("DtAtual")
+            .distinct()
+            .count()
+        )
+        
+        # Calcular dias úteis no período (excluindo fins de semana)
+        total_days = (end_date - start_date).days + 1
+        business_days = sum(1 for i in range(total_days) 
+                          if (start_date + timedelta(days=i)).weekday() < 5)
+        
+        # Considerar que temos dados se pelo menos 80% dos dias úteis estão presentes
+        return existing_data >= (business_days * 0.8)
+        
+    except Exception as e:
+        print(f"⚠️ Erro ao verificar dados existentes: {e}")
+        return False
+
+def delete_existing_data_for_period(spark: SparkSession, table_name: str, start_date: datetime, end_date: datetime) -> None:
+    """
+    Remove dados existentes para o período especificado.
+    
+    Args:
+        spark: Sessão do Spark
+        table_name: Nome da tabela
+        start_date: Data de início do período
+        end_date: Data de fim do período
+    """
+    try:
+        # Ler dados existentes
+        existing_df = spark.read.table(table_name)
+        
+        # Filtrar dados fora do período a ser deletado
+        data_to_keep = existing_df.filter(
+            ~((F.col("DtAtual") >= start_date.strftime("%Y-%m-%d")) &
+              (F.col("DtAtual") <= end_date.strftime("%Y-%m-%d")))
+        )
+        
+        # Sobrescrever tabela mantendo apenas dados fora do período
+        (
+            data_to_keep.write
+            .mode("overwrite")
+            .option("overwriteSchema", "true")
+            .format("delta")
+            .saveAsTable(table_name)
+        )
+        
+        print(f"🗑️ Dados deletados para período: {start_date.strftime('%Y-%m-%d')} a {end_date.strftime('%Y-%m-%d')}")
+        
+    except Exception as e:
+        print(f"❌ Erro ao deletar dados existentes: {e}")
+        raise
+
+def process_monthly_batch(
+    spark: SparkSession,
+    start_date: datetime,
+    end_date: datetime,
+    table_name: str = "databox.bcg_comum.supply_base_merecimento_diario_v2"
+) -> DataFrame:
+    """
+    Processa um lote de meses específico.
+    
+    Args:
+        spark: Sessão do Spark
+        start_date: Data de início do lote
+        end_date: Data de fim do lote
+        table_name: Nome da tabela de destino
+        
+    Returns:
+        DataFrame processado para o período
+    """
+    print(f"🔄 Processando lote: {start_date.strftime('%Y-%m-%d')} a {end_date.strftime('%Y-%m-%d')}")
+    
+    # Converter datas para formato inteiro
+    start_date_int = int(start_date.strftime("%Y%m%d"))
+    end_date_int = int(end_date.strftime("%Y%m%d"))
+    
+    # 1. Carregar dados de estoque para o período
+    df_estoque_lote = (
+        spark.read.table("data_engineering_prd.app_logistica.gi_boss_qualidade_estoque")
+        .filter(F.col("DtAtual") >= start_date)
+        .filter(F.col("DtAtual") <= end_date)
+        .filter(F.col("StLoja") == "ATIVA")
+        .filter(F.col("DsEstoqueLojaDeposito") == "L")
+        .select(
+            "CdFilial", "CdSku", "DsSku", "DsSetor", "DsCurva", "DsCurvaAbcLoja",
+            "StLinha", "DsObrigatorio", "DsVoltagem", F.col("DsTipoEntrega").alias("TipoEntrega"),
+            F.col("CdEstoqueFilialAbastecimento").alias("QtdEstoqueCDVinculado"),
+            (F.col("VrTotalVv")/F.col("VrVndCmv")).alias("DDE"),
+            F.col("QtEstoqueBoaOff").alias("EstoqueLoja"),
+            F.col("DsFaixaDde").alias("ClassificacaoDDE"),
+            F.col("data_ingestao"),
+            F.date_format(F.col("data_ingestao"), "yyyy-MM-dd").alias("DtAtual")    
+        )
+        .dropDuplicates(["DtAtual", "CdSku", "CdFilial"])
+    )
+    
+    # 2. Carregar dados de vendas para o período
+    sales_df_lote = build_sales_view(spark, start_date_int, end_date_int)
+    
+    # 3. Carregar dados de mercadoria (não muda por período)
+    df_mercadoria_lote = load_mercadoria_data(spark)
+    
+    # 4. Criar base de merecimento para o lote
+    df_merecimento_lote = create_base_merecimento(df_estoque_lote, sales_df_lote, df_mercadoria_lote)
+    
+    # 5. Adicionar métricas de média móvel de 90 dias
+    df_merecimento_lote_r90 = add_rolling_90_metrics(df_merecimento_lote)
+    
+    # 6. Adicionar flags de ruptura
+    df_merecimento_lote_final = create_analysis_with_rupture_flags(df_merecimento_lote_r90)
+    
+    # 7. Adicionar mapeamento de abastecimento
+    df_merecimento_lote_cd_loja = create_final_merecimento_base(df_merecimento_lote_final, de_para_filial_CD)
+    
+    return df_merecimento_lote_cd_loja
+
+def append_monthly_batch_to_table(
+    df_batch: DataFrame,
+    table_name: str,
+    mode: str = "append"
+) -> None:
+    """
+    Adiciona lote processado à tabela de destino.
+    
+    Args:
+        df_batch: DataFrame do lote processado
+        table_name: Nome da tabela de destino
+        mode: Modo de escrita ("append" ou "overwrite")
+    """
+    try:
+        (
+            df_batch.write
+            .mode(mode)
+            .option("overwriteSchema", "false")  # Manter schema existente
+            .format("delta")
+            .saveAsTable(table_name)
+        )
+        
+        print(f"✅ Lote salvo com sucesso na tabela {table_name}")
+        
+    except Exception as e:
+        print(f"❌ Erro ao salvar lote: {e}")
+        raise
+
+def process_incremental_from_start_date(
+    spark: SparkSession,
+    start_date: datetime,
+    end_date: datetime = None,
+    batch_size_months: int = 3,
+    table_name: str = "databox.bcg_comum.supply_base_merecimento_diario_v2"
+) -> None:
+    """
+    Processa dados incrementalmente desde a data de início até hoje.
+    
+    Args:
+        spark: Sessão do Spark
+        start_date: Data de início para processamento
+        end_date: Data de fim (padrão: hoje)
+        batch_size_months: Tamanho do lote em meses
+        table_name: Nome da tabela de destino
+    """
+    if end_date is None:
+        end_date = datetime.now() - timedelta(days=1)
+    
+    print(f"🚀 INICIANDO PROCESSAMENTO INCREMENTAL")
+    print(f"📅 Período: {start_date.strftime('%Y-%m-%d')} a {end_date.strftime('%Y-%m-%d')}")
+    print(f"📦 Tamanho do lote: {batch_size_months} meses")
+    print(f"🎯 Tabela de destino: {table_name}")
+    
+    # Gerar lotes de meses
+    batches = get_monthly_batches(start_date, end_date, batch_size_months)
+    
+    print(f"📋 Total de lotes a processar: {len(batches)}")
+    
+    for i, (batch_start, batch_end) in enumerate(batches, 1):
+        print(f"\n🔄 PROCESSANDO LOTE {i}/{len(batches)}")
+        print(f"📅 Período do lote: {batch_start.strftime('%Y-%m-%d')} a {batch_end.strftime('%Y-%m-%d')}")
+        
+        try:
+            # Verificar se já existem dados para este período
+            if check_existing_data_for_period(spark, table_name, batch_start, batch_end):
+                print(f"⏭️ Dados já existem para este período. Pulando...")
+                continue
+            
+            # Deletar dados existentes para o período (se houver)
+            delete_existing_data_for_period(spark, table_name, batch_start, batch_end)
+            
+            # Processar lote
+            df_batch = process_monthly_batch(spark, batch_start, batch_end, table_name)
+            
+            # Salvar lote na tabela
+            append_monthly_batch_to_table(df_batch, table_name, mode="append")
+            
+            print(f"✅ Lote {i} processado e salvo com sucesso!")
+            
+        except Exception as e:
+            print(f"❌ ERRO no lote {i}: {e}")
+            print(f"🛑 Processamento interrompido. Verifique o erro e reinicie.")
+            raise
+    
+    print(f"\n🎉 PROCESSAMENTO INCREMENTAL CONCLUÍDO!")
+    print(f"📊 Todos os {len(batches)} lotes foram processados com sucesso.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 🎯 Execução do Processamento Incremental
+
+# COMMAND ----------
+
+# Executar processamento incremental
+# Descomente a linha abaixo para executar
+# process_incremental_from_start_date(spark, data_inicio, batch_size_months=3)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 📊 Monitoramento e Controle de Qualidade
+
+# COMMAND ----------
+
+def monitor_table_quality(spark: SparkSession, table_name: str) -> None:
+    """
+    Monitora a qualidade da tabela processada.
+    
+    Args:
+        spark: Sessão do Spark
+        table_name: Nome da tabela a monitorar
+    """
+    try:
+        df = spark.read.table(table_name)
+        
+        print(f"🔍 MONITORAMENTO DA TABELA: {table_name}")
+        print("=" * 60)
+        
+        # Contagem total de registros
+        total_records = df.count()
+        print(f"📊 Total de registros: {total_records:,}")
+        
+        # Verificar cobertura temporal
+        date_coverage = (
+            df.select("DtAtual")
+            .distinct()
+            .orderBy("DtAtual")
+            .collect()
+        )
+        
+        if date_coverage:
+            print(f"📅 Cobertura temporal: {date_coverage[0]['DtAtual']} a {date_coverage[-1]['DtAtual']}")
+            print(f"📅 Total de dias únicos: {len(date_coverage)}")
+        
+        # Verificar distribuição por filial
+        filial_distribution = (
+            df.groupBy("CdFilial")
+            .count()
+            .orderBy("count", ascending=False)
+            .limit(10)
+        )
+        
+        print(f"\n🏪 TOP 10 Filiais por volume de dados:")
+        display(filial_distribution)
+        
+        # Verificar distribuição por setor
+        setor_distribution = (
+            df.groupBy("DsSetor")
+            .count()
+            .orderBy("count", ascending=False)
+        )
+        
+        print(f"\n🏭 Distribuição por Setor:")
+        display(setor_distribution)
+        
+        # Verificar dados de ruptura
+        ruptura_stats = (
+            df.groupBy("FlagRuptura")
+            .agg(
+                F.count("*").alias("Quantidade"),
+                F.avg("ReceitaPerdidaRuptura").alias("Receita_Perdida_Media")
+            )
+        )
+        
+        print(f"\n🚨 Estatísticas de Ruptura:")
+        display(ruptura_stats)
+        
+    except Exception as e:
+        print(f"❌ Erro no monitoramento: {e}")
+
+# Executar monitoramento (descomente para usar)
+# monitor_table_quality(spark, "databox.bcg_comum.supply_base_merecimento_diario_v2")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 🔧 Funções de Manutenção e Limpeza
+
+# COMMAND ----------
+
+def cleanup_old_data(
+    spark: SparkSession,
+    table_name: str,
+    retention_days: int = 365
+) -> None:
+    """
+    Remove dados antigos da tabela para controle de custos.
+    
+    Args:
+        spark: Sessão do Spark
+        table_name: Nome da tabela
+        retention_days: Dias de retenção (padrão: 1 ano)
+    """
+    try:
+        cutoff_date = (datetime.now() - timedelta(days=retention_days)).strftime("%Y-%m-%d")
+        
+        print(f"🧹 LIMPEZA DE DADOS ANTIGOS")
+        print(f"📅 Removendo dados anteriores a: {cutoff_date}")
+        
+        # Ler dados existentes
+        existing_df = spark.read.table(table_name)
+        
+        # Filtrar dados dentro da retenção
+        data_to_keep = existing_df.filter(F.col("DtAtual") >= cutoff_date)
+        
+        # Sobrescrever tabela mantendo apenas dados recentes
+        (
+            data_to_keep.write
+            .mode("overwrite")
+            .option("overwriteSchema", "true")
+            .format("delta")
+            .saveAsTable(table_name)
+        )
+        
+        print(f"✅ Limpeza concluída. Dados anteriores a {cutoff_date} removidos.")
+        
+    except Exception as e:
+        print(f"❌ Erro na limpeza: {e}")
+        raise
+
+def optimize_table_performance(spark: SparkSession, table_name: str) -> None:
+    """
+    Otimiza performance da tabela Delta.
+    
+    Args:
+        spark: Sessão do Spark
+        table_name: Nome da tabela
+    """
+    try:
+        print(f"⚡ OTIMIZANDO PERFORMANCE DA TABELA: {table_name}")
+        
+        # Executar OPTIMIZE
+        spark.sql(f"OPTIMIZE {table_name}")
+        
+        # Executar VACUUM para remover arquivos antigos
+        spark.sql(f"VACUUM {table_name} RETAIN 168 HOURS")
+        
+        print(f"✅ Otimização concluída!")
+        
+    except Exception as e:
+        print(f"❌ Erro na otimização: {e}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 📋 Resumo das Funções Incrementais
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 🔄 **Funções Principais para Processamento Incremental:**
+# MAGIC
+# MAGIC 1. **`get_monthly_batches()`** - Divide o período em lotes de meses
+# MAGIC 2. **`check_existing_data_for_period()`** - Verifica se dados já existem
+# MAGIC 3. **`delete_existing_data_for_period()`** - Remove dados existentes para atualização
+# MAGIC 4. **`process_monthly_batch()`** - Processa um lote específico
+# MAGIC 5. **`process_incremental_from_start_date()`** - Função principal para execução incremental
+# MAGIC
+# MAGIC ### 🎯 **Como Usar:**
+# MAGIC
+# MAGIC ```python
+# MAGIC # Processar incrementalmente desde a data de início
+# MAGIC process_incremental_from_start_date(
+# MAGIC     spark, 
+# MAGIC     data_inicio,  # Função já existente no script
+# MAGIC     batch_size_months=3  # Recomendado: 3-4 meses
+# MAGIC )
+# MAGIC ```
+# MAGIC
+# MAGIC ### ⚡ **Vantagens da Abordagem:**
+# MAGIC
+# MAGIC - **Performance**: Processa múltiplos meses de uma vez, reduzindo overhead
+# MAGIC - **Controle**: Verifica dados existentes antes de processar
+# MAGIC - **Atualização**: Remove dados antigos e insere novos para o período
+# MAGIC - **Escalabilidade**: Pode ser executado em paralelo para diferentes períodos
+# MAGIC - **Monitoramento**: Funções de controle de qualidade incluídas
+# MAGIC
+# MAGIC ### 🚀 **Recomendação de Execução:**
+# MAGIC
+# MAGIC **Lotes de 3-4 meses** oferecem o melhor equilíbrio entre:
+# MAGIC - Performance de joins
+# MAGIC - Gerenciamento de memória
+# MAGIC - Tempo de processamento
+# MAGIC - Facilidade de debug em caso de erro
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## ✅ Processo Concluído
+# MAGIC
+# MAGIC A tabela de matriz de merecimento foi criada e salva com sucesso!
+# MAGIC
+# MAGIC **Tabela de destino**: `databox.bcg_comum.supply_base_merecimento_diario_v2`
+# MAGIC
+# MAGIC **Conteúdo**:
+# MAGIC - Dados de estoque das lojas
+# MAGIC - Histórico de vendas com médias móveis de 90 dias
+# MAGIC - Análise de ruptura e receita perdida
+# MAGIC - Mapeamento completo de abastecimento (CDs e lojas)
+# MAGIC - Características geográficas e operacionais
+# MAGIC
+# MAGIC **🆕 Funcionalidades Incrementais Adicionadas:**
+# MAGIC - Processamento em lotes de meses para otimização
+# MAGIC - Verificação e atualização criteriosa de dados
+# MAGIC - Monitoramento de qualidade e performance
+# MAGIC - Funções de manutenção e limpeza
