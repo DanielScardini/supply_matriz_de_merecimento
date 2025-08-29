@@ -166,7 +166,6 @@ df_agregado = (
     )
     .agg(
         F.sum("QtMercadoria").alias("qt_vendas"),
-        #F.sum("Receita").alias("receita_total")
     )
     .orderBy("year_month", "gemeos")
 )
@@ -216,10 +215,9 @@ def criar_grafico_elasticidade_porte(
     # Agrupa por year_month e porte de loja
     df_agrupado = (
         df_gemeo
-        .groupby(['year_month', 'DsPorteLoja'])
+        .groupby(['year_month', 'NmPorteLoja'])
         .agg({
             'qt_vendas': 'sum',
-            'receita_total': 'sum'
         })
         .reset_index()
     )
@@ -227,7 +225,7 @@ def criar_grafico_elasticidade_porte(
     # Pivota para formato de barras empilhadas
     df_pivot = df_agrupado.pivot(
         index='year_month', 
-        columns='DsPorteLoja', 
+        columns='NmPorteLoja', 
         values='qt_vendas'
     ).fillna(0)
     
@@ -378,16 +376,15 @@ def criar_grafico_elasticidade_porte_regiao(
     # Agrupa por year_month, porte de loja e região geográfica
     df_agrupado = (
         df_gemeo
-        .groupby(['year_month', 'DsPorteLoja', 'NmRegiaoGeografica'])
+        .groupby(['year_month', 'NmPorteLoja', 'NmRegiaoGeografica'])
         .agg({
-            'qt_vendas': 'sum',
-            'receita_total': 'sum'
+            'qt_vendas': 'sum'
         })
         .reset_index()
     )
     
     # Cria combinação de porte + região para o gráfico
-    df_agrupado['porte_regiao'] = df_agrupado['DsPorteLoja'] + ' - ' + df_agrupado['NmRegiaoGeografica']
+    df_agrupado['porte_regiao'] = df_agrupado['NmPorteLoja'] + ' - ' + df_agrupado['NmRegiaoGeografica']
     
     # Pivota para formato de barras empilhadas
     df_pivot = df_agrupado.pivot(
@@ -592,7 +589,7 @@ for diretoria in top_gemeos_pandas['NmAgrupamentoDiretoriaSetor'].unique():
 print(f"📊 Dados preparados para gráficos: {len(df_graficos):,} registros")
 print(f"   • Período: {df_graficos['year_month'].min().strftime('%b/%Y')} a {df_graficos['year_month'].max().strftime('%b/%Y')}")
 print(f"   • Gêmeos únicos: {df_graficos['gemeos'].nunique()}")
-print(f"   • Portes de loja: {df_graficos['DsPorteLoja'].nunique()}")
+print(f"   • Portes de loja: {df_graficos['NmPorteLoja'].nunique()}")
 print(f"   • Regiões geográficas: {df_graficos['NmRegiaoGeografica'].nunique()}")
 
 # COMMAND ----------
@@ -611,7 +608,6 @@ df_regiao = (
     .groupby(['gemeos', 'NmRegiaoGeografica'])
     .agg({
         'qt_vendas': 'sum',
-        'receita_total': 'sum'
     })
     .reset_index()
 )
