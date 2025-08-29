@@ -40,17 +40,20 @@ spark = SparkSession.builder.appName("analise_elasticidade_demanda").getOrCreate
 
 # Carrega dados base de merecimento com todas as diretorias
 df_base_merecimento = (
-    spark.table('databox.bcg_comum.supply_base_merecimento_diario_v2')
+    spark.table('databox.bcg_comum.supply_base_merecimento_diario')
     .filter(F.col("NmAgrupamentoDiretoriaSetor").isin(
         "DIRETORIA TELEFONIA CELULAR",
         "DIRETORIA DE TELAS",
-        "DIRETORIA DE LINHA BRANCA",
-        "DIRETORIA LINHA LEVE",
-        "DIRETORIA INFO/PERIFERICOS"
+        # "DIRETORIA DE LINHA BRANCA",
+        # "DIRETORIA LINHA LEVE",
+        # "DIRETORIA INFO/PERIFERICOS"
     ))
+    .filter(F.col("year_month").isNotNull())
 )
 
 print(f"✅ Dados base carregados: {df_base_merecimento.count():,} registros")
+
+df_base_merecimento.display()
 
 # COMMAND ----------
 
@@ -60,31 +63,25 @@ print(f"✅ Dados base carregados: {df_base_merecimento.count():,} registros")
 # COMMAND ----------
 
 # Carrega mapeamento de gêmeos
-try:
-    de_para_gemeos = (
-        pd.read_csv('/dbfs/dados_analise/ITENS_GEMEOS 2.csv',
-                    delimiter=";",
-                    encoding='iso-8859-1')
-        .drop_duplicates()
-    )
-    
-    # Normalização de nomes de colunas
-    de_para_gemeos.columns = (
-        de_para_gemeos.columns
-        .str.strip()
-        .str.lower()
-        .str.replace(r"[^\w]+", "_", regex=True)
-        .str.strip("_")
-    )
-    
-    print("✅ Mapeamento de gêmeos carregado")
-except FileNotFoundError:
-    print("⚠️  Arquivo de mapeamento de gêmeos não encontrado - criando dados de exemplo")
-    # Cria dados de exemplo para demonstração
-    de_para_gemeos = pd.DataFrame({
-        'sku_loja': ['SKU001', 'SKU002', 'SKU003', 'SKU004', 'SKU005'],
-        'gemeos': ['TELAS 43" PREMIUM', 'TELAS 55" SMART', 'CELULAR FLAGSHIP', 'GELADEIRA PREMIUM', 'NOTEBOOK GAMER']
-    })
+
+de_para_gemeos = (
+    pd.read_csv('../dados_analise/ITENS_GEMEOS 2.csv',
+                delimiter=";",
+                encoding='iso-8859-1')
+    .drop_duplicates()
+)
+
+# Normalização de nomes de colunas
+de_para_gemeos.columns = (
+    de_para_gemeos.columns
+    .str.strip()
+    .str.lower()
+    .str.replace(r"[^\w]+", "_", regex=True)
+    .str.strip("_")
+)
+
+print("✅ Mapeamento de gêmeos carregado")
+
 
 # Converte para DataFrame do Spark
 df_gemeos = spark.createDataFrame(de_para_gemeos.rename(columns={"sku_loja": "CdSku"}))
@@ -108,7 +105,9 @@ df_completo = (
         how="left"
     )
     .filter(F.col("gemeos").isNotNull())
-    .filter(~F.col("gemeos").contains("Chip"))  # Filtra chips conforme exemplo
+    .filter(~F.col("gemeos").contains("Chip"))  # Filtra chips conforme exemplo'
+    .filter(F.col("gemeos") != "-")  # Filtra chips conforme exemplo'
+
 )
 
 print(f"✅ Dados completos preparados: {df_completo.count():,} registros")
@@ -162,12 +161,12 @@ df_agregado = (
         "year_month",
         "gemeos",
         "NmAgrupamentoDiretoriaSetor",
-        "DsPorteLoja",
+        "NmPorteLoja",
         "NmRegiaoGeografica"
     )
     .agg(
         F.sum("QtMercadoria").alias("qt_vendas"),
-        F.sum("Receita").alias("receita_total")
+        #F.sum("Receita").alias("receita_total")
     )
     .orderBy("year_month", "gemeos")
 )
@@ -179,7 +178,7 @@ df_graficos = df_agregado.toPandas()
 df_graficos['year_month'] = pd.to_datetime(df_graficos['year_month'].astype(str), format='%Y%m')
 
 # Preenche valores nulos
-df_graficos['DsPorteLoja'] = df_graficos['DsPorteLoja'].fillna('SEM PORTE')
+df_graficos['NmPorteLoja'] = df_graficos['NmPorteLoja'].fillna('SEM PORTE')
 df_graficos['NmRegiaoGeografica'] = df_graficos['NmRegiaoGeografica'].fillna('SEM REGIÃO')
 
 print(f"✅ Dados preparados para gráficos: {len(df_graficos):,} registros")
@@ -524,7 +523,7 @@ def criar_grafico_elasticidade_porte_regiao(
 
 # MAGIC %md
 # MAGIC ## 8. Criação dos Gráficos para Cada Top Gêmeo
-
+# MAGIC
 # MAGIC %md
 # MAGIC ### Execução da Análise Completa - Duas Versões
 
@@ -547,7 +546,7 @@ for _, row in top_5_gemeos.toPandas().iterrows():
     fig_porte = criar_grafico_elasticidade_porte(df_graficos, gemeo, diretoria)
     
     if fig_porte.data:
-        nome_arquivo_porte = f"elasticidade_porte_{gemeo.replace(' ', '_').replace('"', '')}_{diretoria.replace(' ', '_')}.html"
+        nome_arquivo_porte = f"elasticidade_porte_{gemeo.replace(' ', '_').replace("'", '')}_{diretoria.replace(' ', '_')}.html"
         fig_porte.write_html(f"/dbfs/outputs/{nome_arquivo_porte}")
         print(f"    ✅ Gráfico APENAS porte salvo: {nome_arquivo_porte}")
         display(fig_porte)

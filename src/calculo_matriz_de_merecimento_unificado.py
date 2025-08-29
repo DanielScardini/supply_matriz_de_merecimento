@@ -36,6 +36,36 @@
 
 # COMMAND ----------
 
+df_matriz_geral = (
+    spark.createDataFrame(
+        pd.read_csv(
+            "/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/dados_analise/(DRP)_MATRIZ_20250829135142.csv",
+            delimiter=";",
+        )
+    )
+    .select(
+        F.col("CODIGO").cast("int").alias("CdSku"),
+
+        # Extrai só o que vem após "_" e faz cast para int
+        F.regexp_replace(F.col("CODIGO_FILIAL"), ".*_", "")
+         .cast("int")
+         .alias("CdFilial"),
+
+        # Troca vírgula por ponto e converte para float
+        F.regexp_replace(F.col("PERCENTUAL_MATRIZ"), ",", ".")
+         .cast("float")
+         .alias("PercMatrizNeogrid"),
+
+        F.col("CLUSTER").cast("string").alias("is_Cluster"),
+    )
+    .dropDuplicates()
+)
+
+
+df_matriz_geral.display()
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 1. Imports e Configurações Iniciais
 
@@ -2301,5 +2331,3 @@ def exemplo_weighted_smape_com_salvamento(categoria: str = "DIRETORIA TELEFONIA 
 
 # Executa o exemplo completo (descomente para executar)
 # df_weighted_smape_exemplo = exemplo_weighted_smape_com_salvamento("DIRETORIA TELEFONIA CELULAR")
-
-# COMMAND ----------
