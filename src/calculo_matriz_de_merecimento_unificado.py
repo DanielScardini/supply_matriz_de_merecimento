@@ -25,7 +25,7 @@
 # MAGIC **Múltiplas Médias Móveis**:
 # MAGIC - **Médias Móveis Normais**: 90, 180, 270, 360 dias
 # MAGIC - **Médias Móveis Aparadas**: 90, 180, 270, 360 dias (10% de corte)
-# MAGIC 
+# MAGIC
 # MAGIC **Conceito de "Factual" (Demanda Real)**:
 # MAGIC - **Proporção Factual**: Representa a demanda real observada (robusta a ruptura) 
 # MAGIC   como proporção do total do grupo de necessidade
@@ -226,7 +226,7 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-01-01") -> Data
     )
     
     # Cache para otimização
-    df_base.cache()
+    df_base.limit(1000).cache()
     
     print(f"✅ Dados carregados para '{categoria}':")
     print(f"  • Total de registros: {df_base.count():,}")
@@ -1953,7 +1953,7 @@ df_telas_completo = executar_calculo_matriz_merecimento(
 )
 
 # Exibir resultado (limitado para agilizar)
-df_telas_completo.limit(1000).display()
+df_telas_completo.display()
 
 # COMMAND ----------
 
