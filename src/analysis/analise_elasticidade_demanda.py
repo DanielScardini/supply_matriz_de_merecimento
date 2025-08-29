@@ -546,7 +546,7 @@ for _, row in top_5_gemeos.toPandas().iterrows():
     fig_porte = criar_grafico_elasticidade_porte(df_graficos, gemeo, diretoria)
     
     if fig_porte.data:
-        nome_arquivo_porte = f"elasticidade_porte_{gemeo.replace(' ', '_').replace("'", '')}_{diretoria.replace(' ', '_')}.html"
+        nome_arquivo_porte = f"elasticidade_porte_{gemeo.replace(' ', '_').replace('\"', '')}_{diretoria.replace(' ', '_')}.html"
         fig_porte.write_html(f"/dbfs/outputs/{nome_arquivo_porte}")
         print(f"    ✅ Gráfico APENAS porte salvo: {nome_arquivo_porte}")
         display(fig_porte)
@@ -558,7 +558,7 @@ for _, row in top_5_gemeos.toPandas().iterrows():
     fig_porte_regiao = criar_grafico_elasticidade_porte_regiao(df_graficos, gemeo, diretoria)
     
     if fig_porte_regiao.data:
-        nome_arquivo_porte_regiao = f"elasticidade_porte_regiao_{gemeo.replace(' ', '_').replace('"', '')}_{diretoria.replace(' ', '_')}.html"
+        nome_arquivo_porte_regiao = f"elasticidade_porte_regiao_{gemeo.replace(' ', '_').replace('\"', '')}_{diretoria.replace(' ', '_')}.html"
         fig_porte_regiao.write_html(f"/dbfs/outputs/{nome_arquivo_porte_regiao}")
         print(f"    ✅ Gráfico porte + região salvo: {nome_arquivo_porte_regiao}")
         display(fig_porte_regiao)
