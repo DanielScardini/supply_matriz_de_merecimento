@@ -17,9 +17,13 @@ Criei um **sistema completo de análise de elasticidade de demanda** para produt
 - **Quebra 2**: Região geográfica (`NmRegiaoGeografica`)
 - **Métricas**: Quantidade vendida e receita total
 
-### 3. **Visualizações Profissionais**
-- **Gráfico 1**: Vendas mensais (k unidades) por porte de loja
-- **Gráfico 2**: Proporção % de vendas por porte de loja
+### 3. **Visualizações Profissionais - Duas Versões**
+- **Versão 1 - APENAS Porte de Loja**:
+  - Gráfico 1: Vendas mensais (k unidades) por porte de loja
+  - Gráfico 2: Proporção % de vendas por porte de loja
+- **Versão 2 - Porte + Região Geográfica**:
+  - Gráfico 1: Vendas mensais (k unidades) por porte + região
+  - Gráfico 2: Proporção % de vendas por porte + região
 - **Formato**: Barras empilhadas com gradiente de cores azuis
 - **Estilo**: Seguindo padrão da imagem de referência
 
@@ -43,8 +47,9 @@ src/analysis/
 1. **Carregamento de dados** - Acesso às tabelas Spark
 2. **Identificação de top gêmeos** - Ranking por diretoria
 3. **Preparação de dados** - Agregação para gráficos
-4. **Criação de gráficos** - Plotagem com plotly
-5. **Execução completa** - Loop para todos os gêmeos
+4. **Criação de gráficos APENAS por porte** - Plotagem com plotly
+5. **Criação de gráficos por porte + região** - Plotagem com plotly
+6. **Execução completa** - Loop para todos os gêmeos (2 versões cada)
 
 ## 🎨 Características dos Gráficos
 
@@ -161,9 +166,12 @@ src/analysis/
 
 A implementação está **100% funcional e otimizada para Databricks**, criando exatamente os tipos de gráficos solicitados:
 - **Barras empilhadas** agrupando por year_month
-- **Quebra por porte de loja** e região geográfica
+- **Duas versões de quebra**:
+  - **Versão 1**: APENAS por porte de loja
+  - **Versão 2**: Por porte de loja + região geográfica
 - **Top 5 gêmeos** de cada diretoria
 - **Visualizações profissionais** para apresentações
+- **Total de gráficos**: 2 × número de gêmeos analisados
 
 ### **Características Técnicas**
 - **Notebook nativo** do Databricks

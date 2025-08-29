@@ -191,13 +191,13 @@ print(f"✅ Dados preparados para gráficos: {len(df_graficos):,} registros")
 
 # COMMAND ----------
 
-def criar_grafico_elasticidade(
+def criar_grafico_elasticidade_porte(
     df: pd.DataFrame, 
     gemeo: str, 
     diretoria: str
 ) -> go.Figure:
     """
-    Cria gráfico de elasticidade seguindo o molde da imagem de referência.
+    Cria gráfico de elasticidade APENAS por porte de loja.
     
     Args:
         df: DataFrame pandas com dados preparados
@@ -205,7 +205,7 @@ def criar_grafico_elasticidade(
         diretoria: Nome da diretoria
         
     Returns:
-        Figura plotly com dois gráficos de barras empilhadas
+        Figura plotly com dois gráficos de barras empilhadas por porte
     """
     # Filtra dados para o gêmeo específico
     df_gemeo = df[df['gemeos'] == gemeo].copy()
@@ -308,7 +308,175 @@ def criar_grafico_elasticidade(
     # Configurações do layout
     fig.update_layout(
         title={
-            'text': f"Eventos e apostas | Dinâmica de vendas se altera significativamente em eventos e apostas, impactando a proporção de merecimento<br><sub>{gemeo} - {diretoria}</sub>",
+            'text': f"Eventos e apostas | Dinâmica de vendas se altera significativamente em eventos e apostas, impactando a proporção de merecimento<br><sub>{gemeo} - {diretoria} - APENAS PORTE DE LOJA</sub>",
+            'x': 0.5,
+            'xanchor': 'center',
+            'font': {'size': 16}
+        },
+        barmode='stack',
+        height=600,
+        width=1200,
+        plot_bgcolor='#F8F8FF',  # Off-white conforme regras
+        paper_bgcolor='white',
+        font=dict(family="Arial, sans-serif"),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
+    )
+    
+    # Configurações dos eixos
+    fig.update_xaxes(
+        title_text="Mês",
+        tickangle=45,
+        row=1, col=1
+    )
+    fig.update_xaxes(
+        title_text="Mês",
+        tickangle=45,
+        row=1, col=2
+    )
+    
+    fig.update_yaxes(
+        title_text="Vendas mensais (k unid.)",
+        row=1, col=1
+    )
+    
+    fig.update_yaxes(
+        title_text="Proporção % de vendas",
+        row=1, col=2
+    )
+    
+    return fig
+
+
+def criar_grafico_elasticidade_porte_regiao(
+    df: pd.DataFrame, 
+    gemeo: str, 
+    diretoria: str
+) -> go.Figure:
+    """
+    Cria gráfico de elasticidade com quebra por porte de loja E região geográfica.
+    
+    Args:
+        df: DataFrame pandas com dados preparados
+        gemeo: Nome do gêmeo para filtrar
+        diretoria: Nome da diretoria
+        
+    Returns:
+        Figura plotly com dois gráficos de barras empilhadas por porte + região
+    """
+    # Filtra dados para o gêmeo específico
+    df_gemeo = df[df['gemeos'] == gemeo].copy()
+    
+    if df_gemeo.empty:
+        print(f"⚠️  Nenhum dado encontrado para o gêmeo: {gemeo}")
+        return go.Figure()
+    
+    # Agrupa por year_month, porte de loja e região geográfica
+    df_agrupado = (
+        df_gemeo
+        .groupby(['year_month', 'DsPorteLoja', 'NmRegiaoGeografica'])
+        .agg({
+            'qt_vendas': 'sum',
+            'receita_total': 'sum'
+        })
+        .reset_index()
+    )
+    
+    # Cria combinação de porte + região para o gráfico
+    df_agrupado['porte_regiao'] = df_agrupado['DsPorteLoja'] + ' - ' + df_agrupado['NmRegiaoGeografica']
+    
+    # Pivota para formato de barras empilhadas
+    df_pivot = df_agrupado.pivot(
+        index='year_month', 
+        columns='porte_regiao', 
+        values='qt_vendas'
+    ).fillna(0)
+    
+    # Calcula proporções percentuais
+    df_prop = df_pivot.div(df_pivot.sum(axis=1), axis=0) * 100
+    
+    # Cria subplots
+    fig = make_subplots(
+        rows=1, cols=2,
+        subplot_titles=[
+            f"Vendas mensais (k unid.) de {gemeo} por porte de loja + região",
+            f"Proporção % de vendas de {gemeo} por porte de loja + região"
+        ],
+        specs=[[{"type": "bar"}, {"type": "bar"}]]
+    )
+    
+    # Cores para porte de loja (gradiente de azul) - repetidas para cada região
+    cores_base = {
+        'Porte 6': '#1f4e79',  # Mais escuro
+        'Porte 5': '#2d5a8b',
+        'Porte 4': '#3b669d',
+        'Porte 3': '#4972af',
+        'Porte 2': '#577ec1',
+        'Porte 1': '#658ad3',  # Mais claro
+        'SEM PORTE': '#cccccc'
+    }
+    
+    # Gráfico 1: Vendas mensais em k unidades
+    for col in df_pivot.columns:
+        # Extrai o porte da combinação porte-região
+        porte = col.split(' - ')[0]
+        if porte in cores_base:
+            fig.add_trace(
+                go.Bar(
+                    x=df_pivot.index.strftime('%b/%y'),
+                    y=df_pivot[col] / 1000,  # Converte para k unidades
+                    name=col,
+                    marker_color=cores_base[porte],
+                    showlegend=True,
+                    hovertemplate=f'<b>{col}</b><br>' +
+                                'Mês: %{x}<br>' +
+                                'Vendas: %{y:.1f}k unid.<br>' +
+                                '<extra></extra>'
+                ),
+                row=1, col=1
+            )
+    
+    # Gráfico 2: Proporção percentual
+    for col in df_prop.columns:
+        porte = col.split(' - ')[0]
+        if porte in cores_base:
+            fig.add_trace(
+                go.Bar(
+                    x=df_prop.index.strftime('%b/%y'),
+                    y=df_prop[col],
+                    name=col,
+                    marker_color=cores_base[porte],
+                    showlegend=False,
+                    hovertemplate=f'<b>{col}</b><br>' +
+                                'Mês: %{x}<br>' +
+                                'Proporção: %{y:.1f}%<br>' +
+                                '<extra></extra>'
+                ),
+                row=1, col=2
+            )
+    
+    # Adiciona valores totais no topo das barras (gráfico 1)
+    totais_mensais = df_pivot.sum(axis=1) / 1000
+    for i, total in enumerate(totais_mensais):
+        fig.add_annotation(
+            x=df_pivot.index[i].strftime('%b/%y'),
+            y=total + 0.5,
+            text=f"{total:.1f}k",
+            showarrow=False,
+            font=dict(size=10, color='black'),
+            xref='x',
+            yref='y'
+        )
+    
+    # Configurações do layout
+    fig.update_layout(
+        title={
+            'text': f"Eventos e apostas | Dinâmica de vendas se altera significativamente em eventos e apostas, impactando a proporção de merecimento<br><sub>{gemeo} - {diretoria} - PORTE DE LOJA + REGIÃO GEOGRÁFICA</sub>",
             'x': 0.5,
             'xanchor': 'center',
             'font': {'size': 16}
@@ -358,34 +526,48 @@ def criar_grafico_elasticidade(
 # MAGIC ## 8. Criação dos Gráficos para Cada Top Gêmeo
 
 # MAGIC %md
-# MAGIC ### Execução da Análise Completa
+# MAGIC ### Execução da Análise Completa - Duas Versões
 
 # COMMAND ----------
 
 print("🚀 Iniciando criação dos gráficos de elasticidade...")
+print("📊 Serão criadas duas versões para cada gêmeo:")
+print("   1. APENAS por porte de loja")
+print("   2. Por porte de loja + região geográfica")
 
 # Cria gráficos para cada top gêmeo
 for _, row in top_5_gemeos.toPandas().iterrows():
     diretoria = row['NmAgrupamentoDiretoriaSetor']
     gemeo = row['gemeos']
     
-    print(f"  • Criando gráfico para: {gemeo} ({diretoria})")
+    print(f"\n🎯 Processando: {gemeo} ({diretoria})")
     
-    # Cria gráfico
-    fig = criar_grafico_elasticidade(df_graficos, gemeo, diretoria)
+    # VERSÃO 1: Apenas por porte de loja
+    print(f"  📈 Criando versão APENAS por porte de loja...")
+    fig_porte = criar_grafico_elasticidade_porte(df_graficos, gemeo, diretoria)
     
-    if fig.data:  # Verifica se o gráfico tem dados
-        # Salva gráfico no DBFS
-        nome_arquivo = f"elasticidade_{gemeo.replace(' ', '_').replace('"', '')}_{diretoria.replace(' ', '_')}.html"
-        fig.write_html(f"/dbfs/outputs/{nome_arquivo}")
-        print(f"    ✅ Gráfico salvo: {nome_arquivo}")
-        
-        # Exibe gráfico
-        display(fig)
+    if fig_porte.data:
+        nome_arquivo_porte = f"elasticidade_porte_{gemeo.replace(' ', '_').replace('"', '')}_{diretoria.replace(' ', '_')}.html"
+        fig_porte.write_html(f"/dbfs/outputs/{nome_arquivo_porte}")
+        print(f"    ✅ Gráfico APENAS porte salvo: {nome_arquivo_porte}")
+        display(fig_porte)
     else:
-        print(f"    ⚠️  Nenhum dado para criar gráfico")
+        print(f"    ⚠️  Nenhum dado para gráfico APENAS porte")
+    
+    # VERSÃO 2: Por porte de loja + região geográfica
+    print(f"  🌍 Criando versão por porte + região geográfica...")
+    fig_porte_regiao = criar_grafico_elasticidade_porte_regiao(df_graficos, gemeo, diretoria)
+    
+    if fig_porte_regiao.data:
+        nome_arquivo_porte_regiao = f"elasticidade_porte_regiao_{gemeo.replace(' ', '_').replace('"', '')}_{diretoria.replace(' ', '_')}.html"
+        fig_porte_regiao.write_html(f"/dbfs/outputs/{nome_arquivo_porte_regiao}")
+        print(f"    ✅ Gráfico porte + região salvo: {nome_arquivo_porte_regiao}")
+        display(fig_porte_regiao)
+    else:
+        print(f"    ⚠️  Nenhum dado para gráfico porte + região")
 
 print("\n✅ Análise de elasticidade concluída!")
+print(f"📁 Total de gráficos criados: {len(top_5_gemeos.toPandas()) * 2} (2 versões por gêmeo)")
 
 # COMMAND ----------
 

@@ -17,9 +17,13 @@ Este notebook implementa **análise de elasticidade de demanda** para produtos g
 - **Quebra 2**: Região geográfica (`NmRegiaoGeografica`)
 - **Métricas**: Quantidade vendida e receita total
 
-### 3. **Visualizações Profissionais**
-- **Gráfico 1**: Vendas mensais (k unidades) por porte de loja
-- **Gráfico 2**: Proporção % de vendas por porte de loja
+### 3. **Visualizações Profissionais - Duas Versões**
+- **Versão 1 - APENAS Porte de Loja**:
+  - Gráfico 1: Vendas mensais (k unidades) por porte de loja
+  - Gráfico 2: Proporção % de vendas por porte de loja
+- **Versão 2 - Porte + Região Geográfica**:
+  - Gráfico 1: Vendas mensais (k unidades) por porte + região
+  - Gráfico 2: Proporção % de vendas por porte + região
 - **Formato**: Barras empilhadas com gradiente de cores azuis
 - **Estilo**: Seguindo padrão da imagem de referência
 
@@ -32,9 +36,10 @@ Este notebook implementa **análise de elasticidade de demanda** para produtos g
 4. **Join com Região** - Informações geográficas das lojas
 5. **Top 5 Gêmeos** - Identificação por diretoria
 6. **Preparação de Dados** - Agregação para gráficos
-7. **Criação de Gráficos** - Função de plotagem
-8. **Execução Completa** - Loop para todos os gêmeos
-9. **Análises Adicionais** - Resumos e estatísticas
+7. **Criação de Gráficos APENAS por Porte** - Função de plotagem
+8. **Criação de Gráficos por Porte + Região** - Função de plotagem
+9. **Execução Completa** - Loop para todos os gêmeos (2 versões cada)
+10. **Análises Adicionais** - Resumos e estatísticas
 
 ## 🔧 Como Executar
 
@@ -69,6 +74,26 @@ Este notebook implementa **análise de elasticidade de demanda** para produtos g
 - `pandas` - Manipulação de dados
 - `plotly` - Criação de gráficos
 - `datetime` - Manipulação de datas
+
+## 📁 Saídas Geradas
+
+### **1. Gráficos Interativos - Duas Versões**
+- **Formato**: HTML (plotly)
+- **Localização**: `/dbfs/outputs/`
+- **Nomenclatura**:
+  - **Versão 1**: `elasticidade_porte_{GEMEO}_{DIRETORIA}.html` (APENAS porte)
+  - **Versão 2**: `elasticidade_porte_regiao_{GEMEO}_{DIRETORIA}.html` (porte + região)
+- **Total**: 2 gráficos por gêmeo (portes + portes+região)
+
+### **2. Dados Processados**
+- **DataFrame pandas**: Preparado para análises adicionais
+- **Agregações**: Por mês, gêmeo, porte e região
+- **Métricas**: Vendas e receita
+
+### **3. Relatórios Console**
+- **Progresso**: Logs de execução detalhados
+- **Resumos**: Top gêmeos por diretoria
+- **Estatísticas**: Contadores e métricas por versão
 
 ## 🎨 Características dos Gráficos
 
@@ -157,10 +182,13 @@ Este notebook implementa **análise de elasticidade de demanda** para produtos g
 ## 🎉 Resultado Esperado
 
 Ao final da execução, você terá:
-- **Gráficos profissionais** para cada top gêmeo
+- **Duas versões de gráficos** para cada top gêmeo:
+  - **Versão 1**: APENAS por porte de loja
+  - **Versão 2**: Por porte de loja + região geográfica
 - **Análise completa** por diretoria
 - **Insights de elasticidade** de demanda
 - **Visualizações prontas** para apresentações
+- **Total de gráficos**: 2 × número de gêmeos analisados
 
 ## 📞 Suporte
 
