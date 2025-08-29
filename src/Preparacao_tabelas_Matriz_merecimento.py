@@ -667,11 +667,11 @@ def save_merecimento_table(df: DataFrame, table_name: str) -> None:
         .saveAsTable(table_name)
     )
 
-# Salvar tabela final
-save_merecimento_table(
-    df_merecimento_base_cd_loja, 
-    "databox.bcg_comum.supply_base_merecimento_diario_v2"
-)
+# # Salvar tabela final
+# save_merecimento_table(
+#     df_merecimento_base_cd_loja, 
+#     "databox.bcg_comum.supply_base_merecimento_diario_v2"
+# )
 
 # COMMAND ----------
 
@@ -1121,7 +1121,7 @@ def monitor_memory_usage(spark: SparkSession) -> None:
 
 # Executar processamento incremental
 # Descomente a linha abaixo para executar
-# process_incremental_from_start_date(spark, data_inicio, batch_size_months=3)
+process_incremental_from_start_date(spark, data_inicio, batch_size_months=3)
 
 # COMMAND ----------
 
@@ -1131,7 +1131,7 @@ def monitor_memory_usage(spark: SparkSession) -> None:
 # COMMAND ----------
 
 # Monitorar qualidade da tabela (descomente para usar)
-# monitor_table_quality(spark, "databox.bcg_comum.supply_base_merecimento_diario_v2")
+#monitor_table_quality(spark, "databox.bcg_comum.supply_base_merecimento_diario_v2")
 
 # Monitorar uso de memória (descomente para usar)
 # monitor_memory_usage(spark)
