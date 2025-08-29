@@ -997,6 +997,7 @@ def process_incremental_from_start_date(
 ) -> None:
     """
     Processa dados incrementalmente desde a data de início até hoje com gestão de memória.
+    SEMPRE sobrescreve dados existentes para garantir atualização completa.
     
     Args:
         spark: Sessão do Spark
@@ -1025,12 +1026,8 @@ def process_incremental_from_start_date(
             print(f"📅 Período do lote: {batch_start.strftime('%Y-%m-%d')} a {batch_end.strftime('%Y-%m-%d')}")
             
             try:
-                # Verificar se já existem dados para este período
-                if check_existing_data_for_period(spark, table_name, batch_start, batch_end):
-                    print(f"⏭️ Dados já existem para este período. Pulando...")
-                    continue
-                
-                # Deletar dados existentes para o período (se houver)
+                # Sempre deletar dados existentes para o período e sobrescrever
+                print(f"🔄 Processando período: {batch_start.strftime('%Y-%m-%d')} a {batch_end.strftime('%Y-%m-%d')}")
                 delete_existing_data_for_period(spark, table_name, batch_start, batch_end)
                 
                 # Processar lote
@@ -1111,6 +1108,28 @@ def monitor_memory_usage(spark: SparkSession) -> None:
             
     except Exception as e:
         print(f"❌ Erro no monitoramento de memória: {e}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 🔄 Comportamento de Processamento
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### **⚠️ IMPORTANTE: Comportamento de Sobrescrita**
+# MAGIC
+# MAGIC O processamento incremental **SEMPRE sobrescreve** dados existentes para garantir:
+# MAGIC - **Atualização completa** dos dados
+# MAGIC - **Consistência** entre lotes processados
+# MAGIC - **Sem duplicação** ou dados desatualizados
+# MAGIC
+# MAGIC **Processo para cada lote:**
+# MAGIC 1. **Deleta** dados existentes do período
+# MAGIC 2. **Processa** novos dados do período
+# MAGIC 3. **Salva** dados atualizados
+# MAGIC
+# MAGIC **Não há verificação de dados existentes** - sempre processa e sobrescreve!
 
 # COMMAND ----------
 
