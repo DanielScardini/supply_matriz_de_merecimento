@@ -29,7 +29,7 @@ def carregar_mapeamentos_produtos(categoria: str) -> tuple:
     
     # Mapeamento de modelos e tecnologia
     de_para_modelos_tecnologia = (
-        pd.read_csv('dados_analise/MODELOS_AJUSTE (1).csv', 
+        pd.read_csv('../dados_analise/MODELOS_AJUSTE (1).csv', 
                     delimiter=';')
         .drop_duplicates()
     )
@@ -46,7 +46,7 @@ def carregar_mapeamentos_produtos(categoria: str) -> tuple:
     # Mapeamento de produtos similares (gêmeos) - apenas para categorias que usam
     try:
         de_para_gemeos_tecnologia = (
-            pd.read_csv('dados_analise/ITENS_GEMEOS 2.csv',
+            pd.read_csv('../dados_analise/ITENS_GEMEOS 2.csv',
                         delimiter=";",
                         encoding='iso-8859-1')
             .drop_duplicates()
@@ -68,57 +68,15 @@ def carregar_mapeamentos_produtos(categoria: str) -> tuple:
     
     print("✅ Mapeamentos de produtos carregados")
     return (
-        de_para_modelos_tecnologia.rename(columns={"codigo_item": "CdSku"})[['CdSku', 'modelos']], 
-        de_para_gemeos_tecnologia.rename(columns={"sku_loja": "CdSku"})[['CdSku', 'gemeos']]
-    )
-
-
-# COMMAND ----------
-
-def aplicar_mapeamentos_produtos(df: DataFrame, categoria: str, 
-                                de_para_modelos: pd.DataFrame, 
-                                de_para_gemeos: pd.DataFrame = None) -> DataFrame:
-    """
-    Aplica os mapeamentos de produtos ao DataFrame base.
-    
-    Args:
-        df: DataFrame base
-        categoria: Nome da categoria
-        de_para_modelos: DataFrame com mapeamento de modelos
-        de_para_gemeos: DataFrame com mapeamento de gêmeos (opcional)
-        
-    Returns:
-        DataFrame com os mapeamentos aplicados
-    """
-    print(f"🔄 Aplicando mapeamentos para categoria: {categoria}")
-    
-    # Converte pandas DataFrame para Spark DataFrame
-    df_modelos_spark = spark.createDataFrame(de_para_modelos)
-    
-    # Aplica mapeamento de modelos
-    df_com_modelos = df.join(
-        df_modelos_spark,
-        on="CdSku",
-        how="left"
-    )
-    
-    # Aplica mapeamento de gêmeos apenas se necessário
-    if (de_para_gemeos is not None and 
-        REGRAS_AGRUPAMENTO[categoria]["coluna_grupo_necessidade"] == "gemeos"):
-        
-        df_gemeos_spark = spark.createDataFrame(de_para_gemeos)
-        df_com_mapeamentos = df_com_modelos.join(
-            df_gemeos_spark,
-            on="CdSku",
-            how="left"
+        spark.createDataFrame(
+            de_para_modelos_tecnologia
+            .rename(columns={"codigo_item": "CdSku"})[['CdSku', 'modelos']]
+        ), 
+        spark.createDataFrame(
+            de_para_gemeos_tecnologia.rename(columns={"sku_loja": "CdSku"})[['CdSku', 'gemeos']]
         )
-        print("✅ Mapeamento de gêmeos aplicado")
-    else:
-        df_com_mapeamentos = df_com_modelos
-        print("ℹ️  Mapeamento de gêmeos não aplicado (não necessário para esta categoria)")
-    
-    print("✅ Mapeamentos de produtos aplicados")
-    return df_com_mapeamentos
+    )
+
 
 # COMMAND ----------
 
@@ -156,8 +114,48 @@ def criar_de_para_filial_cd() -> DataFrame:
 # COMMAND ----------
 
 df_tabelao_merecimento = (
-    spark.table('databox.bcg_comum.supply_base_merecimento_diario_v2').limit(10000)
+    spark.table('databox.bcg_comum.supply_base_merecimento_diario')
+    .filter(F.col("NmAgrupamentoDiretoriaSetor").isin(
+        "DIRETORIA TELEFONIA CELULAR",
+        "DIRETORIA DE TELAS"
+    ))
 )
 
-df_tabelao_merecimento.display()
+de_para_modelos_tecnologia, de_para_gemeos_tecnologia = carregar_mapeamentos_produtos("DIRETORIA TELEFONIA CELULAR")
 
+de_para_modelos_gemeos_tecnologia = (
+    de_para_modelos_tecnologia
+    .join(de_para_gemeos_tecnologia, on="CdSku", how="left")
+    .fillna("SEM CLASSIFICACAO")
+)
+
+df_tabelao_merecimento_gemeos = (
+    df_tabelao_merecimento
+    .join(de_para_modelos_gemeos_tecnologia,
+          on="CdSku",
+          how="left")
+    .join(
+        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+        .select("CdFilial", "NmRegiaoGeografica")
+        .distinct(),
+          how="left",
+          on="CdFilial")
+)
+
+
+df_tabelao_merecimento_gemeos.limit(1).display()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Top gemeos das categorias
+
+# COMMAND ----------
+
+(
+  df_tabelao_merecimento_gemeos
+  .groupBy("NmAgrupamentoDiretoriaSetor", "gemeos")
+  .agg(F.sum("QtMercadoria").alias("total_vendas"))
+  .orderBy(F.desc("total_vendas"))
+  .filter(~F.col("gemeos").contains("Chip"))
+).display()
