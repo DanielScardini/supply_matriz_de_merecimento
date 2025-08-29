@@ -177,8 +177,8 @@ df_graficos = df_agregado.toPandas()
 # Converte year_month para formato de data
 df_graficos['year_month'] = pd.to_datetime(df_graficos['year_month'].astype(str), format='%Y%m')
 
-# Preenche valores nulos
-df_graficos['NmPorteLoja'] = df_graficos['NmPorteLoja'].fillna('SEM PORTE')
+# Remove lojas sem porte e preenche valores nulos
+df_graficos = df_graficos[df_graficos['DsPorteLoja'].notna() & (df_graficos['DsPorteLoja'] != '')]
 df_graficos['NmRegiaoGeografica'] = df_graficos['NmRegiaoGeografica'].fillna('SEM REGIÃO')
 
 print(f"✅ Dados preparados para gráficos: {len(df_graficos):,} registros")
@@ -244,52 +244,55 @@ def criar_grafico_elasticidade_porte(
         specs=[[{"type": "bar"}, {"type": "bar"}]]
     )
     
+    # Define ordem correta dos portes (Porte 6 no topo, Porte 1 na base)
+    ordem_portes = ['Porte 6', 'Porte 5', 'Porte 4', 'Porte 3', 'Porte 2', 'Porte 1']
+    
+    # Filtra apenas portes válidos e ordena
+    portes_validos = [p for p in ordem_portes if p in df_pivot.columns]
+    
     # Cores para porte de loja (gradiente de azul)
     cores_porte = {
-        'Porte 6': '#1f4e79',  # Mais escuro
+        'Porte 6': '#1f4e79',  # Mais escuro (topo)
         'Porte 5': '#2d5a8b',
         'Porte 4': '#3b669d',
         'Porte 3': '#4972af',
         'Porte 2': '#577ec1',
-        'Porte 1': '#658ad3',  # Mais claro
-        'SEM PORTE': '#cccccc'
+        'Porte 1': '#658ad3',  # Mais claro (base)
     }
     
-    # Gráfico 1: Vendas mensais em k unidades
-    for porte in df_pivot.columns:
-        if porte in cores_porte:
-            fig.add_trace(
-                go.Bar(
-                    x=df_pivot.index.strftime('%b/%y'),
-                    y=df_pivot[porte] / 1000,  # Converte para k unidades
-                    name=porte,
-                    marker_color=cores_porte[porte],
-                    showlegend=True,
-                    hovertemplate=f'<b>{porte}</b><br>' +
-                                'Mês: %{x}<br>' +
-                                'Vendas: %{y:.1f}k unid.<br>' +
-                                '<extra></extra>'
-                ),
-                row=1, col=1
-            )
+    # Gráfico 1: Vendas mensais em k unidades (ordenado por porte)
+    for porte in portes_validos:
+        fig.add_trace(
+            go.Bar(
+                x=df_pivot.index.strftime('%b/%y'),
+                y=df_pivot[porte] / 1000,  # Converte para k unidades
+                name=porte,
+                marker_color=cores_porte[porte],
+                showlegend=True,
+                hovertemplate=f'<b>{porte}</b><br>' +
+                            'Mês: %{x}<br>' +
+                            'Vendas: %{y:.1f}k unid.<br>' +
+                            '<extra></extra>'
+            ),
+            row=1, col=1
+        )
     
-    # Gráfico 2: Proporção percentual
-    for porte in df_prop.columns:
-        if porte in cores_porte:
-            fig.add_trace(
-                go.Bar(
-                    x=df_prop.index.strftime('%b/%y'),
-                    y=df_prop[porte],
-                    name=porte,
-                    marker_color=cores_porte[porte],
-                    showlegend=False,
-                    hovertemplate=f'<b>{porte}</b><br>' +
-                                'Mês: %{x}<br>' +
-                                'Proporção: %{y:.1f}%<br>' +
-                                '<extra></extra>'
-                ),
-                row=1, col=2
-            )
+    # Gráfico 2: Proporção percentual (ordenado por porte, máximo 100%)
+    for porte in portes_validos:
+        fig.add_trace(
+            go.Bar(
+                x=df_prop.index.strftime('%b/%y'),
+                y=df_prop[porte],
+                name=porte,
+                marker_color=cores_porte[porte],
+                showlegend=False,
+                hovertemplate=f'<b>{porte}</b><br>' +
+                            'Mês: %{x}<br>' +
+                            'Proporção: %{y:.1f}%<br>' +
+                            '<extra></extra>'
+            ),
+            row=1, col=2
+        )
     
     # Adiciona valores totais no topo das barras (gráfico 1)
     totais_mensais = df_pivot.sum(axis=1) / 1000
@@ -346,6 +349,7 @@ def criar_grafico_elasticidade_porte(
     
     fig.update_yaxes(
         title_text="Proporção % de vendas",
+        range=[0, 100],  # Força máximo de 100%
         row=1, col=2
     )
     
@@ -409,20 +413,27 @@ def criar_grafico_elasticidade_porte_regiao(
         specs=[[{"type": "bar"}, {"type": "bar"}]]
     )
     
-    # Cores para porte de loja (gradiente de azul) - repetidas para cada região
+    # Define ordem correta dos portes (Porte 6 no topo, Porte 1 na base)
+    ordem_portes = ['Porte 6', 'Porte 5', 'Porte 4', 'Porte 3', 'Porte 2', 'Porte 1']
+    
+    # Cores para porte de loja (gradiente de azul)
     cores_base = {
-        'Porte 6': '#1f4e79',  # Mais escuro
+        'Porte 6': '#1f4e79',  # Mais escuro (topo)
         'Porte 5': '#2d5a8b',
         'Porte 4': '#3b669d',
         'Porte 3': '#4972af',
         'Porte 2': '#577ec1',
-        'Porte 1': '#658ad3',  # Mais claro
-        'SEM PORTE': '#cccccc'
+        'Porte 1': '#658ad3',  # Mais claro (base)
     }
     
-    # Gráfico 1: Vendas mensais em k unidades
-    for col in df_pivot.columns:
-        # Extrai o porte da combinação porte-região
+    # Organiza colunas por ordem de porte (Porte 6 no topo, Porte 1 na base)
+    colunas_ordenadas = []
+    for porte in ordem_portes:
+        colunas_porte = [col for col in df_pivot.columns if col.startswith(porte)]
+        colunas_ordenadas.extend(colunas_porte)
+    
+    # Gráfico 1: Vendas mensais em k unidades (ordenado por porte)
+    for col in colunas_ordenadas:
         porte = col.split(' - ')[0]
         if porte in cores_base:
             fig.add_trace(
@@ -440,8 +451,8 @@ def criar_grafico_elasticidade_porte_regiao(
                 row=1, col=1
             )
     
-    # Gráfico 2: Proporção percentual
-    for col in df_prop.columns:
+    # Gráfico 2: Proporção percentual (ordenado por porte, máximo 100%)
+    for col in colunas_ordenadas:
         porte = col.split(' - ')[0]
         if porte in cores_base:
             fig.add_trace(
@@ -514,6 +525,7 @@ def criar_grafico_elasticidade_porte_regiao(
     
     fig.update_yaxes(
         title_text="Proporção % de vendas",
+        range=[0, 100],  # Força máximo de 100%
         row=1, col=2
     )
     
