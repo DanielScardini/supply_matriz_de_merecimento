@@ -2072,3 +2072,234 @@ def validar_resultados(df: DataFrame, categoria: str) -> None:
 # df_resultado = executar_calculo_matriz_merecimento(categoria_teste)
 # validar_resultados(df_resultado, categoria_teste)
 # display(df_resultado.limit(10))
+
+# COMMAND ----------
+
+def salvar_weighted_smape_agregado(df_weighted_smape: DataFrame, 
+                                   categoria: str,
+                                   mes_analise: str = "202507",
+                                   data_corte_matriz: str = "2025-06-30",
+                                   data_hora_execucao: str = None) -> None:
+    """
+    Salva os weighted sMAPEs agregados em tabelas separadas por nível de agregação.
+    
+    **Tabelas criadas:**
+    1. **supply_weighted_smape_grupo_{CATEGORIA}**: Agregação por grupo de necessidade
+    2. **supply_weighted_smape_grupo_loja_{CATEGORIA}**: Agregação por grupo + loja
+    3. **supply_weighted_smape_loja_{CATEGORIA}**: Agregação por loja
+    4. **supply_weighted_smape_categoria_{CATEGORIA}**: Agregação da categoria inteira
+    
+    **Colunas de weighted sMAPE:**
+    - weighted_smape_Media90_Qt_venda_sem_ruptura: sMAPE ponderado para média 90 dias
+    - weighted_smape_Media180_Qt_venda_sem_ruptura: sMAPE ponderado para média 180 dias
+    - weighted_smape_Media270_Qt_venda_sem_ruptura: sMAPE ponderado para média 270 dias
+    - weighted_smape_Media360_Qt_venda_sem_ruptura: sMAPE ponderado para média 360 dias
+    - weighted_smape_MediaAparada90_Qt_venda_sem_ruptura: sMAPE ponderado para média aparada 90 dias
+    - weighted_smape_MediaAparada180_Qt_venda_sem_ruptura: sMAPE ponderado para média aparada 180 dias
+    - weighted_smape_MediaAparada270_Qt_venda_sem_ruptura: sMAPE ponderado para média aparada 270 dias
+    - weighted_smape_MediaAparada360_Qt_venda_sem_ruptura: sMAPE ponderado para média aparada 360 dias
+    
+    Args:
+        df_weighted_smape: DataFrame com weighted sMAPEs calculados
+        categoria: Nome da categoria/diretoria
+        mes_analise: Mês de análise no formato YYYYMM (padrão: julho-2025)
+        data_corte_matriz: Data de corte para cálculo da matriz de merecimento (padrão: 2025-06-30)
+        data_hora_execucao: Data/hora da execução (padrão: agora)
+    """
+    if data_hora_execucao is None:
+        data_hora_execucao = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    print(f"💾 Salvando weighted sMAPEs agregados para categoria: {categoria}")
+    print(f"📅 Mês de análise: {mes_analise}")
+    print(f"🕐 Data/hora execução: {data_hora_execucao}")
+    
+    # Normaliza nome da categoria para o nome da tabela
+    categoria_normalizada = (
+        categoria
+        .replace("DIRETORIA ", "")
+        .replace(" ", "_")
+        .upper()
+    )
+    
+    # Adiciona metadados a todos os DataFrames
+    df_com_metadados = df_weighted_smape.withColumn("data_hora_execucao", F.lit(data_hora_execucao)) \
+                                        .withColumn("mes_analise", F.lit(mes_analise)) \
+                                        .withColumn("data_corte_matriz", F.lit(data_corte_matriz)) \
+                                        .withColumn("categoria", F.lit(categoria))
+    
+    # 1. SALVA AGREGAÇÃO POR GRUPO DE NECESSIDADE
+    print("📊 Salvando agregação por grupo de necessidade...")
+    df_grupo = df_com_metadados.filter(F.col("nivel_agregacao") == "GRUPO_NECESSIDADE")
+    
+    if df_grupo.count() > 0:
+        nome_tabela_grupo = f"databox.bcg_comum.supply_weighted_smape_grupo_{categoria_normalizada}"
+        
+        (
+            df_grupo
+            .write
+            .format("delta")
+            .mode("overwrite")  # Overwrite para evitar duplicatas
+            .option("mergeSchema", "true")
+            .saveAsTable(nome_tabela_grupo)
+        )
+        
+        print(f"✅ Agregação por grupo salva: {nome_tabela_grupo}")
+        print(f"  • Total de registros: {df_grupo.count():,}")
+    else:
+        print("⚠️  Nenhum registro para agregação por grupo de necessidade")
+    
+    # 2. SALVA AGREGAÇÃO POR GRUPO + LOJA
+    print("📊 Salvando agregação por grupo + loja...")
+    df_grupo_loja = df_com_metadados.filter(F.col("nivel_agregacao") == "GRUPO_NECESSIDADE_LOJA")
+    
+    if df_grupo_loja.count() > 0:
+        nome_tabela_grupo_loja = f"databox.bcg_comum.supply_weighted_smape_grupo_loja_{categoria_normalizada}"
+        
+        (
+            df_grupo_loja
+            .write
+            .format("delta")
+            .mode("overwrite")  # Overwrite para evitar duplicatas
+            .option("mergeSchema", "true")
+            .saveAsTable(nome_tabela_grupo_loja)
+        )
+        
+        print(f"✅ Agregação por grupo + loja salva: {nome_tabela_grupo_loja}")
+        print(f"  • Total de registros: {df_grupo_loja.count():,}")
+    else:
+        print("⚠️  Nenhum registro para agregação por grupo + loja")
+    
+    # 3. SALVA AGREGAÇÃO POR LOJA
+    print("📊 Salvando agregação por loja...")
+    df_loja = df_com_metadados.filter(F.col("nivel_agregacao") == "LOJA")
+    
+    if df_loja.count() > 0:
+        nome_tabela_loja = f"databox.bcg_comum.supply_weighted_smape_loja_{categoria_normalizada}"
+        
+        (
+            df_loja
+            .write
+            .format("delta")
+            .mode("overwrite")  # Overwrite para evitar duplicatas
+            .option("mergeSchema", "true")
+            .saveAsTable(nome_tabela_loja)
+        )
+        
+        print(f"✅ Agregação por loja salva: {nome_tabela_loja}")
+        print(f"  • Total de registros: {df_loja.count():,}")
+    else:
+        print("⚠️  Nenhum registro para agregação por loja")
+    
+    # 4. SALVA AGREGAÇÃO DA CATEGORIA INTEIRA
+    print("📊 Salvando agregação da categoria inteira...")
+    df_categoria = df_com_metadados.filter(F.col("nivel_agregacao") == "CATEGORIA_INTEIRA")
+    
+    if df_categoria.count() > 0:
+        nome_tabela_categoria = f"databox.bcg_comum.supply_weighted_smape_categoria_{categoria_normalizada}"
+        
+        (
+            df_categoria
+            .write
+            .format("delta")
+            .mode("overwrite")  # Overwrite para evitar duplicatas
+            .option("mergeSchema", "true")
+            .saveAsTable(nome_tabela_categoria)
+        )
+        
+        print(f"✅ Agregação da categoria salva: {nome_tabela_categoria}")
+        print(f"  • Total de registros: {df_categoria.count():,}")
+    else:
+        print("⚠️  Nenhum registro para agregação da categoria")
+    
+    print("=" * 80)
+    print("✅ Todos os weighted sMAPEs agregados foram salvos com sucesso!")
+    print(f"📊 Categoria: {categoria}")
+    print(f"📅 Mês de análise: {mes_analise}")
+    print(f"🕐 Data/hora execução: {data_hora_execucao}")
+    print("=" * 80)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Exemplo para DIRETORIA TELEFONIA CELULAR
+
+# COMMAND ----------
+
+# Cálculo com salvamento da versão completa
+df_telas_completo = executar_calculo_matriz_merecimento(
+    categoria="DIRETORIA TELEFONIA CELULAR",
+    salvar_versao_completa=True,
+    mes_analise="202507",  # julho-2025
+    data_corte_matriz="2025-06-30"  # data de corte da matriz
+)
+
+# Exibir resultado (limitado para agilizar)
+df_telas_completo.limit(1000).display()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Exemplo de Cálculo e Salvamento de Weighted sMAPE Agregado
+
+# COMMAND ----------
+
+# Exemplo de cálculo e salvamento automático dos weighted sMAPEs agregados
+def exemplo_weighted_smape_com_salvamento(categoria: str = "DIRETORIA TELEFONIA CELULAR"):
+    """
+    Exemplo completo de cálculo e salvamento dos weighted sMAPEs agregados.
+    
+    Args:
+        categoria: Nome da categoria para teste
+    """
+    print(f"🚀 Exemplo completo de weighted sMAPE com salvamento para: {categoria}")
+    print("=" * 80)
+    
+    try:
+        # 1. Executa o cálculo da matriz de merecimento
+        print("📊 Passo 1: Calculando matriz de merecimento...")
+        df_matriz = executar_calculo_matriz_merecimento(
+            categoria=categoria,
+            salvar_versao_completa=True,
+            mes_analise="202507",
+            data_corte_matriz="2025-06-30"
+        )
+        
+        print(f"✅ Matriz calculada: {df_matriz.count():,} registros")
+        
+        # 2. Calcula o weighted sMAPE agregado
+        print("\n📊 Passo 2: Calculando weighted sMAPE agregado...")
+        df_weighted_smape = calcular_weighted_smape_agregado(
+            df=df_matriz,
+            categoria=categoria
+        )
+        
+        print(f"✅ Weighted sMAPE calculado: {df_weighted_smape.count():,} registros")
+        
+        # 3. Salva automaticamente nas tabelas separadas
+        print("\n💾 Passo 3: Salvando weighted sMAPEs nas tabelas...")
+        salvar_weighted_smape_agregado(
+            df_weighted_smape=df_weighted_smape,
+            categoria=categoria,
+            mes_analise="202507",
+            data_corte_matriz="2025-06-30"
+        )
+        
+        print("\n🎉 Processo completo executado com sucesso!")
+        print("📊 Tabelas criadas:")
+        print("  • supply_weighted_smape_grupo_{CATEGORIA}")
+        print("  • supply_weighted_smape_grupo_loja_{CATEGORIA}")
+        print("  • supply_weighted_smape_loja_{CATEGORIA}")
+        print("  • supply_weighted_smape_categoria_{CATEGORIA}")
+        
+        return df_weighted_smape
+        
+    except Exception as e:
+        print(f"❌ Erro durante o processo: {str(e)}")
+        raise
+
+# COMMAND ----------
+
+# Executa o exemplo completo (descomente para executar)
+# df_weighted_smape_exemplo = exemplo_weighted_smape_com_salvamento("DIRETORIA TELEFONIA CELULAR")
+
+# COMMAND ----------
