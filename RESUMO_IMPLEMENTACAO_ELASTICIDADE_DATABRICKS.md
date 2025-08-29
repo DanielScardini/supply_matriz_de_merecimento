@@ -64,7 +64,7 @@ src/analysis/
 - **Hover**: Informações detalhadas por barra
 - **Legenda**: Horizontal no topo
 - **Anotações**: Valores totais no topo das barras
-- **Exportação**: HTML interativo salvo no DBFS
+- **Visualização**: Plotly interativo exibido diretamente no notebook
 
 ## 🔧 Como Usar no Databricks
 
@@ -79,8 +79,8 @@ src/analysis/
 - Verifique a criação dos gráficos
 
 ### **3. Resultados**
-- Gráficos exibidos no notebook
-- Arquivos HTML salvos no DBFS
+- Gráficos exibidos diretamente no notebook
+- Visualizações interativas usando plotly
 - Análises e estatísticas no console
 
 ## 📁 Dependências no Databricks

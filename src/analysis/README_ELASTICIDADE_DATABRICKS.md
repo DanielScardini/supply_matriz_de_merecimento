@@ -55,7 +55,7 @@ Este notebook implementa **análise de elasticidade de demanda** para produtos g
 
 ### **3. Ajustes Necessários**
 - **Caminho do arquivo de gêmeos**: `/dbfs/dados_analise/ITENS_GEMEOS 2.csv`
-- **Diretório de saída**: `/dbfs/outputs/`
+- **Visualização**: Gráficos exibidos diretamente no notebook
 - **Filtros de diretorias**: Configuráveis na seção 2
 
 ## 📁 Dependências e Tabelas
@@ -78,11 +78,11 @@ Este notebook implementa **análise de elasticidade de demanda** para produtos g
 ## 📁 Saídas Geradas
 
 ### **1. Gráficos Interativos - Duas Versões**
-- **Formato**: HTML (plotly)
-- **Localização**: `/dbfs/outputs/`
-- **Nomenclatura**:
-  - **Versão 1**: `elasticidade_porte_{GEMEO}_{DIRETORIA}.html` (APENAS porte)
-  - **Versão 2**: `elasticidade_porte_regiao_{GEMEO}_{DIRETORIA}.html` (porte + região)
+- **Formato**: Plotly interativo
+- **Visualização**: Direta no notebook usando `fig.show()`
+- **Versões**:
+  - **Versão 1**: APENAS por porte de loja
+  - **Versão 2**: Por porte de loja + região geográfica
 - **Total**: 2 gráficos por gêmeo (portes + portes+região)
 
 ### **2. Dados Processados**
@@ -187,8 +187,9 @@ Ao final da execução, você terá:
   - **Versão 2**: Por porte de loja + região geográfica
 - **Análise completa** por diretoria
 - **Insights de elasticidade** de demanda
-- **Visualizações prontas** para apresentações
+- **Visualizações interativas** usando plotly
 - **Total de gráficos**: 2 × número de gêmeos analisados
+- **Gráficos exibidos** diretamente no notebook
 
 ## 📞 Suporte
 

@@ -546,27 +546,24 @@ for _, row in top_5_gemeos.toPandas().iterrows():
     fig_porte = criar_grafico_elasticidade_porte(df_graficos, gemeo, diretoria)
     
     if fig_porte.data:
-        nome_arquivo_porte = f"elasticidade_porte_{gemeo.replace(' ', '_').replace('\"', '')}_{diretoria.replace(' ', '_')}.html"
-        fig_porte.write_html(f"/dbfs/outputs/{nome_arquivo_porte}")
-        print(f"    ✅ Gráfico APENAS porte salvo: {nome_arquivo_porte}")
-        display(fig_porte)
+        print(f"    ✅ Gráfico APENAS por porte criado com sucesso")
+        fig_porte.show()
     else:
-        print(f"    ⚠️  Nenhum dado para gráfico APENAS porte")
+        print(f"    ⚠️  Nenhum dado para gráfico APENAS por porte")
     
     # VERSÃO 2: Por porte de loja + região geográfica
     print(f"  🌍 Criando versão por porte + região geográfica...")
     fig_porte_regiao = criar_grafico_elasticidade_porte_regiao(df_graficos, gemeo, diretoria)
     
     if fig_porte_regiao.data:
-        nome_arquivo_porte_regiao = f"elasticidade_porte_regiao_{gemeo.replace(' ', '_').replace('\"', '')}_{diretoria.replace(' ', '_')}.html"
-        fig_porte_regiao.write_html(f"/dbfs/outputs/{nome_arquivo_porte_regiao}")
-        print(f"    ✅ Gráfico porte + região salvo: {nome_arquivo_porte_regiao}")
-        display(fig_porte_regiao)
+        print(f"    ✅ Gráfico por porte + região criado com sucesso")
+        fig_porte_regiao.show()
     else:
-        print(f"    ⚠️  Nenhum dado para gráfico porte + região")
+        print(f"    ⚠️  Nenhum dado para gráfico por porte + região")
 
 print("\n✅ Análise de elasticidade concluída!")
-print(f"📁 Total de gráficos criados: {len(top_5_gemeos.toPandas()) * 2} (2 versões por gêmeo)")
+print(f"📊 Total de gráficos criados: {len(top_5_gemeos.toPandas()) * 2} (2 versões por gêmeo)")
+print("🎨 Todos os gráficos foram exibidos usando plotly.show()")
 
 # COMMAND ----------
 
