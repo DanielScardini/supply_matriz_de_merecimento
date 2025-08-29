@@ -31,7 +31,7 @@ hoje_int = int(hoje.strftime("%Y%m%d"))
 
 def get_data_inicio(hoje: datetime | date | None = None) -> datetime:
     """
-    Retorna datetime no dia 1 do mês que está 12 meses antes de 'hoje'.
+    Retorna datetime no dia 1 do mês que está 11 meses antes de 'hoje'.
     """
     if hoje is None:
         hoje_d = date.today()
@@ -128,11 +128,12 @@ def load_mercadoria_data(spark: SparkSession) -> DataFrame:
         .filter(
             F.col("NmAgrupamentoDiretoriaSetor")
             .isin(
-                ["DIRETORIA DE LINHA BRANCA",
+                [#"DIRETORIA DE LINHA BRANCA",
                  "DIRETORIA LINHA LEVE",
                  "DIRETORIA DE TELAS",
                  "DIRETORIA TELEFONIA CELULAR",
-                 "DIRETORIA INFO/PERIFERICOS"]
+                 #"DIRETORIA INFO/PERIFERICOS"
+                 ]
             )
         )
         .select(
