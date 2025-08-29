@@ -243,19 +243,19 @@ def criar_grafico_elasticidade_porte(
     )
     
     # Define ordem correta dos portes (Porte 6 no topo, Porte 1 na base)
-    ordem_portes = ['Porte 6', 'Porte 5', 'Porte 4', 'Porte 3', 'Porte 2', 'Porte 1']
-    
+    # CORREÇÃO: Usar o formato exato dos dados
+    ordem_portes = ['PORTE 6', 'PORTE 5', 'PORTE 4', 'PORTE 3', 'PORTE 2', 'PORTE 1']    
     # Filtra apenas portes válidos e ordena
     portes_validos = [p for p in ordem_portes if p in df_pivot.columns]
     
     # Cores para porte de loja (gradiente de azul)
     cores_porte = {
-        'Porte 6': '#1f4e79',  # Mais escuro (topo)
-        'Porte 5': '#2d5a8b',
-        'Porte 4': '#3b669d',
-        'Porte 3': '#4972af',
-        'Porte 2': '#577ec1',
-        'Porte 1': '#658ad3',  # Mais claro (base)
+        'PORTE 6': '#1f4e79',  # Mais escuro (topo)
+        'PORTE 5': '#2d5a8b',
+        'PORTE 4': '#3b669d',
+        'PORTE 3': '#4972af',
+        'PORTE 2': '#577ec1',
+        'PORTE 1': '#658ad3',  # Mais claro (base)
     }
     
     # Gráfico 1: Vendas mensais em k unidades (ordenado por porte)
