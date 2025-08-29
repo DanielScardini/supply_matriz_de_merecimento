@@ -1283,7 +1283,7 @@ def process_monthly_batch(
     table_name: str = "databox.bcg_comum.supply_base_merecimento_diario_v2"
 ) -> DataFrame:
     """
-    Processa um lote de meses específico.
+    Processa um lote de meses específico com gestão inteligente de memória.
     
     Args:
         spark: Sessão do Spark
@@ -1300,45 +1300,105 @@ def process_monthly_batch(
     start_date_int = int(start_date.strftime("%Y%m%d"))
     end_date_int = int(end_date.strftime("%Y%m%d"))
     
-    # 1. Carregar dados de estoque para o período
-    df_estoque_lote = (
-        spark.read.table("data_engineering_prd.app_logistica.gi_boss_qualidade_estoque")
-        .filter(F.col("DtAtual") >= start_date)
-        .filter(F.col("DtAtual") <= end_date)
-        .filter(F.col("StLoja") == "ATIVA")
-        .filter(F.col("DsEstoqueLojaDeposito") == "L")
-        .select(
-            "CdFilial", "CdSku", "DsSku", "DsSetor", "DsCurva", "DsCurvaAbcLoja",
-            "StLinha", "DsObrigatorio", "DsVoltagem", F.col("DsTipoEntrega").alias("TipoEntrega"),
-            F.col("CdEstoqueFilialAbastecimento").alias("QtdEstoqueCDVinculado"),
-            (F.col("VrTotalVv")/F.col("VrVndCmv")).alias("DDE"),
-            F.col("QtEstoqueBoaOff").alias("EstoqueLoja"),
-            F.col("DsFaixaDde").alias("ClassificacaoDDE"),
-            F.col("data_ingestao"),
-            F.date_format(F.col("data_ingestao"), "yyyy-MM-dd").alias("DtAtual")    
+    try:
+        # 1. Carregar dados de estoque para o período (NÃO cache - muda a cada lote)
+        df_estoque_lote = (
+            spark.read.table("data_engineering_prd.app_logistica.gi_boss_qualidade_estoque")
+            .filter(F.col("DtAtual") >= start_date)
+            .filter(F.col("DtAtual") <= end_date)
+            .filter(F.col("StLoja") == "ATIVA")
+            .filter(F.col("DsEstoqueLojaDeposito") == "L")
+            .select(
+                "CdFilial", "CdSku", "DsSku", "DsSetor", "DsCurva", "DsCurvaAbcLoja",
+                "StLinha", "DsObrigatorio", "DsVoltagem", F.col("DsTipoEntrega").alias("TipoEntrega"),
+                F.col("CdEstoqueFilialAbastecimento").alias("QtdEstoqueCDVinculado"),
+                (F.col("VrTotalVv")/F.col("VrVndCmv")).alias("DDE"),
+                F.col("QtEstoqueBoaOff").alias("EstoqueLoja"),
+                F.col("DsFaixaDde").alias("ClassificacaoDDE"),
+                F.col("data_ingestao"),
+                F.date_format(F.col("data_ingestao"), "yyyy-MM-dd").alias("DtAtual")    
+            )
+            .dropDuplicates(["DtAtual", "CdSku", "CdFilial"])
         )
-        .dropDuplicates(["DtAtual", "CdSku", "CdFilial"])
-    )
-    
-    # 2. Carregar dados de vendas para o período
-    sales_df_lote = build_sales_view(spark, start_date_int, end_date_int)
-    
-    # 3. Carregar dados de mercadoria (não muda por período)
-    df_mercadoria_lote = load_mercadoria_data(spark)
-    
-    # 4. Criar base de merecimento para o lote
-    df_merecimento_lote = create_base_merecimento(df_estoque_lote, sales_df_lote, df_mercadoria_lote)
-    
-    # 5. Adicionar métricas de média móvel de 90 dias
-    df_merecimento_lote_r90 = add_rolling_90_metrics(df_merecimento_lote)
-    
-    # 6. Adicionar flags de ruptura
-    df_merecimento_lote_final = create_analysis_with_rupture_flags(df_merecimento_lote_r90)
-    
-    # 7. Adicionar mapeamento de abastecimento
-    df_merecimento_lote_cd_loja = create_final_merecimento_base(df_merecimento_lote_final, de_para_filial_CD)
-    
-    return df_merecimento_lote_cd_loja
+        
+        # 2. Carregar dados de vendas para o período (NÃO cache - muda a cada lote)
+        sales_df_lote = build_sales_view(spark, start_date_int, end_date_int)
+        
+        # 3. Carregar dados de mercadoria (CACHE - não muda entre lotes, reutilizado)
+        if not hasattr(process_monthly_batch, '_mercadoria_cached'):
+            print("📦 Cacheando dados de mercadoria (reutilizável entre lotes)")
+            df_mercadoria_lote = load_mercadoria_data(spark).cache()
+            process_monthly_batch._mercadoria_cached = df_mercadoria_lote
+            # Forçar materialização
+            df_mercadoria_lote.count()
+        else:
+            print("♻️ Reutilizando dados de mercadoria do cache")
+            df_mercadoria_lote = process_monthly_batch._mercadoria_cached
+        
+        # 4. Criar base de merecimento para o lote
+        df_merecimento_lote = create_base_merecimento(df_estoque_lote, sales_df_lote, df_mercadoria_lote)
+        
+        # 5. Unpersist dados de estoque e vendas (não serão mais usados)
+        df_estoque_lote.unpersist()
+        sales_df_lote.unpersist()
+        print("🧹 Memória liberada: dados de estoque e vendas do lote")
+        
+        # 6. Adicionar métricas de média móvel de 90 dias
+        df_merecimento_lote_r90 = add_rolling_90_metrics(df_merecimento_lote)
+        
+        # 7. Unpersist dados intermediários
+        df_merecimento_lote.unpersist()
+        print("🧹 Memória liberada: dados intermediários de merecimento")
+        
+        # 8. Adicionar flags de ruptura
+        df_merecimento_lote_final = create_analysis_with_rupture_flags(df_merecimento_lote_r90)
+        
+        # 9. Unpersist dados de média móvel
+        df_merecimento_lote_r90.unpersist()
+        print("🧹 Memória liberada: dados de média móvel")
+        
+        # 10. Adicionar mapeamento de abastecimento (CACHE - não muda entre lotes)
+        if not hasattr(process_monthly_batch, '_supply_mapping_cached'):
+            print("📦 Cacheando mapeamento de abastecimento (reutilizável entre lotes)")
+            supply_mapping = create_complete_supply_mapping(spark, datetime.now()).cache()
+            process_monthly_batch._supply_mapping_cached = supply_mapping
+            # Forçar materialização
+            supply_mapping.count()
+        else:
+            print("♻️ Reutilizando mapeamento de abastecimento do cache")
+            supply_mapping = process_monthly_batch._supply_mapping_cached
+        
+        df_merecimento_lote_cd_loja = create_final_merecimento_base(df_merecimento_lote_final, supply_mapping)
+        
+        # 11. Unpersist dados finais do lote (serão salvos)
+        df_merecimento_lote_final.unpersist()
+        print("🧹 Memória liberada: dados finais do lote")
+        
+        return df_merecimento_lote_cd_loja
+        
+    except Exception as e:
+        # Em caso de erro, limpar cache para liberar memória
+        print(f"❌ Erro no processamento. Limpando cache...")
+        cleanup_batch_memory()
+        raise e
+
+def cleanup_batch_memory():
+    """
+    Limpa cache de dados reutilizáveis entre lotes.
+    """
+    try:
+        if hasattr(process_monthly_batch, '_mercadoria_cached'):
+            process_monthly_batch._mercadoria_cached.unpersist()
+            delattr(process_monthly_batch, '_mercadoria_cached')
+            print("🧹 Cache de mercadoria limpo")
+            
+        if hasattr(process_monthly_batch, '_supply_mapping_cached'):
+            process_monthly_batch._supply_mapping_cached.unpersist()
+            delattr(process_monthly_batch, '_supply_mapping_cached')
+            print("🧹 Cache de mapeamento de abastecimento limpo")
+            
+    except Exception as e:
+        print(f"⚠️ Erro ao limpar cache: {e}")
 
 def append_monthly_batch_to_table(
     df_batch: DataFrame,
@@ -1376,7 +1436,7 @@ def process_incremental_from_start_date(
     table_name: str = "databox.bcg_comum.supply_base_merecimento_diario_v2"
 ) -> None:
     """
-    Processa dados incrementalmente desde a data de início até hoje.
+    Processa dados incrementalmente desde a data de início até hoje com gestão de memória.
     
     Args:
         spark: Sessão do Spark
@@ -1392,40 +1452,105 @@ def process_incremental_from_start_date(
     print(f"📅 Período: {start_date.strftime('%Y-%m-%d')} a {end_date.strftime('%Y-%m-%d')}")
     print(f"📦 Tamanho do lote: {batch_size_months} meses")
     print(f"🎯 Tabela de destino: {table_name}")
+    print(f"🧠 Gestão inteligente de memória ativada")
     
     # Gerar lotes de meses
     batches = get_monthly_batches(start_date, end_date, batch_size_months)
     
     print(f"📋 Total de lotes a processar: {len(batches)}")
     
-    for i, (batch_start, batch_end) in enumerate(batches, 1):
-        print(f"\n🔄 PROCESSANDO LOTE {i}/{len(batches)}")
-        print(f"📅 Período do lote: {batch_start.strftime('%Y-%m-%d')} a {batch_end.strftime('%Y-%m-%d')}")
+    try:
+        for i, (batch_start, batch_end) in enumerate(batches, 1):
+            print(f"\n🔄 PROCESSANDO LOTE {i}/{len(batches)}")
+            print(f"📅 Período do lote: {batch_start.strftime('%Y-%m-%d')} a {batch_end.strftime('%Y-%m-%d')}")
+            
+            try:
+                # Verificar se já existem dados para este período
+                if check_existing_data_for_period(spark, table_name, batch_start, batch_end):
+                    print(f"⏭️ Dados já existem para este período. Pulando...")
+                    continue
+                
+                # Deletar dados existentes para o período (se houver)
+                delete_existing_data_for_period(spark, table_name, batch_start, batch_end)
+                
+                # Processar lote
+                df_batch = process_monthly_batch(spark, batch_start, batch_end, table_name)
+                
+                # Salvar lote na tabela
+                append_monthly_batch_to_table(df_batch, table_name, mode="append")
+                
+                # Unpersist dados do lote após salvamento
+                df_batch.unpersist()
+                print(f"🧹 Memória liberada: dados do lote {i}")
+                
+                print(f"✅ Lote {i} processado e salvo com sucesso!")
+                
+                # Forçar garbage collection entre lotes
+                if i % 3 == 0:  # A cada 3 lotes
+                    print("🔄 Forçando limpeza de memória entre lotes...")
+                    spark.catalog.clearCache()
+                
+            except Exception as e:
+                print(f"❌ ERRO no lote {i}: {e}")
+                print(f"🛑 Processamento interrompido. Verifique o erro e reinicie.")
+                raise
         
-        try:
-            # Verificar se já existem dados para este período
-            if check_existing_data_for_period(spark, table_name, batch_start, batch_end):
-                print(f"⏭️ Dados já existem para este período. Pulando...")
-                continue
-            
-            # Deletar dados existentes para o período (se houver)
-            delete_existing_data_for_period(spark, table_name, batch_start, batch_end)
-            
-            # Processar lote
-            df_batch = process_monthly_batch(spark, batch_start, batch_end, table_name)
-            
-            # Salvar lote na tabela
-            append_monthly_batch_to_table(df_batch, table_name, mode="append")
-            
-            print(f"✅ Lote {i} processado e salvo com sucesso!")
-            
-        except Exception as e:
-            print(f"❌ ERRO no lote {i}: {e}")
-            print(f"🛑 Processamento interrompido. Verifique o erro e reinicie.")
-            raise
+        print(f"\n🎉 PROCESSAMENTO INCREMENTAL CONCLUÍDO!")
+        print(f"📊 Todos os {len(batches)} lotes foram processados com sucesso.")
+        
+    finally:
+        # Sempre limpar cache ao finalizar
+        print("🧹 Limpeza final de memória...")
+        cleanup_batch_memory()
+        spark.catalog.clearCache()
+        print("✅ Memória limpa e otimizada!")
+
+def monitor_memory_usage(spark: SparkSession) -> None:
+    """
+    Monitora uso de memória e cache do Spark.
     
-    print(f"\n🎉 PROCESSAMENTO INCREMENTAL CONCLUÍDO!")
-    print(f"📊 Todos os {len(batches)} lotes foram processados com sucesso.")
+    Args:
+        spark: Sessão do Spark
+    """
+    try:
+        print("🧠 MONITORAMENTO DE MEMÓRIA E CACHE")
+        print("=" * 50)
+        
+        # Verificar tabelas em cache
+        cached_tables = spark.catalog.listTables()
+        cached_count = len([t for t in cached_tables if t.isCached])
+        
+        print(f"📦 Tabelas em cache: {cached_count}")
+        
+        # Verificar uso de memória (se disponível)
+        try:
+            # Tentar obter métricas de memória do Spark
+            memory_info = spark.sparkContext.getConf().getAll()
+            memory_configs = [conf for conf in memory_info if 'memory' in conf[0].lower()]
+            
+            if memory_configs:
+                print(f"\n⚙️ Configurações de memória:")
+                for key, value in memory_configs:
+                    print(f"  {key}: {value}")
+            else:
+                print(f"\n⚙️ Configurações de memória não disponíveis")
+                
+        except Exception as e:
+            print(f"⚠️ Não foi possível obter métricas de memória: {e}")
+        
+        # Verificar se há dados em cache específicos
+        if hasattr(process_monthly_batch, '_mercadoria_cached'):
+            print(f"✅ Cache de mercadoria: ATIVO")
+        else:
+            print(f"❌ Cache de mercadoria: INATIVO")
+            
+        if hasattr(process_monthly_batch, '_supply_mapping_cached'):
+            print(f"✅ Cache de mapeamento: ATIVO")
+        else:
+            print(f"❌ Cache de mapeamento: INATIVO")
+            
+    except Exception as e:
+        print(f"❌ Erro no monitoramento de memória: {e}")
 
 # COMMAND ----------
 
@@ -1630,7 +1755,10 @@ def optimize_table_performance(spark: SparkSession, table_name: str) -> None:
 
 # MAGIC %md
 # MAGIC ## ✅ Processo Concluído
-# MAGIC
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC A tabela de matriz de merecimento foi criada e salva com sucesso!
 # MAGIC
 # MAGIC **Tabela de destino**: `databox.bcg_comum.supply_base_merecimento_diario_v2`
@@ -1647,3 +1775,4 @@ def optimize_table_performance(spark: SparkSession, table_name: str) -> None:
 # MAGIC - Verificação e atualização criteriosa de dados
 # MAGIC - Monitoramento de qualidade e performance
 # MAGIC - Funções de manutenção e limpeza
+# MAGIC - **🧠 Gestão inteligente de memória com cache seletivo**
