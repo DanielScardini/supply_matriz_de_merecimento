@@ -310,6 +310,56 @@ def criar_grafico_elasticidade_porte(
             yref='y'
         )
     
+    # Adiciona annotations com percentuais para cada porte em cada mês (gráfico 2)
+    for i, mes in enumerate(df_prop.index):
+        y_pos = 0  # Posição inicial para empilhar as annotations
+        for porte in portes_validos:
+            if porte in df_prop.columns:
+                percentual = df_prop.loc[mes, porte]
+                if percentual > 0:  # Só mostra annotation se houver valor
+                    # Adiciona annotation com percentual
+                    fig.add_annotation(
+                        x=mes.strftime('%b/%y'),
+                        y=y_pos + (percentual / 2),  # Posiciona no meio da barra
+                        text=f"{round(percentual, 0)}%",
+                        showarrow=False,
+                        font=dict(size=9, color='white', family="Arial, sans-serif"),
+                        xref='x2',
+                        yref='y2'
+                    )
+                    y_pos += percentual  # Atualiza posição para próxima annotation
+    
+    # Adiciona linhas de participação para cada porte (gráfico 2)
+    for porte in portes_validos:
+        if porte in df_prop.columns:
+            # Calcula posição acumulada para cada mês
+            posicoes_acumuladas = []
+            for mes in df_prop.index:
+                pos_acumulada = 0
+                for p in portes_validos:
+                    if p in df_prop.columns and p != porte:
+                        if ordem_portes.index(p) < ordem_portes.index(porte):
+                            pos_acumulada += df_prop.loc[mes, p]
+                posicoes_acumuladas.append(pos_acumulada)
+            
+            # Adiciona linha de participação
+            fig.add_trace(
+                go.Scatter(
+                    x=df_prop.index.strftime('%b/%y'),
+                    y=posicoes_acumuladas,
+                    mode='lines+markers',
+                    name=f'Linha {porte}',
+                    line=dict(color='rgba(255,255,255,0.8)', width=2, dash='dash'),
+                    marker=dict(size=4, color='rgba(255,255,255,0.8)'),
+                    showlegend=False,
+                    hovertemplate=f'<b>Linha {porte}</b><br>' +
+                                'Mês: %{x}<br>' +
+                                'Posição: %{y:.1f}%<br>' +
+                                '<extra></extra>'
+                ),
+                row=1, col=2
+            )
+    
     # Configurações do layout com fundo concrete e melhor estética
     fig.update_layout(
         title={
@@ -511,6 +561,61 @@ def criar_grafico_elasticidade_porte_regiao(
             yref='y'
         )
     
+    # Adiciona annotations com percentuais para cada porte+região em cada mês (gráfico 2)
+    for i, mes in enumerate(df_prop.index):
+        y_pos = 0  # Posição inicial para empilhar as annotations
+        for col in colunas_ordenadas:
+            if col in df_prop.columns:
+                percentual = df_prop.loc[mes, col]
+                if percentual > 0:  # Só mostra annotation se houver valor
+                    # Adiciona annotation com percentual
+                    fig.add_annotation(
+                        x=mes.strftime('%b/%y'),
+                        y=y_pos + (percentual / 2),  # Posiciona no meio da barra
+                        text=f"{round(percentual, 0)}%",
+                        showarrow=False,
+                        font=dict(size=9, color='white', family="Arial, sans-serif"),
+                        xref='x2',
+                        yref='y2'
+                    )
+                    y_pos += percentual  # Atualiza posição para próxima annotation
+    
+    # Adiciona linhas de participação para cada porte (gráfico 2)
+    for porte in ordem_portes:
+        # Encontra todas as colunas para este porte
+        colunas_porte = [col for col in colunas_ordenadas if col.startswith(porte)]
+        if colunas_porte:
+            # Calcula posição acumulada para cada mês
+            posicoes_acumuladas = []
+            for mes in df_prop.index:
+                pos_acumulada = 0
+                for p in ordem_portes:
+                    if p != porte:
+                        colunas_p = [col for col in colunas_ordenadas if col.startswith(p)]
+                        for col in colunas_p:
+                            if col in df_prop.columns:
+                                if ordem_portes.index(p) < ordem_portes.index(porte):
+                                    pos_acumulada += df_prop.loc[mes, col]
+                posicoes_acumuladas.append(pos_acumulada)
+            
+            # Adiciona linha de participação
+            fig.add_trace(
+                go.Scatter(
+                    x=df_prop.index.strftime('%b/%y'),
+                    y=posicoes_acumuladas,
+                    mode='lines+markers',
+                    name=f'Linha {porte}',
+                    line=dict(color='rgba(255,255,255,0.8)', width=2, dash='dash'),
+                    marker=dict(size=4, color='rgba(255,255,255,0.8)'),
+                    showlegend=False,
+                    hovertemplate=f'<b>Linha {porte}</b><br>' +
+                                'Mês: %{x}<br>' +
+                                'Posição: %{y:.1f}%<br>' +
+                                '<extra></extra>'
+                ),
+                row=1, col=2
+            )
+    
     # Configurações do layout com fundo concrete e melhor estética
     fig.update_layout(
         title={
@@ -593,7 +698,7 @@ def criar_grafico_elasticidade_porte_regiao(
 # COMMAND ----------
 
 print("🚀 Iniciando criação dos gráficos de elasticidade...")
-print("📊 Serão criadas duas versões para cada gêmeo:")
+print("�� Serão criadas duas versões para cada gêmeo:")
 print("   1. APENAS por porte de loja")
 print("   2. Por porte de loja + região geográfica")
 print("🎨 Gráficos configurados com alta resolução para slides profissionais")
