@@ -232,30 +232,35 @@ def criar_grafico_elasticidade_porte(
     # Calcula proporções percentuais
     df_prop = df_pivot.div(df_pivot.sum(axis=1), axis=0) * 100
     
-    # Cria subplots
+    # Cria subplots com maior espaçamento
     fig = make_subplots(
         rows=1, cols=2,
         subplot_titles=[
-            f"Vendas mensais (k unid.) de {gemeo} por porte de loja",
-            f"Proporção % de vendas de {gemeo} por porte de loja"
+            f"<b>Vendas mensais (k unid.) de {gemeo} por porte de loja</b>",
+            f"<b>Proporção % de vendas de {gemeo} por porte de loja</b>"
         ],
-        specs=[[{"type": "bar"}, {"type": "bar"}]]
+        specs=[[{"type": "bar"}, {"type": "bar"}]],
+        horizontal_spacing=0.15,  # Aumenta espaçamento horizontal
+        vertical_spacing=0.1      # Aumenta espaçamento vertical
     )
     
     # Define ordem correta dos portes (Porte 6 no topo, Porte 1 na base)
+    # IMPORTANTE: Esta ordem garante que o Porte 6 fique no topo do stack
+    # e os demais portes sigam em ordem descendente para melhor visualização
     # CORREÇÃO: Usar o formato exato dos dados
     ordem_portes = ['PORTE 6', 'PORTE 5', 'PORTE 4', 'PORTE 3', 'PORTE 2', 'PORTE 1']    
     # Filtra apenas portes válidos e ordena
     portes_validos = [p for p in ordem_portes if p in df_pivot.columns]
     
-    # Cores para porte de loja (gradiente de azul)
+    # Cores para porte de loja (gradiente de azuis mais distintos e contrastantes)
+    # Porte 6 = mais escuro (topo), Porte 1 = mais claro (base)
     cores_porte = {
-        'PORTE 6': '#1f4e79',  # Mais escuro (topo)
-        'PORTE 5': '#2d5a8b',
-        'PORTE 4': '#3b669d',
-        'PORTE 3': '#4972af',
-        'PORTE 2': '#577ec1',
-        'PORTE 1': '#658ad3',  # Mais claro (base)
+        'PORTE 6': '#1a365d',  # Azul muito escuro (topo)
+        'PORTE 5': '#2c5282',  # Azul escuro
+        'PORTE 4': '#3182ce',  # Azul médio-escuro
+        'PORTE 3': '#4299e1',  # Azul médio
+        'PORTE 2': '#63b3ed',  # Azul médio-claro
+        'PORTE 1': '#90cdf4',  # Azul claro (base)
     }
     
     # Gráfico 1: Vendas mensais em k unidades (ordenado por porte)
@@ -300,54 +305,77 @@ def criar_grafico_elasticidade_porte(
             y=total + 0.5,
             text=f"{total:.1f}k",
             showarrow=False,
-            font=dict(size=10, color='black'),
+            font=dict(size=12, color='#2c3e50', family="Arial, sans-serif"),
             xref='x',
             yref='y'
         )
     
-    # Configurações do layout
+    # Configurações do layout com fundo concrete e melhor estética
     fig.update_layout(
         title={
-            'text': f"Eventos e apostas | Dinâmica de vendas se altera significativamente em eventos e apostas, impactando a proporção de merecimento<br><sub>{gemeo} - {diretoria} - APENAS PORTE DE LOJA</sub>",
+            'text': f"<b>Eventos e apostas | Dinâmica de vendas se altera significativamente em eventos e apostas, impactando a proporção de merecimento</b><br><sub style='color: #7f8c8d; font-size: 14px;'>{gemeo} - {diretoria} - APENAS PORTE DE LOJA</sub>",
             'x': 0.5,
             'xanchor': 'center',
-            'font': {'size': 16}
+            'font': {'size': 18, 'color': '#2c3e50', 'family': "Arial, sans-serif"},
+            'y': 0.98
         },
         barmode='stack',
-        height=600,
-        width=1200,
-        plot_bgcolor='#F8F8FF',  # Off-white conforme regras
-        paper_bgcolor='white',
-        font=dict(family="Arial, sans-serif"),
+        height=700,  # Aumenta altura para melhor visualização
+        width=1400,  # Aumenta largura para melhor visualização
+        plot_bgcolor='#F2F2F2',  # Fundo concrete conforme solicitado
+        paper_bgcolor='#F2F2F2',  # Fundo concrete para toda a figura
+        font=dict(family="Arial, sans-serif", size=12),
         legend=dict(
             orientation="h",
             yanchor="bottom",
             y=1.02,
             xanchor="right",
-            x=1
-        )
+            x=1,
+            bgcolor='rgba(255,255,255,0.8)',  # Fundo semi-transparente para legenda
+            bordercolor='#bdc3c7',
+            borderwidth=1,
+            font=dict(size=11, color='#2c3e50')
+        ),
+        margin=dict(l=80, r=80, t=120, b=80),  # Aumenta margens para melhor espaçamento
+        showlegend=True
     )
     
-    # Configurações dos eixos
+    # Configurações dos eixos com melhor estética
     fig.update_xaxes(
-        title_text="Mês",
+        title_text="<b>Mês</b>",
+        title_font=dict(size=14, color='#2c3e50'),
         tickangle=45,
+        tickfont=dict(size=11, color='#34495e'),
+        gridcolor='rgba(255,255,255,0.8)',
+        zerolinecolor='#bdc3c7',
         row=1, col=1
     )
     fig.update_xaxes(
-        title_text="Mês",
+        title_text="<b>Mês</b>",
+        title_font=dict(size=14, color='#2c3e50'),
         tickangle=45,
+        tickfont=dict(size=11, color='#34495e'),
+        gridcolor='rgba(255,255,255,0.8)',
+        zerolinecolor='#bdc3c7',
         row=1, col=2
     )
     
     fig.update_yaxes(
-        title_text="Vendas mensais (k unid.)",
+        title_text="<b>Vendas mensais (k unid.)</b>",
+        title_font=dict(size=14, color='#2c3e50'),
+        tickfont=dict(size=11, color='#34495e'),
+        gridcolor='rgba(255,255,255,0.8)',
+        zerolinecolor='#bdc3c7',
         row=1, col=1
     )
     
     fig.update_yaxes(
-        title_text="Proporção % de vendas",
+        title_text="<b>Proporção % de vendas</b>",
+        title_font=dict(size=14, color='#2c3e50'),
         range=[0, 100],  # Força máximo de 100%
+        tickfont=dict(size=11, color='#34495e'),
+        gridcolor='rgba(255,255,255,0.8)',
+        zerolinecolor='#bdc3c7',
         row=1, col=2
     )
     
@@ -400,27 +428,30 @@ def criar_grafico_elasticidade_porte_regiao(
     # Calcula proporções percentuais
     df_prop = df_pivot.div(df_pivot.sum(axis=1), axis=0) * 100
     
-    # Cria subplots
+    # Cria subplots com maior espaçamento
     fig = make_subplots(
         rows=1, cols=2,
         subplot_titles=[
-            f"Vendas mensais (k unid.) de {gemeo} por porte de loja + região",
-            f"Proporção % de vendas de {gemeo} por porte de loja + região"
+            f"<b>Vendas mensais (k unid.) de {gemeo} por porte de loja + região</b>",
+            f"<b>Proporção % de vendas de {gemeo} por porte de loja + região</b>"
         ],
-        specs=[[{"type": "bar"}, {"type": "bar"}]]
+        specs=[[{"type": "bar"}, {"type": "bar"}]],
+        horizontal_spacing=0.15,  # Aumenta espaçamento horizontal
+        vertical_spacing=0.1      # Aumenta espaçamento vertical
     )
     
     # Define ordem correta dos portes (Porte 6 no topo, Porte 1 na base)
-    ordem_portes = ['Porte 6', 'Porte 5', 'Porte 4', 'Porte 3', 'Porte 2', 'Porte 1']
+    ordem_portes = ['PORTE 6', 'PORTE 5', 'PORTE 4', 'PORTE 3', 'PORTE 2', 'PORTE 1']
     
-    # Cores para porte de loja (gradiente de azul)
+    # Cores para porte de loja (gradiente de azuis mais distintos e contrastantes)
+    # Porte 6 = mais escuro (topo), Porte 1 = mais claro (base)
     cores_base = {
-        'Porte 6': '#1f4e79',  # Mais escuro (topo)
-        'Porte 5': '#2d5a8b',
-        'Porte 4': '#3b669d',
-        'Porte 3': '#4972af',
-        'Porte 2': '#577ec1',
-        'Porte 1': '#658ad3',  # Mais claro (base)
+        'PORTE 6': '#1a365d',  # Azul muito escuro (topo)
+        'PORTE 5': '#2c5282',  # Azul escuro
+        'PORTE 4': '#3182ce',  # Azul médio-escuro
+        'PORTE 3': '#4299e1',  # Azul médio
+        'PORTE 2': '#63b3ed',  # Azul médio-claro
+        'PORTE 1': '#90cdf4',  # Azul claro (base)
     }
     
     # Organiza colunas por ordem de porte (Porte 6 no topo, Porte 1 na base)
@@ -475,54 +506,77 @@ def criar_grafico_elasticidade_porte_regiao(
             y=total + 0.5,
             text=f"{total:.1f}k",
             showarrow=False,
-            font=dict(size=10, color='black'),
+            font=dict(size=12, color='#2c3e50', family="Arial, sans-serif"),
             xref='x',
             yref='y'
         )
     
-    # Configurações do layout
+    # Configurações do layout com fundo concrete e melhor estética
     fig.update_layout(
         title={
-            'text': f"Eventos e apostas | Dinâmica de vendas se altera significativamente em eventos e apostas, impactando a proporção de merecimento<br><sub>{gemeo} - {diretoria} - PORTE DE LOJA + REGIÃO GEOGRÁFICA</sub>",
+            'text': f"<b>Eventos e apostas | Dinâmica de vendas se altera significativamente em eventos e apostas, impactando a proporção de merecimento</b><br><sub style='color: #7f8c8d; font-size: 14px;'>{gemeo} - {diretoria} - PORTE DE LOJA + REGIÃO GEOGRÁFICA</sub>",
             'x': 0.5,
             'xanchor': 'center',
-            'font': {'size': 16}
+            'font': {'size': 18, 'color': '#2c3e50', 'family': "Arial, sans-serif"},
+            'y': 0.98
         },
         barmode='stack',
-        height=600,
-        width=1200,
-        plot_bgcolor='#F8F8FF',  # Off-white conforme regras
-        paper_bgcolor='white',
-        font=dict(family="Arial, sans-serif"),
+        height=700,  # Aumenta altura para melhor visualização
+        width=1400,  # Aumenta largura para melhor visualização
+        plot_bgcolor='#F2F2F2',  # Fundo concrete conforme solicitado
+        paper_bgcolor='#F2F2F2',  # Fundo concrete para toda a figura
+        font=dict(family="Arial, sans-serif", size=12),
         legend=dict(
             orientation="h",
             yanchor="bottom",
             y=1.02,
             xanchor="right",
-            x=1
-        )
+            x=1,
+            bgcolor='rgba(255,255,255,0.8)',  # Fundo semi-transparente para legenda
+            bordercolor='#bdc3c7',
+            borderwidth=1,
+            font=dict(size=11, color='#2c3e50')
+        ),
+        margin=dict(l=80, r=80, t=120, b=80),  # Aumenta margens para melhor espaçamento
+        showlegend=True
     )
     
-    # Configurações dos eixos
+    # Configurações dos eixos com melhor estética
     fig.update_xaxes(
-        title_text="Mês",
+        title_text="<b>Mês</b>",
+        title_font=dict(size=14, color='#2c3e50'),
         tickangle=45,
+        tickfont=dict(size=11, color='#34495e'),
+        gridcolor='rgba(255,255,255,0.8)',
+        zerolinecolor='#bdc3c7',
         row=1, col=1
     )
     fig.update_xaxes(
-        title_text="Mês",
+        title_text="<b>Mês</b>",
+        title_font=dict(size=14, color='#2c3e50'),
         tickangle=45,
+        tickfont=dict(size=11, color='#34495e'),
+        gridcolor='rgba(255,255,255,0.8)',
+        zerolinecolor='#bdc3c7',
         row=1, col=2
     )
     
     fig.update_yaxes(
-        title_text="Vendas mensais (k unid.)",
+        title_text="<b>Vendas mensais (k unid.)</b>",
+        title_font=dict(size=14, color='#2c3e50'),
+        tickfont=dict(size=11, color='#34495e'),
+        gridcolor='rgba(255,255,255,0.8)',
+        zerolinecolor='#bdc3c7',
         row=1, col=1
     )
     
     fig.update_yaxes(
-        title_text="Proporção % de vendas",
+        title_text="<b>Proporção % de vendas</b>",
+        title_font=dict(size=14, color='#2c3e50'),
         range=[0, 100],  # Força máximo de 100%
+        tickfont=dict(size=11, color='#34495e'),
+        gridcolor='rgba(255,255,255,0.8)',
+        zerolinecolor='#bdc3c7',
         row=1, col=2
     )
     
@@ -542,6 +596,11 @@ print("🚀 Iniciando criação dos gráficos de elasticidade...")
 print("📊 Serão criadas duas versões para cada gêmeo:")
 print("   1. APENAS por porte de loja")
 print("   2. Por porte de loja + região geográfica")
+print("🎨 Gráficos configurados com alta resolução para slides profissionais")
+
+# Configurações globais para alta qualidade
+import plotly.io as pio
+pio.kaleido.scale = 2.0  # Aumenta escala para exportação de alta resolução
 
 # Cria gráficos para cada top gêmeo
 for _, row in top_5_gemeos.toPandas().iterrows():
@@ -554,11 +613,18 @@ for _, row in top_5_gemeos.toPandas().iterrows():
     print(f"  📈 Criando versão APENAS por porte de loja...")
     fig_porte = criar_grafico_elasticidade_porte(df_graficos, gemeo, diretoria)
     
-
-    
     if fig_porte.data:
         print(f"    ✅ Gráfico APENAS por porte criado com sucesso")
+        print(f"    💾 Configurações de alta resolução aplicadas")
         fig_porte.show()
+        
+        # Salva versão de alta resolução para slides
+        try:
+            fig_porte.write_image(f"grafico_porte_{gemeo.replace(' ', '_')}.png", 
+                                width=1400, height=700, scale=2)
+            print(f"    💾 Imagem de alta resolução salva: grafico_porte_{gemeo.replace(' ', '_')}.png")
+        except Exception as e:
+            print(f"    ⚠️  Erro ao salvar imagem: {e}")
     else:
         print(f"    ⚠️  Nenhum dado para gráfico APENAS por porte")
     
@@ -568,13 +634,25 @@ for _, row in top_5_gemeos.toPandas().iterrows():
     
     if fig_porte_regiao.data:
         print(f"    ✅ Gráfico por porte + região criado com sucesso")
+        print(f"    💾 Configurações de alta resolução aplicadas")
         fig_porte_regiao.show()
+        
+        # Salva versão de alta resolução para slides
+        try:
+            fig_porte_regiao.write_image(f"grafico_porte_regiao_{gemeo.replace(' ', '_')}.png", 
+                                       width=1400, height=700, scale=2)
+            print(f"    💾 Imagem de alta resolução salva: grafico_porte_regiao_{gemeo.replace(' ', '_')}.png")
+        except Exception as e:
+            print(f"    ⚠️  Erro ao salvar imagem: {e}")
     else:
         print(f"    ⚠️  Nenhum dado para gráfico por porte + região")
 
 print("\n✅ Análise de elasticidade concluída!")
 print(f"📊 Total de gráficos criados: {len(top_5_gemeos.toPandas()) * 2} (2 versões por gêmeo)")
 print("🎨 Todos os gráficos foram exibidos usando plotly.show()")
+print("💾 Imagens de alta resolução salvas para uso em slides profissionais")
+print("🎯 Portes organizados em ordem descendente (Porte 6 no topo)")
+print("🎨 Fundo concrete (#F2F2F2) aplicado para estética profissional")
 
 # COMMAND ----------
 
