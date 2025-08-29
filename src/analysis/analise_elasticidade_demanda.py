@@ -177,7 +177,7 @@ df_graficos = df_agregado.toPandas()
 df_graficos['year_month'] = pd.to_datetime(df_graficos['year_month'].astype(str), format='%Y%m')
 
 # Remove lojas sem porte e preenche valores nulos
-df_graficos = df_graficos[df_graficos['DsPorteLoja'].notna() & (df_graficos['DsPorteLoja'] != '')]
+df_graficos = df_graficos[df_graficos['NmPorteLoja'].notna() & (df_graficos['NmPorteLoja'] != '')]
 df_graficos['NmRegiaoGeografica'] = df_graficos['NmRegiaoGeografica'].fillna('SEM REGIÃO')
 
 print(f"✅ Dados preparados para gráficos: {len(df_graficos):,} registros")
@@ -553,6 +553,8 @@ for _, row in top_5_gemeos.toPandas().iterrows():
     # VERSÃO 1: Apenas por porte de loja
     print(f"  📈 Criando versão APENAS por porte de loja...")
     fig_porte = criar_grafico_elasticidade_porte(df_graficos, gemeo, diretoria)
+    
+
     
     if fig_porte.data:
         print(f"    ✅ Gráfico APENAS por porte criado com sucesso")
