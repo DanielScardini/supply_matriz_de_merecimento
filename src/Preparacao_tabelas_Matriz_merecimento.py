@@ -125,14 +125,14 @@ def load_mercadoria_data(spark: SparkSession) -> DataFrame:
     return (
         spark.table('data_engineering_prd.app_venda.mercadoria')
         .filter(F.col("StUltimaVersaoMercadoria") == "Y")
-        .filter(~
+        .filter(
             F.col("NmAgrupamentoDiretoriaSetor")
             .isin(
                 ["DIRETORIA DE LINHA BRANCA",
                  "DIRETORIA LINHA LEVE",
                  "DIRETORIA DE TELAS",
                  "DIRETORIA TELEFONIA CELULAR",
-                 "DIRETORIA INFO GAMES"]
+                 "DIRETORIA INFO/PERIFERICOS"]
             )
         )
         .select(
