@@ -159,6 +159,17 @@ df_top = (
           how="inner")
 )
 
+print(f"🔍 Debug: Dados após join com top gêmeos: {df_top.count():,} registros")
+print(f"🔍 Debug: Gêmeos únicos após join: {df_top.select('gemeos').distinct().count()}")
+print(f"🔍 Debug: Diretorias únicas após join: {df_top.select('NmAgrupamentoDiretoriaSetor').distinct().count()}")
+print(f"🔍 Debug: Meses únicos após join: {df_top.select('year_month').distinct().count()}")
+print(f"🔍 Debug: Sample de gêmeos: {df_top.select('gemeos').distinct().limit(5).collect()}")
+print(f"🔍 Debug: Verificando se há dados para cada gêmeo:")
+for gemeo in top_5_gemeos.select('gemeos').distinct().collect():
+    gemeo_nome = gemeo['gemeos']
+    count_gemeo = df_top.filter(F.col('gemeos') == gemeo_nome).count()
+    print(f"    • {gemeo_nome}: {count_gemeo:,} registros")
+
 # Agrega por year_month, gemeo, porte de loja e região
 df_agregado = (
     df_top
@@ -175,30 +186,51 @@ df_agregado = (
     .orderBy("year_month", "gemeos")
 )
 
+print(f"🔍 Debug: Dados após agregação: {df_agregado.count():,} registros")
+print(f"🔍 Debug: Gêmeos únicos após agregação: {df_agregado.select('gemeos').distinct().count()}")
+print(f"🔍 Debug: Meses únicos após agregação: {df_agregado.select('year_month').distinct().count()}")
+print(f"🔍 Debug: Sample de gêmeos após agregação: {df_agregado.select('gemeos').distinct().limit(5).collect()}")
+
 # Converte para pandas para plotagem
 df_graficos = df_agregado.toPandas()
 
+print(f"🔍 Debug: Dados após conversão para pandas - Total: {len(df_graficos):,}")
+print(f"🔍 Debug: Colunas disponíveis: {list(df_graficos.columns)}")
+print(f"🔍 Debug: Sample de dados: {df_graficos.head(3).to_dict('records')}")
 print(f"🔍 Debug: Dados antes da conversão - Total: {len(df_graficos):,}")
 print(f"🔍 Debug: year_month antes da conversão: {df_graficos['year_month'].head().tolist()}")
 print(f"🔍 Debug: year_month tipo: {df_graficos['year_month'].dtype}")
 
-# Converte year_month para formato de data
-df_graficos['year_month'] = pd.to_datetime(df_graficos['year_month'].astype(str), format='%Y%m')
+# Converte year_month para formato de data com tratamento de erros
+df_graficos['year_month'] = pd.to_datetime(df_graficos['year_month'].astype(str), format='%Y%m', errors='coerce')
 
 print(f"🔍 Debug: year_month depois da conversão: {df_graficos['year_month'].head().tolist()}")
 print(f"🔍 Debug: year_month tipo depois: {df_graficos['year_month'].dtype}")
+print(f"🔍 Debug: Valores NaT encontrados: {df_graficos['year_month'].isna().sum()}")
+print(f"🔍 Debug: Valores válidos: {df_graficos['year_month'].notna().sum()}")
+
+# Remove registros com datas inválidas
+df_graficos = df_graficos[df_graficos['year_month'].notna()].copy()
+print(f"🔍 Debug: Dados após remoção de datas inválidas: {len(df_graficos):,} registros")
 
 # Remove lojas sem porte e preenche valores nulos
 df_graficos = df_graficos[df_graficos['NmPorteLoja'].notna() & (df_graficos['NmPorteLoja'] != '')]
 df_graficos['NmRegiaoGeografica'] = df_graficos['NmRegiaoGeografica'].fillna('SEM REGIÃO')
 
 print(f"✅ Dados preparados para gráficos: {len(df_graficos):,} registros")
-print(f"🔍 Debug: Período total dos dados: {df_graficos['year_month'].min()} a {df_graficos['year_month'].max()}")
-print(f"🔍 Debug: Total de meses únicos: {df_graficos['year_month'].nunique()}")
-print(f"🔍 Debug: Meses disponíveis: {sorted(df_graficos['year_month'].dt.strftime('%Y-%m').unique())}")
-print(f"🔍 Debug: Gêmeos únicos: {df_graficos['gemeos'].nunique()}")
-print(f"🔍 Debug: Regiões únicas: {df_graficos['NmRegiaoGeografica'].nunique()}")
-print(f"🔍 Debug: Portes únicos: {df_graficos['NmPorteLoja'].nunique()}")
+
+# Verifica se há dados válidos antes de tentar formatar datas
+if len(df_graficos) > 0 and df_graficos['year_month'].notna().any():
+    print(f"🔍 Debug: Período total dos dados: {df_graficos['year_month'].min().strftime('%b/%Y')} a {df_graficos['year_month'].max().strftime('%b/%Y')}")
+    print(f"🔍 Debug: Total de meses únicos: {df_graficos['year_month'].nunique()}")
+    print(f"🔍 Debug: Meses disponíveis: {sorted(df_graficos['year_month'].dt.strftime('%Y-%m').unique())}")
+else:
+    print("🔍 Debug: Nenhum dado válido encontrado após preparação")
+    print("🔍 Debug: Verificando dados originais...")
+
+print(f"🔍 Debug: Gêmeos únicos: {df_graficos['gemeos'].nunique() if len(df_graficos) > 0 else 0}")
+print(f"🔍 Debug: Regiões únicas: {df_graficos['NmRegiaoGeografica'].nunique() if len(df_graficos) > 0 else 0}")
+print(f"🔍 Debug: Portes únicos: {df_graficos['NmPorteLoja'].nunique() if len(df_graficos) > 0 else 0}")
 
 # COMMAND ----------
 
