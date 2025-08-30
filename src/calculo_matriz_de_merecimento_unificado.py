@@ -2544,3 +2544,131 @@ def executar_comparacao_matriz_geral(
     except Exception as e:
         print(f"❌ Erro durante a comparação: {str(e)}")
         raise
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 🎯 EXECUÇÃO FINAL - CÁLCULO E SALVAMENTO DE TODAS AS CATEGORIAS
+# MAGIC
+# MAGIC Este script calcula a matriz de merecimento para todas as categorias e salva em tabelas específicas.
+# MAGIC **PARA AQUI** - Análise de factual e comparações será feita em script separado.
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### **EXECUÇÃO EM LOTE - TODAS AS CATEGORIAS**
+
+# COMMAND ----------
+
+# EXECUTAR CÁLCULO DA MATRIZ DE MERECIMENTO PARA TODAS AS CATEGORIAS
+# Este script calcula até o merecimento final e salva em tabelas específicas
+print("🚀 EXECUÇÃO FINAL - Calculando matriz de merecimento para todas as categorias...")
+print("=" * 80)
+
+# Lista de todas as categorias disponíveis
+categorias = [
+    "DIRETORIA DE TELAS",
+    "DIRETORIA TELEFONIA CELULAR", 
+    "DIRETORIA LINHA BRANCA",
+    "DIRETORIA LINHA LEVE",
+    "DIRETORIA INFO/GAMES"
+]
+
+resultados_finais = {}
+
+for categoria in categorias:
+    print(f"\n🔄 Processando: {categoria}")
+    print("-" * 60)
+    
+    try:
+        # Executa cálculo da matriz de merecimento (APENAS ATÉ O MERECIMENTO FINAL)
+        df_matriz_final = executar_calculo_matriz_merecimento_completo(
+            categoria=categoria,
+            mes_analise="202507",
+            data_corte_matriz="2025-06-30"
+        )
+        
+        # Salva em tabela específica da categoria
+        categoria_normalizada = (
+            categoria
+            .replace("DIRETORIA ", "")
+            .replace(" ", "_")
+            .upper()
+        )
+        
+        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}"
+        
+        print(f"💾 Salvando matriz de merecimento para: {categoria}")
+        print(f"📊 Tabela: {nome_tabela}")
+        
+        (
+            df_matriz_final
+            .write
+            .format("delta")
+            .mode("overwrite")
+            .option("mergeSchema", "true")
+            .saveAsTable(nome_tabela)
+        )
+        
+        # Armazena resultado
+        resultados_finais[categoria] = {
+            "matriz": df_matriz_final,
+            "tabela": nome_tabela,
+            "status": "SUCESSO",
+            "total_registros": df_matriz_final.count()
+        }
+        
+        print(f"✅ {categoria} - Matriz calculada e salva com sucesso!")
+        print(f"📊 Total de registros: {df_matriz_final.count():,}")
+        
+    except Exception as e:
+        print(f"❌ {categoria} - Erro: {str(e)}")
+        resultados_finais[categoria] = {
+            "status": "ERRO",
+            "erro": str(e)
+        }
+
+print("\n" + "=" * 80)
+print("🎉 CÁLCULO DAS MATRIZES DE MERECIMENTO CONCLUÍDO!")
+print("=" * 80)
+
+# Exibe resumo dos resultados
+print("📊 RESUMO DOS RESULTADOS:")
+for categoria, resultado in resultados_finais.items():
+    if resultado["status"] == "SUCESSO":
+        print(f"  ✅ {categoria}: {resultado['total_registros']:,} registros → {resultado['tabela']}")
+    else:
+        print(f"  ❌ {categoria}: {resultado['erro']}")
+
+print("\n" + "=" * 80)
+print("🎯 SCRIPT DE CÁLCULO CONCLUÍDO!")
+print("📋 Próximo passo: Executar script de análise de factual e comparações")
+print("=" * 80)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 📋 RESUMO FINAL DO SCRIPT DE CÁLCULO
+# MAGIC
+# MAGIC ### **O que este script faz:**
+# MAGIC 1. **Calcula matriz de merecimento** para todas as categorias
+# MAGIC 2. **Salva em tabelas específicas** por categoria
+# MAGIC 3. **Para aqui** - Não faz análise de factual nem comparações
+# MAGIC
+# MAGIC ### **Tabelas criadas:**
+# MAGIC - `supply_matriz_merecimento_TELAS`
+# MAGIC - `supply_matriz_merecimento_TELEFONIA_CELULAR`
+# MAGIC - `supply_matriz_merecimento_LINHA_BRANCA`
+# MAGIC - `supply_matriz_merecimento_LINHA_LEVE`
+# MAGIC - `supply_matriz_merecimento_INFO_GAMES`
+# MAGIC
+# MAGIC ### **Próximo passo:**
+# MAGIC Executar o script `analise_factual_comparacao_matrizes.py` para:
+# MAGIC - Análise de factual
+# MAGIC - Cálculo de sMAPE e WMAPE
+# MAGIC - Comparação com matriz DRP geral
+# MAGIC - Identificação de distorções
+# MAGIC
+# MAGIC **Este script está completo e finalizado!** 🎉
+
+# COMMAND ----------
