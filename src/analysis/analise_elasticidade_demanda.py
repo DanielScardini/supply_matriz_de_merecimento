@@ -178,14 +178,27 @@ df_agregado = (
 # Converte para pandas para plotagem
 df_graficos = df_agregado.toPandas()
 
+print(f"🔍 Debug: Dados antes da conversão - Total: {len(df_graficos):,}")
+print(f"🔍 Debug: year_month antes da conversão: {df_graficos['year_month'].head().tolist()}")
+print(f"🔍 Debug: year_month tipo: {df_graficos['year_month'].dtype}")
+
 # Converte year_month para formato de data
 df_graficos['year_month'] = pd.to_datetime(df_graficos['year_month'].astype(str), format='%Y%m')
+
+print(f"🔍 Debug: year_month depois da conversão: {df_graficos['year_month'].head().tolist()}")
+print(f"🔍 Debug: year_month tipo depois: {df_graficos['year_month'].dtype}")
 
 # Remove lojas sem porte e preenche valores nulos
 df_graficos = df_graficos[df_graficos['NmPorteLoja'].notna() & (df_graficos['NmPorteLoja'] != '')]
 df_graficos['NmRegiaoGeografica'] = df_graficos['NmRegiaoGeografica'].fillna('SEM REGIÃO')
 
 print(f"✅ Dados preparados para gráficos: {len(df_graficos):,} registros")
+print(f"🔍 Debug: Período total dos dados: {df_graficos['year_month'].min()} a {df_graficos['year_month'].max()}")
+print(f"🔍 Debug: Total de meses únicos: {df_graficos['year_month'].nunique()}")
+print(f"🔍 Debug: Meses disponíveis: {sorted(df_graficos['year_month'].dt.strftime('%Y-%m').unique())}")
+print(f"🔍 Debug: Gêmeos únicos: {df_graficos['gemeos'].nunique()}")
+print(f"🔍 Debug: Regiões únicas: {df_graficos['NmRegiaoGeografica'].nunique()}")
+print(f"🔍 Debug: Portes únicos: {df_graficos['NmPorteLoja'].nunique()}")
 
 # COMMAND ----------
 
@@ -209,6 +222,10 @@ def criar_grafico_elasticidade_porte(
     if df_gemeo.empty:
         print(f"⚠️  Nenhum dado encontrado para o gêmeo: {gemeo}")
         return go.Figure()
+    
+    print(f"    🔍 Debug: Dados do gêmeo {gemeo}: {len(df_gemeo)} registros")
+    print(f"    🔍 Debug: Meses disponíveis: {sorted(df_gemeo['year_month'].unique())}")
+    print(f"    🔍 Debug: Portes disponíveis: {df_gemeo['NmPorteLoja'].unique()}")
 
     df_agrupado = (
         df_gemeo.groupby(['year_month', 'NmPorteLoja'])
@@ -432,6 +449,10 @@ def criar_grafico_elasticidade_regiao(
     if df_gemeo.empty:
         print(f"⚠️  Nenhum dado encontrado para o gêmeo: {gemeo}")
         return go.Figure()
+    
+    print(f"    🔍 Debug: Dados do gêmeo {gemeo}: {len(df_gemeo)} registros")
+    print(f"    🔍 Debug: Meses disponíveis: {sorted(df_gemeo['year_month'].unique())}")
+    print(f"    🔍 Debug: Regiões disponíveis: {df_gemeo['NmRegiaoGeografica'].unique()}")
 
     df_agrupado = (
         df_gemeo.groupby(['year_month', 'NmRegiaoGeografica'])
@@ -445,6 +466,10 @@ def criar_grafico_elasticidade_regiao(
         .reindex(sorted(df_gemeo['year_month'].unique()))  # Inclui todos os meses unicos
         .sort_index()
     )
+    
+    print(f"    🔍 Debug: Pivot criado com {len(df_pivot)} meses e {len(df_pivot.columns)} regiões")
+    print(f"    🔍 Debug: Colunas do pivot: {list(df_pivot.columns)}")
+    
     df_prop = df_pivot.div(df_pivot.sum(axis=1), axis=0) * 100
 
     fig = make_subplots(
@@ -466,9 +491,14 @@ def criar_grafico_elasticidade_regiao(
     # Ordem das regiões (mais importantes primeiro)
     ordem_regioes = ['SUDESTE', 'SUL', 'NORDESTE', 'CENTRO-OESTE', 'NORTE', 'SEM REGIÃO']
     regioes = [r for r in ordem_regioes if r in df_pivot.columns]
+    
+    print(f"    🔍 Debug: Regiões encontradas: {regioes}")
+    print(f"    🔍 Debug: Total de regiões: {len(regioes)}")
 
     x_labels = pd.to_datetime(df_pivot.index).strftime('%b/%y').tolist()
     x_labels_prop = pd.to_datetime(df_prop.index).strftime('%b/%y').tolist()
+    
+    print(f"    🔍 Debug: Labels X criados: {len(x_labels)} meses")
 
     # Barras para vendas absolutas
     for regiao in regioes:
@@ -572,7 +602,7 @@ for _, row in top_5_gemeos.toPandas().iterrows():
     print(f"  📈 Criando versão APENAS por porte de loja...")
     fig_porte = criar_grafico_elasticidade_porte(df_graficos, gemeo, diretoria)
     
-    if fig_porte.data:
+    if fig_porte and fig_porte.data:
         print(f"    ✅ Gráfico APENAS por porte criado com sucesso")
         print(f"    💾 Configurações de alta resolução aplicadas")
         fig_porte.show()
@@ -591,7 +621,7 @@ for _, row in top_5_gemeos.toPandas().iterrows():
     print(f"  🌍 Criando versão por porte + região geográfica...")
     fig_porte_regiao = criar_grafico_elasticidade_porte_regiao(df_graficos, gemeo, diretoria)
     
-    if fig_porte_regiao.data:
+    if fig_porte_regiao and fig_porte_regiao.data:
         print(f"    ✅ Gráfico por porte + região criado com sucesso")
         print(f"    💾 Configurações de alta resolução aplicadas")
         fig_porte_regiao.show()
@@ -610,7 +640,7 @@ for _, row in top_5_gemeos.toPandas().iterrows():
     print(f"  🗺️  Criando versão APENAS por região geográfica...")
     fig_regiao = criar_grafico_elasticidade_regiao(df_graficos, gemeo, diretoria)
     
-    if fig_regiao.data:
+    if fig_regiao and fig_regiao.data:
         print(f"    ✅ Gráfico APENAS por região criado com sucesso")
         print(f"    💾 Configurações de alta resolução aplicadas")
         fig_regiao.show()
