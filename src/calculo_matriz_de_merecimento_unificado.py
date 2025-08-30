@@ -12,8 +12,8 @@
 # MAGIC **Regras de Agrupamento por Categoria**:
 # MAGIC - **DIRETORIA DE TELAS**: Usa `gemeos` como grupo_de_necessidade
 # MAGIC - **DIRETORIA TELEFONIA CELULAR**: Usa `gemeos` como grupo_de_necessidade  
-# MAGIC - **DIRETORIA LINHA BRANCA**: Usa `NmEspecieGerencial` como grupo_de_necessidade
-# MAGIC - **DIRETORIA LINHA LEVE**: Usa `NmEspecieGerencial` como grupo_de_necessidade
+# MAGIC - **DIRETORIA LINHA BRANCA**: Usa `NmEspecieGerencial + "_" + DsVoltagem` como grupo_de_necessidade (DsVoltagem nulls preenchidos com "")
+# MAGIC - **DIRETORIA LINHA LEVE**: Usa `NmEspecieGerencial + "_" + DsVoltagem` como grupo_de_necessidade (DsVoltagem nulls preenchidos com "")
 # MAGIC - **DIRETORIA INFO/GAMES**: Usa `NmEspecieGerencial` como grupo_de_necessidade
 
 # COMMAND ----------
@@ -80,12 +80,12 @@ REGRAS_AGRUPAMENTO = {
     "DIRETORIA LINHA BRANCA": {
         "coluna_grupo_necessidade": "NmEspecieGerencial",
         "tipo_agrupamento": "espécie_gerencial",
-        "descricao": "Agrupamento por espécie gerencial"
+        "descricao": "Agrupamento por espécie gerencial + voltagem (DsVoltagem)"
     },
     "DIRETORIA LINHA LEVE": {
         "coluna_grupo_necessidade": "NmEspecieGerencial",
         "tipo_agrupamento": "espécie_gerencial", 
-        "descricao": "Agrupamento por espécie gerencial"
+        "descricao": "Agrupamento por espécie gerencial + voltagem (DsVoltagem)"
     },
     "DIRETORIA INFO/GAMES": {
         "coluna_grupo_necessidade": "NmEspecieGerencial",
@@ -135,17 +135,45 @@ def determinar_grupo_necessidade(categoria: str, df: DataFrame) -> DataFrame:
     if coluna_origem not in colunas_df:
         raise ValueError(f"Coluna '{coluna_origem}' não encontrada no DataFrame. Colunas disponíveis: {colunas_df}")
     
-    df_com_grupo = df.withColumn(
-        "grupo_de_necessidade",
-        F.coalesce(F.col(coluna_origem), F.lit("SEM_GN"))
-    ).withColumn(
-        "tipo_agrupamento",
-        F.lit(regra["tipo_agrupamento"])
-    )
-    
-    print(f"✅ Grupo de necessidade definido para '{categoria}':")
-    print(f"  • Coluna origem: {coluna_origem}")
-    print(f"  • Valores copiados: {df_com_grupo.select('grupo_de_necessidade').distinct().count()} grupos únicos")
+    # Verifica se é LINHA BRANCA ou LINHA LEVE para aplicar agrupamento especial
+    if categoria in ["DIRETORIA DE LINHA BRANCA", "DIRETORIA LINHA LEVE"]:
+        # Verifica se DsVoltagem existe no DataFrame
+        if "DsVoltagem" not in colunas_df:
+            raise ValueError(f"Coluna 'DsVoltagem' não encontrada no DataFrame para categoria '{categoria}'. Colunas disponíveis: {colunas_df}")
+        
+        # Cria grupo de necessidade combinando NmEspecieGerencial + "_" + DsVoltagem (nulls preenchidos com "")
+        df_com_grupo = df.withColumn(
+            "DsVoltagem_filled",
+            F.coalesce(F.col("DsVoltagem"), F.lit(""))
+        ).withColumn(
+            "grupo_de_necessidade",
+            F.concat(
+                F.coalesce(F.col(coluna_origem), F.lit("SEM_GN")),
+                F.lit("_"),
+                F.col("DsVoltagem_filled")
+            )
+        ).withColumn(
+            "tipo_agrupamento",
+            F.lit(regra["tipo_agrupamento"])
+        ).drop("DsVoltagem_filled")
+        
+        print(f"✅ Grupo de necessidade definido para '{categoria}' (com DsVoltagem):")
+        print(f"  • Coluna origem: {coluna_origem} + DsVoltagem")
+        print(f"  • Valores copiados: {df_com_grupo.select('grupo_de_necessidade').distinct().count()} grupos únicos")
+        
+    else:
+        # Para outras categorias, mantém o comportamento original
+        df_com_grupo = df.withColumn(
+            "grupo_de_necessidade",
+            F.coalesce(F.col(coluna_origem), F.lit("SEM_GN"))
+        ).withColumn(
+            "tipo_agrupamento",
+            F.lit(regra["tipo_agrupamento"])
+        )
+        
+        print(f"✅ Grupo de necessidade definido para '{categoria}':")
+        print(f"  • Coluna origem: {coluna_origem}")
+        print(f"  • Valores copiados: {df_com_grupo.select('grupo_de_necessidade').distinct().count()} grupos únicos")
     
     return df_com_grupo
 
