@@ -31,7 +31,7 @@ hoje_int = int(hoje.strftime("%Y%m%d"))
 
 def get_data_inicio(hoje: datetime | date | None = None) -> datetime:
     """
-    Retorna datetime no dia 1 do mês que está 12 meses antes de 'hoje'.
+    Retorna datetime no dia 1 do mês que está 18 meses antes de 'hoje'.
     """
     if hoje is None:
         hoje_d = date.today()
@@ -40,7 +40,7 @@ def get_data_inicio(hoje: datetime | date | None = None) -> datetime:
     else:
         hoje_d = hoje
 
-    total_meses = hoje_d.year * 12 + hoje_d.month - 12
+    total_meses = hoje_d.year * 12 + hoje_d.month - 18
     ano = total_meses // 12
     mes = total_meses % 12
     if mes == 0:
@@ -259,7 +259,8 @@ def build_sales_view(
         .withColumn("TeveVenda",
                     F.when(F.col("QtMercadoria") > 0, F.lit(1))
                     .otherwise(F.lit(0)))
-    )
+        )               
+
 
     return result
 
@@ -676,53 +677,6 @@ def save_merecimento_table(df: DataFrame, table_name: str) -> None:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## ✅ Processo Concluído
-# MAGIC
-# MAGIC A tabela de matriz de merecimento foi criada e salva com sucesso!
-# MAGIC
-# MAGIC **Tabela de destino**: `databox.bcg_comum.supply_base_merecimento_diario`
-# MAGIC
-# MAGIC **Conteúdo**:
-# MAGIC - Dados de estoque das lojas
-# MAGIC - Histórico de vendas com médias móveis de 90 dias
-# MAGIC - Análise de ruptura e receita perdida
-# MAGIC - Mapeamento completo de abastecimento (CDs e lojas)
-# MAGIC - Características geográficas e operacionais
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Debug: Verificação de Colunas
-
-# COMMAND ----------
-
-def debug_dataframe_info(df: DataFrame, stage_name: str):
-    """
-    Função de debug para verificar informações do DataFrame em cada etapa.
-    
-    Args:
-        df: DataFrame para verificar
-        stage_name: Nome da etapa para identificação
-    """
-    print(f"\n🔍 DEBUG - {stage_name}")
-    print("=" * 60)
-    print(f"📊 Total de registros: {df.count():,}")
-    print(f"📋 Total de colunas: {len(df.columns)}")
-    print(f"📋 Colunas disponíveis:")
-    for i, col in enumerate(df.columns, 1):
-        print(f"  {i:2d}. {col}")
-    print("-" * 60)
-
-# Verificar colunas em cada etapa
-debug_dataframe_info(df_estoque_loja, "Estoque Lojas")
-debug_dataframe_info(sales_df, "Vendas")
-debug_dataframe_info(df_mercadoria, "Mercadoria")
-debug_dataframe_info(df_merecimento_base, "Base Merecimento (após joins)")
-
-
-# COMMAND ----------
-
-# MAGIC %md
 # MAGIC ## 🔄 Processamento Incremental em Lotes de Meses
 
 # COMMAND ----------
@@ -840,7 +794,7 @@ def process_monthly_batch(
     spark: SparkSession,
     start_date: datetime,
     end_date: datetime,
-    table_name: str = "databox.bcg_comum.supply_base_merecimento_diario_v2"
+    table_name: str = "databox.bcg_comum.supply_base_merecimento_diario_v3"
 ) -> DataFrame:
     """
     Processa um lote de meses específico com gestão inteligente de memória.
@@ -993,7 +947,7 @@ def process_incremental_from_start_date(
     start_date: datetime,
     end_date: datetime = None,
     batch_size_months: int = 3,
-    table_name: str = "databox.bcg_comum.supply_base_merecimento_diario_v2"
+    table_name: str = "databox.bcg_comum.supply_base_merecimento_diario_v3"
 ) -> None:
     """
     Processa dados incrementalmente desde a data de início até hoje com gestão de memória.
@@ -1141,29 +1095,3 @@ def monitor_memory_usage(spark: SparkSession) -> None:
 # Executar processamento incremental
 # Descomente a linha abaixo para executar
 process_incremental_from_start_date(spark, data_inicio, batch_size_months=3)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 📊 Monitoramento da Tabela
-
-# COMMAND ----------
-
-# Monitorar qualidade da tabela (descomente para usar)
-#monitor_table_quality(spark, "databox.bcg_comum.supply_base_merecimento_diario_v2")
-
-# Monitorar uso de memória (descomente para usar)
-# monitor_memory_usage(spark)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 🔧 Manutenção da Tabela
-
-# COMMAND ----------
-
-# Limpar dados antigos (descomente para usar)
-# cleanup_old_data(spark, "databox.bcg_comum.supply_base_merecimento_diario_v2", retention_days=365)
-
-# Otimizar performance (descomente para usar)
-# optimize_table_performance(spark, "databox.bcg_comum.supply_base_merecimento_diario_v2")
