@@ -12,6 +12,8 @@
 # MAGIC **Visualizações**:
 # MAGIC - Gráfico de barras empilhadas: Vendas mensais (k unidades) por porte de loja
 # MAGIC - Gráfico de barras empilhadas: Proporção % de vendas por porte de loja
+# MAGIC - Gráfico de barras empilhadas: Vendas mensais (k unidades) por região geográfica
+# MAGIC - Gráfico de barras empilhadas: Proporção % de vendas por região geográfica
 
 # COMMAND ----------
 
@@ -143,6 +145,9 @@ display(top_5_gemeos)
 
 # MAGIC %md
 # MAGIC ## 6. Preparação de Dados para Gráficos
+# MAGIC 
+# MAGIC **IMPORTANTE**: Implementada solução para garantir que todos os meses sejam incluídos nos gráficos,
+# MAGIC mesmo quando não há vendas para todos os portes de loja em um determinado mês.
 
 # COMMAND ----------
 
@@ -210,9 +215,12 @@ def criar_grafico_elasticidade_porte(
         .agg({'qt_vendas': 'sum'}).reset_index()
     )
 
+    # Garante que todos os meses sejam incluídos, mesmo sem vendas
     df_pivot = (
         df_agrupado.pivot(index='year_month', columns='NmPorteLoja', values='qt_vendas')
-        .fillna(0).sort_index()
+        .fillna(0)
+        .reindex(sorted(df_gemeo['year_month'].unique()))  # Inclui todos os meses unicos
+        .sort_index()
     )
     df_prop = df_pivot.div(df_pivot.sum(axis=1), axis=0) * 100
 
@@ -320,7 +328,9 @@ def criar_grafico_elasticidade_porte_regiao(
 
     df_pivot = (
         df_agrupado.pivot(index='year_month', columns='porte_regiao', values='qt_vendas')
-        .fillna(0).sort_index()
+        .fillna(0)
+        .reindex(sorted(df_gemeo['year_month'].unique()))  # Inclui todos os meses unicos
+        .sort_index()
     )
     df_prop = df_pivot.div(df_pivot.sum(axis=1), axis=0) * 100
 
@@ -411,20 +421,140 @@ def criar_grafico_elasticidade_porte_regiao(
 
     return fig
 
+
+def criar_grafico_elasticidade_regiao(
+    df: pd.DataFrame,
+    gemeo: str,
+    diretoria: str
+) -> go.Figure:
+    """Gráfico de elasticidade apenas por região geográfica com anotações visíveis."""
+    df_gemeo = df[df['gemeos'] == gemeo].copy()
+    if df_gemeo.empty:
+        print(f"⚠️  Nenhum dado encontrado para o gêmeo: {gemeo}")
+        return go.Figure()
+
+    df_agrupado = (
+        df_gemeo.groupby(['year_month', 'NmRegiaoGeografica'])
+        .agg({'qt_vendas': 'sum'}).reset_index()
+    )
+    
+    # Garante que todos os meses sejam incluídos, mesmo sem vendas
+    df_pivot = (
+        df_agrupado.pivot(index='year_month', columns='NmRegiaoGeografica', values='qt_vendas')
+        .fillna(0)
+        .reindex(sorted(df_gemeo['year_month'].unique()))  # Inclui todos os meses unicos
+        .sort_index()
+    )
+    df_prop = df_pivot.div(df_pivot.sum(axis=1), axis=0) * 100
+
+    fig = make_subplots(
+        rows=1, cols=2,
+        subplot_titles=[
+            f"<b>Vendas mensais (k unid.) de {gemeo} por região geográfica</b>",
+            f"<b>Proporção % de vendas de {gemeo} por região geográfica</b>",
+        ],
+        specs=[[{"type": "bar"}, {"type": "bar"}]],
+        horizontal_spacing=0.12,
+    )
+
+    # Cores para regiões (esquema de cores profissional)
+    cores_regioes = {
+        'SUL': '#1a365d', 'SUDESTE': '#2c5282', 'CENTRO-OESTE': '#3182ce',
+        'NORDESTE': '#4299e1', 'NORTE': '#63b3ed', 'SEM REGIÃO': '#90cdf4'
+    }
+    
+    # Ordem das regiões (mais importantes primeiro)
+    ordem_regioes = ['SUDESTE', 'SUL', 'NORDESTE', 'CENTRO-OESTE', 'NORTE', 'SEM REGIÃO']
+    regioes = [r for r in ordem_regioes if r in df_pivot.columns]
+
+    x_labels = pd.to_datetime(df_pivot.index).strftime('%b/%y').tolist()
+    x_labels_prop = pd.to_datetime(df_prop.index).strftime('%b/%y').tolist()
+
+    # Barras para vendas absolutas
+    for regiao in regioes:
+        cor = cores_regioes.get(regiao, '#90cdf4')
+        fig.add_trace(
+            go.Bar(
+                x=x_labels, y=(df_pivot[regiao]/1000), name=regiao, marker_color=cor,
+                marker_line_color="#FFFFFF", marker_line_width=0.7,
+                hovertemplate=f"<b>{regiao}</b><br>Mês: %{ '{' }x{'}' }<br>Vendas: %{ '{' }y:.1f{'}' }k<extra></extra>"
+            ),
+            row=1, col=1
+        )
+    
+    # Barras para proporções
+    for regiao in regioes:
+        cor = cores_regioes.get(regiao, '#90cdf4')
+        fig.add_trace(
+            go.Bar(
+                x=x_labels_prop, y=df_prop[regiao], name=regiao, showlegend=False,
+                marker_line_color="#FFFFFF", marker_line_width=0.7,
+                hovertemplate=f"<b>{regiao}</b><br>Mês: %{ '{' }x{'}' }<br>Proporção: %{ '{' }y:.1f{'}' }%<extra></extra>"
+            ),
+            row=1, col=2
+        )
+
+    # Eixo X categórico fixo
+    fig.update_xaxes(type='category', categoryorder='array', categoryarray=x_labels, row=1, col=1)
+    fig.update_xaxes(type='category', categoryorder='array', categoryarray=x_labels_prop, row=1, col=2)
+
+    # Headroom + anotações
+    totais = (df_pivot.sum(axis=1)/1000).astype(float)
+    y_max = float(totais.max())*1.25 if len(totais) else 1
+    fig.update_yaxes(range=[0, y_max], row=1, col=1)
+
+    for xi, total in zip(x_labels, totais):
+        fig.add_annotation(
+            x=xi, y=float(total), text=f"{float(total):.1f}k",
+            showarrow=False, yshift=14,
+            font=dict(size=12, color='#2c3e50'),
+            row=1, col=1
+        )
+
+    # Layout
+    fig.update_layout(
+        title=dict(
+            text=(f"<b>Análise Regional | Dinâmica de vendas por região geográfica</b>"
+                  f"<br><sub style='color:#7f8c8d'>{gemeo} - {diretoria} - APENAS REGIÃO GEOGRÁFICA</sub>"),
+            x=0.5, xanchor='center', pad=dict(t=10, b=6)
+        ),
+        barmode='stack', bargap=0.15, bargroupgap=0.04,
+        height=780, width=1400,
+        plot_bgcolor='#F2F2F2', paper_bgcolor='#F2F2F2',
+        legend=dict(orientation="h", x=0.5, xanchor="center", y=-0.22),
+        margin=dict(l=90, r=90, t=170, b=160, pad=12),
+        hovermode="x unified",
+    )
+    
+    # Subtítulos
+    for i, ann in enumerate(fig.layout.annotations):
+        if i < 2:
+            ann.update(y=1.09, yanchor='bottom', font=dict(size=13, color='#2c3e50'))
+
+    # Eixos
+    fig.update_yaxes(range=[0, 100], row=1, col=2, title_text="<b>Proporção % de vendas</b>")
+    fig.update_yaxes(title_text="<b>Vendas mensais (k unid.)</b>", row=1, col=1)
+    fig.update_xaxes(title_text="<b>Mês</b>", row=1, col=1)
+    fig.update_xaxes(title_text="<b>Mês</b>", row=1, col=2)
+
+    return fig
+
+
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## 8. Criação dos Gráficos para Cada Top Gêmeo
 # MAGIC
 # MAGIC %md
-# MAGIC ### Execução da Análise Completa - Duas Versões
+# MAGIC ### Execução da Análise Completa - Três Versões
 
 # COMMAND ----------
 
 print("🚀 Iniciando criação dos gráficos de elasticidade...")
-print("📊 Serão criadas duas versões para cada gêmeo:")
+print("📊 Serão criadas três versões para cada gêmeo:")
 print("   1. APENAS por porte de loja")
 print("   2. Por porte de loja + região geográfica")
+print("   3. APENAS por região geográfica")
 print("🎨 Gráficos configurados com alta resolução para slides profissionais")
 !pip install -U kaleido
 # Configurações globais para alta qualidade
@@ -475,9 +605,28 @@ for _, row in top_5_gemeos.toPandas().iterrows():
             print(f"    ⚠️  Erro ao salvar imagem: {e}")
     else:
         print(f"    ⚠️  Nenhum dado para gráfico por porte + região")
+    
+    # VERSÃO 3: Apenas por região geográfica
+    print(f"  🗺️  Criando versão APENAS por região geográfica...")
+    fig_regiao = criar_grafico_elasticidade_regiao(df_graficos, gemeo, diretoria)
+    
+    if fig_regiao.data:
+        print(f"    ✅ Gráfico APENAS por região criado com sucesso")
+        print(f"    💾 Configurações de alta resolução aplicadas")
+        fig_regiao.show()
+        
+        # Salva versão de alta resolução para slides
+        try:
+            fig_regiao.write_image(f"grafico_regiao_{gemeo.replace(' ', '_')}.png", 
+                                 width=1400, height=900, scale=2)
+            print(f"    💾 Imagem de alta resolução salva: grafico_regiao_{gemeo.replace(' ', '_')}.png")
+        except Exception as e:
+            print(f"    ⚠️  Erro ao salvar imagem: {e}")
+    else:
+        print(f"    ⚠️  Nenhum dado para gráfico APENAS por região")
 
 print("\n✅ Análise de elasticidade concluída!")
-print(f"📊 Total de gráficos criados: {len(top_5_gemeos.toPandas()) * 2} (2 versões por gêmeo)")
+print(f"📊 Total de gráficos criados: {len(top_5_gemeos.toPandas()) * 3} (3 versões por gêmeo)")
 print("🎨 Todos os gráficos foram exibidos usando plotly.show()")
 print("💾 Imagens de alta resolução salvas para uso em slides profissionais")
 print("🎯 Portes organizados em ordem descendente (Porte 6 no topo)")
