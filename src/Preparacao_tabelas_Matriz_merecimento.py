@@ -40,7 +40,7 @@ def get_data_inicio(hoje: datetime | date | None = None) -> datetime:
     else:
         hoje_d = hoje
 
-    total_meses = hoje_d.year * 12 + hoje_d.month - 19
+    total_meses = hoje_d.year * 12 + hoje_d.month - 6
     ano = total_meses // 12
     mes = total_meses % 12
     if mes == 0:
@@ -80,6 +80,8 @@ def load_estoque_loja_data(spark: SparkSession) -> DataFrame:
         .filter(F.col("DtAtual") >= data_inicio)
         .filter(F.col("StLoja") == "ATIVA")
         .filter(F.col("DsEstoqueLojaDeposito") == "L")
+
+
         .select(
             "CdFilial", 
             "CdSku",
@@ -184,6 +186,7 @@ def build_sales_view(
     # unify and filter
     df = (
         df_rateada
+
         .filter(F.col("NmTipoNegocio") == 'LOJA FISICA')
         .join(df_nao_rateada.select("ChaveFatos","QtMercadoria"), on="ChaveFatos")
         .filter(
@@ -191,7 +194,7 @@ def build_sales_view(
             & (F.col("VrOperacao") >= 0)
             & (F.col("VrCustoContabilFilialSku") >= 0)
             & (F.col("QtMercadoria") >= 0)
-        )
+        )        
         .withColumn(
             "year_month",
             F.date_format(F.to_date(F.col("DtAprovacao").cast("string"), "yyyyMMdd"), "yyyyMM").cast("int")
@@ -463,7 +466,7 @@ def load_cd_characteristics(spark: SparkSession) -> DataFrame:
     return (
         spark.table("data_engineering_prd.app_operacoesloja.roteirizacaocentrodistribuicao")
         .select(
-            F.col("CdFilial"),
+            F.col("CdFilial").alias("CdFilial").cast("string"),
             "NmFilial",
             F.concat_ws("/", F.col("NmCidade"), F.col("NmUF")).alias("NmCidade_UF"),
             "NmTipoFilial"
@@ -487,7 +490,7 @@ def load_store_characteristics(spark: SparkSession) -> DataFrame:
         spark.table("data_engineering_prd.app_operacoesloja.roteirizacaolojaativa")
         .select(
             F.col("NmBandeira").alias("BandeiraLoja"),
-            F.col("CdFilial"),
+            F.col("CdFilial").alias("CdFilial").cast("string"),
             F.col("NmFilial").alias("NmLoja"),
             F.col("NmCidade").alias("NmCidadeLoja"),
             F.col("NmUF").alias("NmUFLoja"),
@@ -497,6 +500,7 @@ def load_store_characteristics(spark: SparkSession) -> DataFrame:
             F.col("CdLatitude").alias("LatitudeLoja"),
             F.col("CdLongitude").alias("LongitudeLoja"),
         )
+        .dropDuplicates(["CdFilial"])
     )
 
 def load_supply_plan_mapping(spark: SparkSession) -> DataFrame:
@@ -523,7 +527,7 @@ def load_supply_plan_mapping(spark: SparkSession) -> DataFrame:
         .select(
             F.col("CdFilialAtende").alias("CD_primario"),
             F.col("CdFilialEntrega").alias("CD_secundario"),
-            F.col("CdLoja").alias("CdFilial"),
+            F.col("CdLoja").alias("CdFilial").cast("int"),
             F.col("QtdDiasViagem").alias("LeadTime"),
             F.col("QtdCargasDia").alias("QtdCargasDia"),
             F.col("DsCubagemCaminhao").alias("DsCubagemCaminhao"),
@@ -536,6 +540,7 @@ def load_supply_plan_mapping(spark: SparkSession) -> DataFrame:
             F.col("QtdSabado"),
             F.col("QtdDomingo"),
         )
+        .dropDuplicates(["CdFilial"])
     )
 
 # COMMAND ----------
@@ -565,9 +570,9 @@ def create_complete_supply_mapping(
     de_para_filial_CD = load_supply_plan_mapping(spark)
     
     # Normalizar IDs
-    caracteristicas_cd = normalize_ids(caracteristicas_cd, ["CdFilial"])
-    caracteristicas_loja = normalize_ids(caracteristicas_loja, ["CdFilial"])
-    de_para_filial_CD = normalize_ids(de_para_filial_CD, ["CdFilial", "CD_primario", "CD_secundario"])
+    # caracteristicas_cd = normalize_ids(caracteristicas_cd, ["CdFilial"])
+    # caracteristicas_loja = normalize_ids(caracteristicas_loja, ["CdFilial"])
+    # de_para_filial_CD = normalize_ids(de_para_filial_CD, ["CdFilial", "CD_primario", "CD_secundario"])
     
     # Construir mapeamento completo
     return (
@@ -575,7 +580,7 @@ def create_complete_supply_mapping(
         # Características da loja
         .join(F.broadcast(caracteristicas_loja), on="CdFilial", how="inner")
         .select(
-            "CdFilial",
+            F.col("CdFilial").alias("CdFilial").cast("string"),
             "BandeiraLoja", "NmLoja", "NmCidadeLoja", "NmUFLoja", "CEPLoja",
             "NmPorteLoja", "TipoLoja", "LatitudeLoja", "LongitudeLoja",
             "CD_primario", "CD_secundario", "LeadTime", "QtdCargasDia",
