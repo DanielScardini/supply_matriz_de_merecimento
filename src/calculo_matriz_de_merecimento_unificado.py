@@ -36,6 +36,26 @@
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## 1. Imports e Configurações Iniciais
+
+# COMMAND ----------
+
+from pyspark.sql import SparkSession, DataFrame
+from pyspark.sql import functions as F, Window
+from datetime import datetime, timedelta, date
+import pandas as pd
+from typing import List, Optional, Dict, Any
+
+# Inicialização do Spark
+spark = SparkSession.builder.appName("calculo_matriz_merecimento_unificado").getOrCreate()
+
+hoje = datetime.now() - timedelta(days=1)
+hoje_str = hoje.strftime("%Y-%m-%d")
+hoje_int = int(hoje.strftime("%Y%m%d"))
+
+# COMMAND ----------
+
 df_matriz_geral = (
     spark.createDataFrame(
         pd.read_csv(
@@ -60,29 +80,6 @@ df_matriz_geral = (
     )
     .dropDuplicates()
 )
-
-
-df_matriz_geral.display()
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 1. Imports e Configurações Iniciais
-
-# COMMAND ----------
-
-from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql import functions as F, Window
-from datetime import datetime, timedelta, date
-import pandas as pd
-from typing import List, Optional, Dict, Any
-
-# Inicialização do Spark
-spark = SparkSession.builder.appName("calculo_matriz_merecimento_unificado").getOrCreate()
-
-hoje = datetime.now() - timedelta(days=1)
-hoje_str = hoje.strftime("%Y-%m-%d")
-hoje_int = int(hoje.strftime("%Y%m%d"))
 
 # COMMAND ----------
 
@@ -253,10 +250,10 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-01-01") -> Data
             F.date_format(F.col("DtAtual"), "yyyyMM").cast("int")
         )
         .fillna(0, subset=["Receita", "QtMercadoria", "TeveVenda"])
-    )
+    ).limit(1000)
     
     # Cache para otimização
-    df_base.limit(1000).cache()
+    df_base.cache()
     
     print(f"✅ Dados carregados para '{categoria}':")
     print(f"  • Total de registros: {df_base.count():,}")
@@ -1987,11 +1984,6 @@ df_telas_completo.display()
 
 # COMMAND ----------
 
-# Verificação da base de merecimento (limitado para agilizar)
-spark.table('databox.bcg_comum.supply_base_merecimento_diario_TELEFONIA_CELULAR').limit(1000).display()
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC ## 12. Exemplo de Uso
 
@@ -2264,7 +2256,7 @@ df_telas_completo = executar_calculo_matriz_merecimento(
 )
 
 # Exibir resultado (limitado para agilizar)
-df_telas_completo.limit(1000).display()
+df_telas_completo.display()
 
 # COMMAND ----------
 
