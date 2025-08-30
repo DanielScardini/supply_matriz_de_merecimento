@@ -53,7 +53,7 @@ df_base_merecimento = (
 
 print(f"✅ Dados base carregados: {df_base_merecimento.count():,} registros")
 
-df_base_merecimento.display()
+df_base_merecimento.limit(10).display()
 
 # COMMAND ----------
 
@@ -199,183 +199,104 @@ def criar_grafico_elasticidade_porte(
     gemeo: str,
     diretoria: str
 ) -> go.Figure:
-    """
-    Gráfico de elasticidade por porte de loja com melhor espaçamento vertical.
-    """
+    """Gráfico de elasticidade por porte com anotações visíveis."""
     df_gemeo = df[df['gemeos'] == gemeo].copy()
     if df_gemeo.empty:
         print(f"⚠️  Nenhum dado encontrado para o gêmeo: {gemeo}")
         return go.Figure()
 
     df_agrupado = (
-        df_gemeo
-        .groupby(['year_month', 'NmPorteLoja'])
-        .agg({'qt_vendas': 'sum'})
-        .reset_index()
+        df_gemeo.groupby(['year_month', 'NmPorteLoja'])
+        .agg({'qt_vendas': 'sum'}).reset_index()
     )
 
-    df_pivot = df_agrupado.pivot(
-        index='year_month',
-        columns='NmPorteLoja',
-        values='qt_vendas'
-    ).fillna(0).sort_index()
-
+    df_pivot = (
+        df_agrupado.pivot(index='year_month', columns='NmPorteLoja', values='qt_vendas')
+        .fillna(0).sort_index()
+    )
     df_prop = df_pivot.div(df_pivot.sum(axis=1), axis=0) * 100
 
     fig = make_subplots(
         rows=1, cols=2,
         subplot_titles=[
             f"<b>Vendas mensais (k unid.) de {gemeo} por porte de loja</b>",
-            f"<b>Proporção % de vendas de {gemeo} por porte de loja</b>"
+            f"<b>Proporção % de vendas de {gemeo} por porte de loja</b>",
         ],
         specs=[[{"type": "bar"}, {"type": "bar"}]],
-        horizontal_spacing=0.12
+        horizontal_spacing=0.12,
     )
 
-    ordem_portes = ['PORTE 6', 'PORTE 5', 'PORTE 4', 'PORTE 3', 'PORTE 2', 'PORTE 1']
-    portes_validos = [p for p in ordem_portes if p in df_pivot.columns]
-
-    cores_porte = {
-        'PORTE 6': '#1a365d',
-        'PORTE 5': '#2c5282',
-        'PORTE 4': '#3182ce',
-        'PORTE 3': '#4299e1',
-        'PORTE 2': '#63b3ed',
-        'PORTE 1': '#90cdf4',
+    ordem = ['PORTE 6','PORTE 5','PORTE 4','PORTE 3','PORTE 2','PORTE 1']
+    portas = [p for p in ordem if p in df_pivot.columns]
+    cores = {
+        'PORTE 6':'#1a365d','PORTE 5':'#2c5282','PORTE 4':'#3182ce',
+        'PORTE 3':'#4299e1','PORTE 2':'#63b3ed','PORTE 1':'#90cdf4'
     }
 
-    x1 = pd.to_datetime(df_pivot.index).strftime('%b/%y')
-    x2 = pd.to_datetime(df_prop.index).strftime('%b/%y')
+    x_labels = pd.to_datetime(df_pivot.index).strftime('%b/%y').tolist()
+    x_labels_prop = pd.to_datetime(df_prop.index).strftime('%b/%y').tolist()
 
-    for porte in portes_validos:
+    # barras
+    for p in portas:
         fig.add_trace(
             go.Bar(
-                x=x1,
-                y=df_pivot[porte] / 1000,
-                name=porte,
-                marker_color=cores_porte[porte],
-                marker_line_color="#FFFFFF",
-                marker_line_width=0.7,
-                hovertemplate=(
-                    f'<b>{porte}</b><br>'
-                    'Mês: %{x}<br>'
-                    'Vendas: %{y:.1f}k unid.<extra></extra>'
-                )
+                x=x_labels, y=(df_pivot[p]/1000), name=p, marker_color=cores[p],
+                marker_line_color="#FFFFFF", marker_line_width=0.7,
+                hovertemplate=f"<b>{p}</b><br>Mês: %{ '{' }x{'}' }<br>Vendas: %{ '{' }y:.1f{'}' }k<extra></extra>"
             ),
             row=1, col=1
         )
-
-    for porte in portes_validos:
+    for p in portas:
         fig.add_trace(
             go.Bar(
-                x=x2,
-                y=df_prop[porte],
-                name=porte,
-                marker_color=cores_porte[porte],
-                marker_line_color="#FFFFFF",
-                marker_line_width=0.7,
-                showlegend=False,
-                hovertemplate=(
-                    f'<b>{porte}</b><br>'
-                    'Mês: %{x}<br>'
-                    'Proporção: %{y:.1f}%<extra></extra>'
-                )
+                x=x_labels_prop, y=df_prop[p], name=p, marker_color=cores[p], showlegend=False,
+                marker_line_color="#FFFFFF", marker_line_width=0.7,
+                hovertemplate=f"<b>{p}</b><br>Mês: %{ '{' }x{'}' }<br>Proporção: %{ '{' }y:.1f{'}' }%<extra></extra>"
             ),
             row=1, col=2
         )
 
-    totais_mensais = df_pivot.sum(axis=1) / 1000
-    for i, total in enumerate(totais_mensais):
+    # eixo X categórico fixo
+    fig.update_xaxes(type='category', categoryorder='array', categoryarray=x_labels, row=1, col=1)
+    fig.update_xaxes(type='category', categoryorder='array', categoryarray=x_labels_prop, row=1, col=2)
+
+    # headroom + anotações
+    totais = (df_pivot.sum(axis=1)/1000).astype(float)
+    y_max = float(totais.max())*1.25 if len(totais) else 1
+    fig.update_yaxes(range=[0, y_max], row=1, col=1)
+
+    for xi, total in zip(x_labels, totais):
         fig.add_annotation(
-            x=x1[i],
-            y=total,
-            yanchor="bottom",
-            yshift=14,  # mais distância do topo da barra
-            text=f"{total:.1f}k",
-            showarrow=False,
-            font=dict(size=12, color='#2c3e50', family="Arial, sans-serif"),
-            xref='x',
-            yref='y'
+            x=xi, y=float(total), text=f"{float(total):.1f}k",
+            showarrow=False, yshift=14,
+            font=dict(size=12, color='#2c3e50'),
+            row=1, col=1
         )
 
-    # Headroom dinâmico no eixo Y do 1º subplot
-    y_max = float(totais_mensais.max()) * 1.18 if len(totais_mensais) else None
-
+    # layout
     fig.update_layout(
         title=dict(
-            text=(
-                f"<b>Eventos e apostas | Dinâmica de vendas se altera significativamente em eventos e apostas, "
-                f"impactando a proporção de merecimento</b>"
-                f"<br><sub style='color:#7f8c8d; font-size:14px;'>{gemeo} - {diretoria} - APENAS PORTE DE LOJA</sub>"
-            ),
-            x=0.5, xanchor='center', y=0.98,
-            font=dict(size=18, color='#2c3e50', family="Arial, sans-serif"),
-            pad=dict(t=10, b=6)  # respiro entre título/sub e o gráfico
+            text=(f"<b>Eventos e apostas | Dinâmica de vendas se altera significativamente</b>"
+                  f"<br><sub style='color:#7f8c8d'>{gemeo} - {diretoria} - APENAS PORTE DE LOJA</sub>"),
+            x=0.5, xanchor='center', pad=dict(t=10, b=6)
         ),
-        barmode='stack',
-        bargap=0.15,
-        bargroupgap=0.04,
-        height=780,
-        width=1400,
-        plot_bgcolor='#F2F2F2',
-        paper_bgcolor='#F2F2F2',
-        font=dict(family="Arial, sans-serif", size=12),
-        legend=dict(
-            title_text="Porte de loja",
-            orientation="h",
-            x=0.5, xanchor="center",
-            y=-0.22, yanchor="top",  # mais baixo
-            bgcolor='rgba(255,255,255,0.9)',
-            bordercolor='#bdc3c7',
-            borderwidth=1,
-            font=dict(size=11, color='#2c3e50'),
-            tracegroupgap=6
-        ),
+        barmode='stack', bargap=0.15, bargroupgap=0.04,
+        height=780, width=1400,
+        plot_bgcolor='#F2F2F2', paper_bgcolor='#F2F2F2',
+        legend=dict(orientation="h", x=0.5, xanchor="center", y=-0.22),
         margin=dict(l=90, r=90, t=170, b=160, pad=12),
-        hoverlabel=dict(font_size=12, namelength=-1),
         hovermode="x unified",
-        showlegend=True
     )
-
-    # Subtítulos dos subplots mais altos
+    # subtítulos
     for i, ann in enumerate(fig.layout.annotations):
         if i < 2:
             ann.update(y=1.09, yanchor='bottom', font=dict(size=13, color='#2c3e50'))
 
-    fig.update_xaxes(
-        title_text="<b>Mês</b>",
-        tickangle=30, ticks="outside", ticklen=6,
-        title_standoff=20, automargin=True,
-        tickfont=dict(size=11, color='#34495e'),
-        gridcolor='rgba(255,255,255,0.8)', zerolinecolor='#bdc3c7',
-        row=1, col=1
-    )
-    fig.update_xaxes(
-        title_text="<b>Mês</b>",
-        tickangle=30, ticks="outside", ticklen=6,
-        title_standoff=20, automargin=True,
-        tickfont=dict(size=11, color='#34495e'),
-        gridcolor='rgba(255,255,255,0.8)', zerolinecolor='#bdc3c7',
-        row=1, col=2
-    )
-    fig.update_yaxes(
-        title_text="<b>Vendas mensais (k unid.)</b>",
-        range=[0, y_max] if y_max else None,
-        ticks="outside", ticklen=6,
-        title_standoff=22, automargin=True,
-        tickfont=dict(size=11, color='#34495e'),
-        gridcolor='rgba(255,255,255,0.8)', zerolinecolor='#bdc3c7',
-        row=1, col=1
-    )
-    fig.update_yaxes(
-        title_text="<b>Proporção % de vendas</b>",
-        range=[0, 100],
-        ticks="outside", ticklen=6,
-        title_standoff=22, automargin=True,
-        tickfont=dict(size=11, color='#34495e'),
-        gridcolor='rgba(255,255,255,0.8)', zerolinecolor='#bdc3c7',
-        row=1, col=2
-    )
+    # eixos
+    fig.update_yaxes(range=[0, 100], row=1, col=2, title_text="<b>Proporção % de vendas</b>")
+    fig.update_yaxes(title_text="<b>Vendas mensais (k unid.)</b>", row=1, col=1)
+    fig.update_xaxes(title_text="<b>Mês</b>", row=1, col=1)
+    fig.update_xaxes(title_text="<b>Mês</b>", row=1, col=2)
 
     return fig
 
@@ -385,189 +306,108 @@ def criar_grafico_elasticidade_porte_regiao(
     gemeo: str,
     diretoria: str
 ) -> go.Figure:
-    """
-    Gráfico de elasticidade por porte + região com melhor espaçamento vertical.
-    """
+    """Gráfico de elasticidade por porte + região com anotações visíveis."""
     df_gemeo = df[df['gemeos'] == gemeo].copy()
     if df_gemeo.empty:
         print(f"⚠️  Nenhum dado encontrado para o gêmeo: {gemeo}")
         return go.Figure()
 
     df_agrupado = (
-        df_gemeo
-        .groupby(['year_month', 'NmPorteLoja', 'NmRegiaoGeografica'])
-        .agg({'qt_vendas': 'sum'})
-        .reset_index()
+        df_gemeo.groupby(['year_month', 'NmPorteLoja', 'NmRegiaoGeografica'])
+        .agg({'qt_vendas': 'sum'}).reset_index()
     )
     df_agrupado['porte_regiao'] = df_agrupado['NmPorteLoja'] + ' - ' + df_agrupado['NmRegiaoGeografica']
 
-    df_pivot = df_agrupado.pivot(
-        index='year_month',
-        columns='porte_regiao',
-        values='qt_vendas'
-    ).fillna(0).sort_index()
-
+    df_pivot = (
+        df_agrupado.pivot(index='year_month', columns='porte_regiao', values='qt_vendas')
+        .fillna(0).sort_index()
+    )
     df_prop = df_pivot.div(df_pivot.sum(axis=1), axis=0) * 100
 
     fig = make_subplots(
         rows=1, cols=2,
         subplot_titles=[
-            f"<b>Vendas mensais (k unid.) de {gemeo} por porte de loja + região</b>",
-            f"<b>Proporção % de vendas de {gemeo} por porte de loja + região</b>"
+            f"<b>Vendas mensais (k unid.) de {gemeo} por porte + região</b>",
+            f"<b>Proporção % de vendas de {gemeo} por porte + região</b>",
         ],
         specs=[[{"type": "bar"}, {"type": "bar"}]],
-        horizontal_spacing=0.12
+        horizontal_spacing=0.12,
     )
 
-    ordem_portes = ['PORTE 6', 'PORTE 5', 'PORTE 4', 'PORTE 3', 'PORTE 2', 'PORTE 1']
-    cores_base = {
-        'PORTE 6': '#1a365d',
-        'PORTE 5': '#2c5282',
-        'PORTE 4': '#3182ce',
-        'PORTE 3': '#4299e1',
-        'PORTE 2': '#63b3ed',
-        'PORTE 1': '#90cdf4',
+    cores = {
+        'PORTE 6':'#1a365d','PORTE 5':'#2c5282','PORTE 4':'#3182ce',
+        'PORTE 3':'#4299e1','PORTE 2':'#63b3ed','PORTE 1':'#90cdf4'
     }
+    ordem = list(cores.keys())
+    cols_ord = []
+    for p in ordem:
+        cols_ord.extend([c for c in df_pivot.columns if c.startswith(p)])
 
-    colunas_ordenadas = []
-    for porte in ordem_portes:
-        colunas_porte = [col for col in df_pivot.columns if col.startswith(porte)]
-        colunas_ordenadas.extend(colunas_porte)
+    x_labels = pd.to_datetime(df_pivot.index).strftime('%b/%y').tolist()
+    x_labels_prop = pd.to_datetime(df_prop.index).strftime('%b/%y').tolist()
 
-    x1 = pd.to_datetime(df_pivot.index).strftime('%b/%y')
-    x2 = pd.to_datetime(df_prop.index).strftime('%b/%y')
-
-    for col in colunas_ordenadas:
-        porte = col.split(' - ')[0]
-        if porte in cores_base:
-            fig.add_trace(
-                go.Bar(
-                    x=x1,
-                    y=df_pivot[col] / 1000,
-                    name=col,
-                    marker_color=cores_base[porte],
-                    marker_line_color="#FFFFFF",
-                    marker_line_width=0.7,
-                    hovertemplate=(
-                        f'<b>{col}</b><br>'
-                        'Mês: %{x}<br>'
-                        'Vendas: %{y:.1f}k unid.<extra></extra>'
-                    )
-                ),
-                row=1, col=1
-            )
-
-    for col in colunas_ordenadas:
-        porte = col.split(' - ')[0]
-        if porte in cores_base:
-            fig.add_trace(
-                go.Bar(
-                    x=x2,
-                    y=df_prop[col],
-                    name=col,
-                    marker_color=cores_base[porte],
-                    marker_line_color="#FFFFFF",
-                    marker_line_width=0.7,
-                    showlegend=False,
-                    hovertemplate=(
-                        f'<b>{col}</b><br>'
-                        'Mês: %{x}<br>'
-                        'Proporção: %{y:.1f}%<extra></extra>'
-                    )
-                ),
-                row=1, col=2
-            )
-
-    totais_mensais = df_pivot.sum(axis=1) / 1000
-    for i, total in enumerate(totais_mensais):
-        fig.add_annotation(
-            x=x1[i],
-            y=total,
-            yanchor="bottom",
-            yshift=14,
-            text=f"{total:.1f}k",
-            showarrow=False,
-            font=dict(size=12, color='#2c3e50', family="Arial, sans-serif"),
-            xref='x',
-            yref='y'
+    for c in cols_ord:
+        p = c.split(' - ')[0]
+        fig.add_trace(
+            go.Bar(
+                x=x_labels, y=(df_pivot[c]/1000), name=c,
+                marker_color=cores[p],
+                marker_line_color="#FFFFFF", marker_line_width=0.7,
+                hovertemplate=f"<b>{c}</b><br>Mês: %{ '{' }x{'}' }<br>Vendas: %{ '{' }y:.1f{'}' }k<extra></extra>"
+            ),
+            row=1, col=1
+        )
+    for c in cols_ord:
+        p = c.split(' - ')[0]
+        fig.add_trace(
+            go.Bar(
+                x=x_labels_prop, y=df_prop[c], name=c, showlegend=False,
+                marker_color=cores[p],
+                marker_line_color="#FFFFFF", marker_line_width=0.7,
+                hovertemplate=f"<b>{c}</b><br>Mês: %{ '{' }x{'}' }<br>Proporção: %{ '{' }y:.1f{'}' }%<extra></extra>"
+            ),
+            row=1, col=2
         )
 
-    y_max = float(totais_mensais.max()) * 1.18 if len(totais_mensais) else None
+    # eixos categóricos
+    fig.update_xaxes(type='category', categoryorder='array', categoryarray=x_labels, row=1, col=1)
+    fig.update_xaxes(type='category', categoryorder='array', categoryarray=x_labels_prop, row=1, col=2)
+
+    # headroom + anotações
+    totais = (df_pivot.sum(axis=1)/1000).astype(float)
+    y_max = float(totais.max())*1.25 if len(totais) else 1
+    fig.update_yaxes(range=[0, y_max], row=1, col=1)
+
+    for xi, total in zip(x_labels, totais):
+        fig.add_annotation(
+            x=xi, y=float(total), text=f"{float(total):.1f}k",
+            showarrow=False, yshift=14,
+            font=dict(size=12, color='#2c3e50'),
+            row=1, col=1
+        )
 
     fig.update_layout(
         title=dict(
-            text=(
-                f"<b>Eventos e apostas | Dinâmica de vendas se altera significativamente em eventos e apostas, "
-                f"impactando a proporção de merecimento</b>"
-                f"<br><sub style='color:#7f8c8d; font-size:14px;'>{gemeo} - {diretoria} - PORTE DE LOJA + REGIÃO GEOGRÁFICA</sub>"
-            ),
-            x=0.5, xanchor='center', y=0.98,
-            font=dict(size=18, color='#2c3e50', family="Arial, sans-serif"),
-            pad=dict(t=10, b=6)
+            text=(f"<b>Eventos e apostas | Dinâmica de vendas se altera significativamente</b>"
+                  f"<br><sub style='color:#7f8c8d'>{gemeo} - {diretoria} - PORTE + REGIÃO</sub>"),
+            x=0.5, xanchor='center', pad=dict(t=10, b=6)
         ),
-        barmode='stack',
-        bargap=0.15,
-        bargroupgap=0.04,
-        height=780,
-        width=1400,
-        plot_bgcolor='#F2F2F2',
-        paper_bgcolor='#F2F2F2',
-        font=dict(family="Arial, sans-serif", size=12),
-        legend=dict(
-            title_text="Porte + Região",
-            orientation="h",
-            x=0.5, xanchor="center",
-            y=-0.22, yanchor="top",
-            bgcolor='rgba(255,255,255,0.9)',
-            bordercolor='#bdc3c7',
-            borderwidth=1,
-            font=dict(size=11, color='#2c3e50'),
-            tracegroupgap=6
-        ),
+        barmode='stack', bargap=0.15, bargroupgap=0.04,
+        height=780, width=1400,
+        plot_bgcolor='#F2F2F2', paper_bgcolor='#F2F2F2',
+        legend=dict(orientation="h", x=0.5, xanchor="center", y=-0.22),
         margin=dict(l=90, r=90, t=180, b=170, pad=12),
-        hoverlabel=dict(font_size=12, namelength=-1),
         hovermode="x unified",
-        showlegend=True
     )
-
     for i, ann in enumerate(fig.layout.annotations):
         if i < 2:
             ann.update(y=1.09, yanchor='bottom', font=dict(size=13, color='#2c3e50'))
 
-    fig.update_xaxes(
-        title_text="<b>Mês</b>",
-        tickangle=30, ticks="outside", ticklen=6,
-        title_standoff=20, automargin=True,
-        tickfont=dict(size=11, color='#34495e'),
-        gridcolor='rgba(255,255,255,0.8)', zerolinecolor='#bdc3c7',
-        row=1, col=1
-    )
-    fig.update_xaxes(
-        title_text="<b>Mês</b>",
-        tickangle=30, ticks="outside", ticklen=6,
-        title_standoff=20, automargin=True,
-        tickfont=dict(size=11, color='#34495e'),
-        gridcolor='rgba(255,255,255,0.8)', zerolinecolor='#bdc3c7',
-        row=1, col=2
-    )
-    fig.update_yaxes(
-        title_text="<b>Vendas mensais (k unid.)</b>",
-        range=[0, y_max] if y_max else None,
-        ticks="outside", ticklen=6,
-        title_standoff=22, automargin=True,
-        tickfont=dict(size=11, color='#34495e'),
-        gridcolor='rgba(255,255,255,0.8)', zerolinecolor='#bdc3c7',
-        row=1, col=1
-    )
-    fig.update_yaxes(
-        title_text="<b>Proporção % de vendas</b>",
-        range=[0, 100],
-        ticks="outside", ticklen=6,
-        title_standoff=22, automargin=True,
-        tickfont=dict(size=11, color='#34495e'),
-        gridcolor='rgba(255,255,255,0.8)', zerolinecolor='#bdc3c7',
-        row=1, col=2
-    )
+    # eixos
+    fig.update_yaxes(title_text="<b>Vendas mensais (k unid.)</b>", row=1, col=1)
+    fig.update_yaxes(title_text="<b>Proporção % de vendas</b>", range=[0, 100], row=1, col=2)
+    fig.update_xaxes(title_text="<b>Mês</b>", row=1, col=1)
+    fig.update_xaxes(title_text="<b>Mês</b>", row=1, col=2)
 
     return fig
 

@@ -31,7 +31,7 @@ hoje_int = int(hoje.strftime("%Y%m%d"))
 
 def get_data_inicio(hoje: datetime | date | None = None) -> datetime:
     """
-    Retorna datetime no dia 1 do mês que está 18 meses antes de 'hoje'.
+    Retorna datetime no dia 1 do mês que está 19 meses antes de 'hoje'.
     """
     if hoje is None:
         hoje_d = date.today()
@@ -40,7 +40,7 @@ def get_data_inicio(hoje: datetime | date | None = None) -> datetime:
     else:
         hoje_d = hoje
 
-    total_meses = hoje_d.year * 12 + hoje_d.month - 18
+    total_meses = hoje_d.year * 12 + hoje_d.month - 19
     ano = total_meses // 12
     mes = total_meses % 12
     if mes == 0:
@@ -794,7 +794,7 @@ def process_monthly_batch(
     spark: SparkSession,
     start_date: datetime,
     end_date: datetime,
-    table_name: str = "databox.bcg_comum.supply_base_merecimento_diario_v3"
+    table_name: str = "databox.bcg_comum.supply_base_merecimento_diario_v2"
 ) -> DataFrame:
     """
     Processa um lote de meses específico com gestão inteligente de memória.
@@ -947,7 +947,7 @@ def process_incremental_from_start_date(
     start_date: datetime,
     end_date: datetime = None,
     batch_size_months: int = 3,
-    table_name: str = "databox.bcg_comum.supply_base_merecimento_diario_v3"
+    table_name: str = "databox.bcg_comum.supply_base_merecimento_diario_v2"
 ) -> None:
     """
     Processa dados incrementalmente desde a data de início até hoje com gestão de memória.
