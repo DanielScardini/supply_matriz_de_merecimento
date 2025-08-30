@@ -664,9 +664,9 @@ print("=" * 80)
 categorias = [
     "DIRETORIA DE TELAS",
     "DIRETORIA TELEFONIA CELULAR", 
-    "DIRETORIA LINHA BRANCA",
+    "DIRETORIA DE LINHA BRANCA",
     "DIRETORIA LINHA LEVE",
-    "DIRETORIA INFO/GAMES"
+    "DIRETORIA INFO/PERIFERICOS"
 ]
 
 resultados_finais = {}
@@ -765,5 +765,3 @@ print("=" * 80)
 # MAGIC - Identificação de distorções
 # MAGIC
 # MAGIC **Este script está completo e finalizado!** 🎉
-
-# COMMAND ----------
