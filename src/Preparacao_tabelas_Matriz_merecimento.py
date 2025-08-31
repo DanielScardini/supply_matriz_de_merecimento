@@ -23,9 +23,11 @@ from typing import List, Optional
 
 # Inicialização do Spark
 spark = SparkSession.builder.appName("impacto_apostas").getOrCreate()
-hoje = datetime.now() - timedelta(days=1)
+hoje = datetime.now() - timedelta(days=304)
 hoje_str = hoje.strftime("%Y-%m-%d")
 hoje_int = int(hoje.strftime("%Y%m%d"))
+
+print(hoje, hoje_str, hoje_int)
 
 # COMMAND ----------
 
@@ -40,7 +42,7 @@ def get_data_inicio(hoje: datetime | date | None = None) -> datetime:
     else:
         hoje_d = hoje
 
-    total_meses = hoje_d.year * 12 + hoje_d.month - 6
+    total_meses = hoje_d.year * 12 + hoje_d.month - 19
     ano = total_meses // 12
     mes = total_meses % 12
     if mes == 0:
@@ -134,7 +136,8 @@ def load_mercadoria_data(spark: SparkSession) -> DataFrame:
                  "DIRETORIA LINHA LEVE",
                  "DIRETORIA DE TELAS",
                  "DIRETORIA TELEFONIA CELULAR",
-                 "DIRETORIA INFO/PERIFERICOS"]
+                 "DIRETORIA INFO/PERIFERICOS"
+                 ]
             )
         )
         .select(
@@ -519,11 +522,6 @@ def load_supply_plan_mapping(spark: SparkSession) -> DataFrame:
     """
     return (
         spark.table("context_abastecimento_inteligente.PlanoAbastecimento")
-        .filter(
-            (F.col("AaIngestao") == hoje.year) &
-            (F.col("MmIngestao") == hoje.month) &
-            (F.col("DdIngestao") == hoje.day)
-        )
         .select(
             F.col("CdFilialAtende").alias("CD_primario"),
             F.col("CdFilialEntrega").alias("CD_secundario"),
@@ -570,9 +568,9 @@ def create_complete_supply_mapping(
     de_para_filial_CD = load_supply_plan_mapping(spark)
     
     # Normalizar IDs
-    # caracteristicas_cd = normalize_ids(caracteristicas_cd, ["CdFilial"])
-    # caracteristicas_loja = normalize_ids(caracteristicas_loja, ["CdFilial"])
-    # de_para_filial_CD = normalize_ids(de_para_filial_CD, ["CdFilial", "CD_primario", "CD_secundario"])
+    caracteristicas_cd = normalize_ids(caracteristicas_cd, ["CdFilial"])
+    caracteristicas_loja = normalize_ids(caracteristicas_loja, ["CdFilial"])
+    de_para_filial_CD = normalize_ids(de_para_filial_CD, ["CdFilial", "CD_primario", "CD_secundario"])
     
     # Construir mapeamento completo
     return (
@@ -676,7 +674,7 @@ def save_merecimento_table(df: DataFrame, table_name: str) -> None:
 # # Salvar tabela final
 # save_merecimento_table(
 #     df_merecimento_base_cd_loja, 
-#     "databox.bcg_comum.supply_base_merecimento_diario_v2"
+#     "databox.bcg_comum.supply_base_merecimento_diario_v3"
 # )
 
 # COMMAND ----------
@@ -799,7 +797,7 @@ def process_monthly_batch(
     spark: SparkSession,
     start_date: datetime,
     end_date: datetime,
-    table_name: str = "databox.bcg_comum.supply_base_merecimento_diario_v2"
+    table_name: str = "databox.bcg_comum.supply_base_merecimento_diario_v3"
 ) -> DataFrame:
     """
     Processa um lote de meses específico com gestão inteligente de memória.
@@ -950,9 +948,9 @@ def append_monthly_batch_to_table(
 def process_incremental_from_start_date(
     spark: SparkSession,
     start_date: datetime,
-    end_date: datetime = None,
+    end_date: datetime,
     batch_size_months: int = 3,
-    table_name: str = "databox.bcg_comum.supply_base_merecimento_diario_v2"
+    table_name: str = "databox.bcg_comum.supply_base_merecimento_diario_v3"
 ) -> None:
     """
     Processa dados incrementalmente desde a data de início até hoje com gestão de memória.
@@ -1099,4 +1097,4 @@ def monitor_memory_usage(spark: SparkSession) -> None:
 
 # Executar processamento incremental
 # Descomente a linha abaixo para executar
-process_incremental_from_start_date(spark, data_inicio, batch_size_months=3)
+process_incremental_from_start_date(spark, data_inicio, hoje, batch_size_months=3)
