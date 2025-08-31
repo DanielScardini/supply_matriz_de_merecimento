@@ -235,9 +235,18 @@ print(f"🔍 Debug: Valores válidos: {df_graficos['year_month'].notna().sum()}"
 df_graficos = df_graficos[df_graficos['year_month'].notna()].copy()
 print(f"🔍 Debug: Dados após remoção de datas inválidas: {len(df_graficos):,} registros")
 
-# Remove lojas sem porte e preenche valores nulos
-df_graficos = df_graficos[df_graficos['NmPorteLoja'].notna() & (df_graficos['NmPorteLoja'] != '')]
+# Preenche valores nulos em vez de remover registros
+print(f"🔍 Debug: Verificando valores nulos antes do preenchimento:")
+print(f"🔍 Debug: NmPorteLoja nulos: {df_graficos['NmPorteLoja'].isna().sum()}")
+print(f"🔍 Debug: NmRegiaoGeografica nulos: {df_graficos['NmRegiaoGeografica'].isna().sum()}")
+
+# Preenche valores nulos em vez de remover registros
+df_graficos['NmPorteLoja'] = df_graficos['NmPorteLoja'].fillna('SEM PORTE')
 df_graficos['NmRegiaoGeografica'] = df_graficos['NmRegiaoGeografica'].fillna('SEM REGIÃO')
+
+print(f"🔍 Debug: Dados após preenchimento de valores nulos: {len(df_graficos):,} registros")
+print(f"🔍 Debug: Portes únicos após preenchimento: {df_graficos['NmPorteLoja'].unique()}")
+print(f"🔍 Debug: Regiões únicas após preenchimento: {df_graficos['NmRegiaoGeografica'].unique()}")
 
 print(f"✅ Dados preparados para gráficos: {len(df_graficos):,} registros")
 
