@@ -527,15 +527,21 @@ def criar_grafico_elasticidade_regiao(
         horizontal_spacing=0.12,
     )
 
-    # Cores para regiões (esquema de cores profissional)
-    cores_regioes = {
-        'SUL': '#1a365d', 'SUDESTE': '#2c5282', 'CENTRO-OESTE': '#3182ce',
-        'NORDESTE': '#4299e1', 'NORTE': '#63b3ed', 'SEM REGIÃO': '#90cdf4'
-    }
+    # Detecta automaticamente os nomes reais das regiões nas colunas
+    regioes_reais = list(df_pivot.columns)
+    print(f"    🔍 Debug: Regiões reais encontradas nas colunas: {regioes_reais}")
     
-    # Ordem das regiões (mais importantes primeiro)
-    ordem_regioes = ['SUDESTE', 'SUL', 'NORDESTE', 'CENTRO-OESTE', 'NORTE', 'SEM REGIÃO']
-    regioes = [r for r in ordem_regioes if r in df_pivot.columns]
+    # Cria mapeamento de cores dinâmico baseado nas regiões reais
+    cores_disponiveis = ['#1a365d', '#2c5282', '#3182ce', '#4299e1', '#63b3ed', '#90cdf4', '#e53e3e', '#38a169']
+    cores_regioes = {}
+    
+    for i, regiao in enumerate(regioes_reais):
+        cores_regioes[regiao] = cores_disponiveis[i % len(cores_disponiveis)]
+    
+    print(f"    🔍 Debug: Cores atribuídas: {cores_regioes}")
+    
+    # Usa as regiões reais encontradas
+    regioes = regioes_reais
     
     print(f"    🔍 Debug: Regiões encontradas: {regioes}")
     print(f"    🔍 Debug: Total de regiões: {len(regioes)}")
