@@ -315,8 +315,9 @@ def criar_grafico_elasticidade_porte(
         if i < 2:
             ann.update(y=1.09, yanchor='bottom', font=dict(size=13, color='#2c3e50'))
 
-    # eixos
-    fig.update_yaxes(range=[0, 100], row=1, col=2, title_text="<b>Proporção % de vendas</b>")
+    # eixos - Garante altura consistente das barras de proporção
+    fig.update_yaxes(range=[0, 100], row=1, col=2, title_text="<b>Proporção % de vendas</b>", 
+                     tickmode='linear', dtick=20, tickformat='.0f')
     fig.update_yaxes(title_text="<b>Vendas mensais (k unid.)</b>", row=1, col=1)
     fig.update_xaxes(title_text="<b>Mês</b>", row=1, col=1)
     fig.update_xaxes(title_text="<b>Mês</b>", row=1, col=2)
@@ -418,6 +419,11 @@ def criar_grafico_elasticidade_porte_regiao(
     # eixos categóricos
     fig.update_xaxes(type='category', categoryorder='array', categoryarray=x_labels, row=1, col=1)
     fig.update_xaxes(type='category', categoryorder='array', categoryarray=x_labels_prop, row=1, col=2)
+    
+    # Garante altura consistente das barras de proporção
+    fig.update_yaxes(range=[0, 100], row=1, col=2, title_text="<b>Proporção % de vendas</b>", 
+                     tickmode='linear', dtick=20, tickformat='.0f')
+    fig.update_yaxes(title_text="<b>Vendas mensais (k unid.)</b>", row=1, col=1)
 
     # headroom + anotações
     totais = (df_pivot.sum(axis=1)/1000).astype(float)
@@ -600,8 +606,9 @@ def criar_grafico_elasticidade_regiao(
         if i < 2:
             ann.update(y=1.09, yanchor='bottom', font=dict(size=13, color='#2c3e50'))
 
-    # Eixos
-    fig.update_yaxes(range=[0, 100], row=1, col=2, title_text="<b>Proporção % de vendas</b>")
+    # Eixos - Garante altura consistente das barras de proporção
+    fig.update_yaxes(range=[0, 100], row=1, col=2, title_text="<b>Proporção % de vendas</b>", 
+                     tickmode='linear', dtick=20, tickformat='.0f')
     fig.update_yaxes(title_text="<b>Vendas mensais (k unid.)</b>", row=1, col=1)
     fig.update_xaxes(title_text="<b>Mês</b>", row=1, col=1)
     fig.update_xaxes(title_text="<b>Mês</b>", row=1, col=2)
