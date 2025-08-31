@@ -41,9 +41,8 @@ spark = SparkSession.builder.appName("analise_elasticidade_demanda").getOrCreate
 # COMMAND ----------
 
 # Carrega dados base de merecimento com todas as diretorias
-print("🔍 Debug: Carregando dados base de merecimento...")
 df_base_merecimento = (
-    spark.table('databox.bcg_comum.supply_base_merecimento_diario')
+    spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3')
     .filter(F.col("NmAgrupamentoDiretoriaSetor").isin(
         "DIRETORIA TELEFONIA CELULAR",
         "DIRETORIA DE TELAS",
@@ -53,13 +52,7 @@ df_base_merecimento = (
     ))
     .filter(F.col("year_month").isNotNull())
 )
-
-print(f"✅ Dados base carregados: {df_base_merecimento.count():,} registros")
-print(f"🔍 Debug: Diretorias encontradas: {df_base_merecimento.select('NmAgrupamentoDiretoriaSetor').distinct().collect()}")
-print(f"🔍 Debug: Período dos dados: {df_base_merecimento.select('year_month').distinct().orderBy('year_month').collect()}")
-print(f"🔍 Debug: Sample de registros: {df_base_merecimento.limit(3).collect()}")
-
-df_base_merecimento.limit(10).display()
+df_base_merecimento.cache()
 
 # COMMAND ----------
 
@@ -99,13 +92,6 @@ df_gemeos = spark.createDataFrame(de_para_gemeos.rename(columns={"sku_loja": "Cd
 
 # COMMAND ----------
 
-# Join com dados base e região geográfica
-print("🔍 Debug: Verificando dados antes dos joins")
-print(f"🔍 Debug: Total em df_base_merecimento: {df_base_merecimento.count():,}")
-print(f"🔍 Debug: Total em df_gemeos: {df_gemeos.count():,}")
-print(f"🔍 Debug: Sample de SKUs em df_base_merecimento: {df_base_merecimento.select('CdSku').distinct().limit(5).collect()}")
-print(f"🔍 Debug: Sample de SKUs em df_gemeos: {df_gemeos.select('CdSku').distinct().limit(5).collect()}")
-
 df_completo = (
     df_base_merecimento
     .join(df_gemeos, on="CdSku", how="left")
@@ -122,11 +108,6 @@ df_completo = (
 
 )
 
-print(f"✅ Dados completos preparados: {df_completo.count():,} registros")
-print(f"🔍 Debug: Verificando dados após joins e filtros")
-print(f"🔍 Debug: Gêmeos únicos após filtros: {df_completo.select('gemeos').distinct().count()}")
-print(f"🔍 Debug: Sample de gêmeos após filtros: {df_completo.select('gemeos').distinct().limit(10).collect()}")
-
 # COMMAND ----------
 
 # MAGIC %md
@@ -134,22 +115,12 @@ print(f"🔍 Debug: Sample de gêmeos após filtros: {df_completo.select('gemeos
 
 # COMMAND ----------
 
-# Identifica os top 5 gêmeos de cada diretoria
-print("🔍 Debug: Verificando dados completos antes da identificação dos top gêmeos")
-print(f"🔍 Debug: Total de registros em df_completo: {df_completo.count():,}")
-print(f"🔍 Debug: Gêmeos únicos em df_completo: {df_completo.select('gemeos').distinct().count()}")
-print(f"🔍 Debug: Diretorias únicas em df_completo: {df_completo.select('NmAgrupamentoDiretoriaSetor').distinct().count()}")
-print(f"🔍 Debug: Sample de gêmeos disponíveis: {df_completo.select('gemeos').distinct().limit(10).collect()}")
-
 top_gemeos = (
     df_completo
     .groupBy("NmAgrupamentoDiretoriaSetor", "gemeos")
     .agg(F.sum("QtMercadoria").alias("total_vendas"))
     .orderBy("NmAgrupamentoDiretoriaSetor", F.desc("total_vendas"))
 )
-
-print(f"🔍 Debug: Total de gêmeos após agregação: {top_gemeos.count():,}")
-print(f"🔍 Debug: Sample de top_gemeos: {top_gemeos.limit(5).collect()}")
 
 # Aplica window para pegar top 5 de cada diretoria
 w = Window.partitionBy("NmAgrupamentoDiretoriaSetor").orderBy(F.desc("total_vendas"))
@@ -167,7 +138,7 @@ display(top_5_gemeos)
 
 # MAGIC %md
 # MAGIC ## 6. Preparação de Dados para Gráficos
-# MAGIC 
+# MAGIC
 # MAGIC **IMPORTANTE**: Implementada solução para garantir que todos os meses sejam incluídos nos gráficos,
 # MAGIC mesmo quando não há vendas para todos os portes de loja em um determinado mês.
 
@@ -180,17 +151,6 @@ df_top = (
           on=["NmAgrupamentoDiretoriaSetor", "gemeos"], 
           how="inner")
 )
-
-print(f"🔍 Debug: Dados após join com top gêmeos: {df_top.count():,} registros")
-print(f"🔍 Debug: Gêmeos únicos após join: {df_top.select('gemeos').distinct().count()}")
-print(f"🔍 Debug: Diretorias únicas após join: {df_top.select('NmAgrupamentoDiretoriaSetor').distinct().count()}")
-print(f"🔍 Debug: Meses únicos após join: {df_top.select('year_month').distinct().count()}")
-print(f"🔍 Debug: Sample de gêmeos: {df_top.select('gemeos').distinct().limit(5).collect()}")
-print(f"🔍 Debug: Verificando se há dados para cada gêmeo:")
-for gemeo in top_5_gemeos.select('gemeos').distinct().collect():
-    gemeo_nome = gemeo['gemeos']
-    count_gemeo = df_top.filter(F.col('gemeos') == gemeo_nome).count()
-    print(f"    • {gemeo_nome}: {count_gemeo:,} registros")
 
 # Agrega por year_month, gemeo, porte de loja e região
 df_agregado = (
@@ -208,60 +168,21 @@ df_agregado = (
     .orderBy("year_month", "gemeos")
 )
 
-print(f"🔍 Debug: Dados após agregação: {df_agregado.count():,} registros")
-print(f"🔍 Debug: Gêmeos únicos após agregação: {df_agregado.select('gemeos').distinct().count()}")
-print(f"🔍 Debug: Meses únicos após agregação: {df_agregado.select('year_month').distinct().count()}")
-print(f"🔍 Debug: Sample de gêmeos após agregação: {df_agregado.select('gemeos').distinct().limit(5).collect()}")
-
 # Converte para pandas para plotagem
 df_graficos = df_agregado.toPandas()
 
-print(f"🔍 Debug: Dados após conversão para pandas - Total: {len(df_graficos):,}")
-print(f"🔍 Debug: Colunas disponíveis: {list(df_graficos.columns)}")
-print(f"🔍 Debug: Sample de dados: {df_graficos.head(3).to_dict('records')}")
-print(f"🔍 Debug: Dados antes da conversão - Total: {len(df_graficos):,}")
-print(f"🔍 Debug: year_month antes da conversão: {df_graficos['year_month'].head().tolist()}")
-print(f"🔍 Debug: year_month tipo: {df_graficos['year_month'].dtype}")
-
 # Converte year_month para formato de data com tratamento de erros
 df_graficos['year_month'] = pd.to_datetime(df_graficos['year_month'].astype(str), format='%Y%m', errors='coerce')
-
-print(f"🔍 Debug: year_month depois da conversão: {df_graficos['year_month'].head().tolist()}")
-print(f"🔍 Debug: year_month tipo depois: {df_graficos['year_month'].dtype}")
-print(f"🔍 Debug: Valores NaT encontrados: {df_graficos['year_month'].isna().sum()}")
-print(f"🔍 Debug: Valores válidos: {df_graficos['year_month'].notna().sum()}")
 
 # Remove registros com datas inválidas
 df_graficos = df_graficos[df_graficos['year_month'].notna()].copy()
 print(f"🔍 Debug: Dados após remoção de datas inválidas: {len(df_graficos):,} registros")
 
 # Preenche valores nulos em vez de remover registros
-print(f"🔍 Debug: Verificando valores nulos antes do preenchimento:")
-print(f"🔍 Debug: NmPorteLoja nulos: {df_graficos['NmPorteLoja'].isna().sum()}")
-print(f"🔍 Debug: NmRegiaoGeografica nulos: {df_graficos['NmRegiaoGeografica'].isna().sum()}")
-
-# Preenche valores nulos em vez de remover registros
 df_graficos['NmPorteLoja'] = df_graficos['NmPorteLoja'].fillna('SEM PORTE')
 df_graficos['NmRegiaoGeografica'] = df_graficos['NmRegiaoGeografica'].fillna('SEM REGIÃO')
 
-print(f"🔍 Debug: Dados após preenchimento de valores nulos: {len(df_graficos):,} registros")
-print(f"🔍 Debug: Portes únicos após preenchimento: {df_graficos['NmPorteLoja'].unique()}")
-print(f"🔍 Debug: Regiões únicas após preenchimento: {df_graficos['NmRegiaoGeografica'].unique()}")
-
 print(f"✅ Dados preparados para gráficos: {len(df_graficos):,} registros")
-
-# Verifica se há dados válidos antes de tentar formatar datas
-if len(df_graficos) > 0 and df_graficos['year_month'].notna().any():
-    print(f"🔍 Debug: Período total dos dados: {df_graficos['year_month'].min().strftime('%b/%Y')} a {df_graficos['year_month'].max().strftime('%b/%Y')}")
-    print(f"🔍 Debug: Total de meses únicos: {df_graficos['year_month'].nunique()}")
-    print(f"🔍 Debug: Meses disponíveis: {sorted(df_graficos['year_month'].dt.strftime('%Y-%m').unique())}")
-else:
-    print("🔍 Debug: Nenhum dado válido encontrado após preparação")
-    print("🔍 Debug: Verificando dados originais...")
-
-print(f"🔍 Debug: Gêmeos únicos: {df_graficos['gemeos'].nunique() if len(df_graficos) > 0 else 0}")
-print(f"🔍 Debug: Regiões únicas: {df_graficos['NmRegiaoGeografica'].nunique() if len(df_graficos) > 0 else 0}")
-print(f"🔍 Debug: Portes únicos: {df_graficos['NmPorteLoja'].nunique() if len(df_graficos) > 0 else 0}")
 
 # COMMAND ----------
 
