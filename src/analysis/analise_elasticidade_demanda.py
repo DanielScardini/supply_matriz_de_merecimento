@@ -354,9 +354,16 @@ def criar_grafico_elasticidade_porte_regiao(
     # Garante que as proporções somem exatamente 100% (corrige erros de arredondamento)
     for idx in df_prop.index:
         row_sum = df_prop.loc[idx].sum()
-        if abs(row_sum - 100) > 0.01:  # Se a diferença for maior que 0.01%
+        if abs(row_sum - 100) > 0.001:  # Tolerância mais rigorosa (0.001%)
             # Normaliza para somar exatamente 100%
             df_prop.loc[idx] = (df_prop.loc[idx] / row_sum) * 100
+            # Arredonda para 2 casas decimais para evitar problemas de precisão
+            df_prop.loc[idx] = df_prop.loc[idx].round(2)
+            # Garante que a soma seja exatamente 100.00
+            df_prop.loc[idx] = df_prop.loc[idx].fillna(0)
+            # Ajusta a maior categoria para garantir soma = 100%
+            max_col = df_prop.loc[idx].idxmax()
+            df_prop.loc[idx, max_col] = 100 - (df_prop.loc[idx].sum() - df_prop.loc[idx, max_col])
     
     print(f"    🔍 Debug: Verificação das proporções (porte+região):")
     for idx in df_prop.index:
@@ -488,9 +495,16 @@ def criar_grafico_elasticidade_regiao(
     # Garante que as proporções somem exatamente 100% (corrige erros de arredondamento)
     for idx in df_pivot.index:
         row_sum = df_prop.loc[idx].sum()
-        if abs(row_sum - 100) > 0.01:  # Se a diferença for maior que 0.01%
+        if abs(row_sum - 100) > 0.001:  # Tolerância mais rigorosa (0.001%)
             # Normaliza para somar exatamente 100%
             df_prop.loc[idx] = (df_prop.loc[idx] / row_sum) * 100
+            # Arredonda para 2 casas decimais para evitar problemas de precisão
+            df_prop.loc[idx] = df_prop.loc[idx].round(2)
+            # Garante que a soma seja exatamente 100.00
+            df_prop.loc[idx] = df_prop.loc[idx].fillna(0)
+            # Ajusta a maior categoria para garantir soma = 100%
+            max_col = df_prop.loc[idx].idxmax()
+            df_prop.loc[idx, max_col] = 100 - (df_prop.loc[idx].sum() - df_prop.loc[idx, max_col])
     
     print(f"    🔍 Debug: Verificação das proporções (região):")
     for idx in df_pivot.index:
