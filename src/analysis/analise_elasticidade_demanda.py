@@ -223,7 +223,21 @@ def criar_grafico_elasticidade_porte(
         .reindex(sorted(df_gemeo['year_month'].unique()))  # Inclui todos os meses unicos
         .sort_index()
     )
+    
+    # Calcula proporções garantindo que somem 100% exato
     df_prop = df_pivot.div(df_pivot.sum(axis=1), axis=0) * 100
+    
+    # Garante que as proporções somem exatamente 100% (corrige erros de arredondamento)
+    for idx in df_prop.index:
+        row_sum = df_prop.loc[idx].sum()
+        if abs(row_sum - 100) > 0.01:  # Se a diferença for maior que 0.01%
+            # Normaliza para somar exatamente 100%
+            df_prop.loc[idx] = (df_prop.loc[idx] / row_sum) * 100
+    
+    print(f"    🔍 Debug: Verificação das proporções (porte):")
+    for idx in df_prop.index:
+        row_sum = df_prop.loc[idx].sum()
+        print(f"      • {idx.strftime('%b/%Y')}: {row_sum:.2f}%")
 
     fig = make_subplots(
         rows=1, cols=2,
@@ -333,7 +347,21 @@ def criar_grafico_elasticidade_porte_regiao(
         .reindex(sorted(df_gemeo['year_month'].unique()))  # Inclui todos os meses unicos
         .sort_index()
     )
+    
+    # Calcula proporções garantindo que somem 100% exato
     df_prop = df_pivot.div(df_pivot.sum(axis=1), axis=0) * 100
+    
+    # Garante que as proporções somem exatamente 100% (corrige erros de arredondamento)
+    for idx in df_prop.index:
+        row_sum = df_prop.loc[idx].sum()
+        if abs(row_sum - 100) > 0.01:  # Se a diferença for maior que 0.01%
+            # Normaliza para somar exatamente 100%
+            df_prop.loc[idx] = (df_prop.loc[idx] / row_sum) * 100
+    
+    print(f"    🔍 Debug: Verificação das proporções (porte+região):")
+    for idx in df_prop.index:
+        row_sum = df_prop.loc[idx].sum()
+        print(f"      • {idx.strftime('%b/%Y')}: {row_sum:.2f}%")
 
     fig = make_subplots(
         rows=1, cols=2,
@@ -454,7 +482,20 @@ def criar_grafico_elasticidade_regiao(
     print(f"    🔍 Debug: Pivot criado com {len(df_pivot)} meses e {len(df_pivot.columns)} regiões")
     print(f"    🔍 Debug: Colunas do pivot: {list(df_pivot.columns)}")
     
+    # Calcula proporções garantindo que somem 100% exato
     df_prop = df_pivot.div(df_pivot.sum(axis=1), axis=0) * 100
+    
+    # Garante que as proporções somem exatamente 100% (corrige erros de arredondamento)
+    for idx in df_pivot.index:
+        row_sum = df_prop.loc[idx].sum()
+        if abs(row_sum - 100) > 0.01:  # Se a diferença for maior que 0.01%
+            # Normaliza para somar exatamente 100%
+            df_prop.loc[idx] = (df_prop.loc[idx] / row_sum) * 100
+    
+    print(f"    🔍 Debug: Verificação das proporções (região):")
+    for idx in df_pivot.index:
+        row_sum = df_prop.loc[idx].sum()
+        print(f"      • {idx.strftime('%b/%Y')}: {row_sum:.2f}%")
 
     fig = make_subplots(
         rows=1, cols=2,
