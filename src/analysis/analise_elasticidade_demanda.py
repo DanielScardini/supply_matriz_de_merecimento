@@ -41,6 +41,7 @@ spark = SparkSession.builder.appName("analise_elasticidade_demanda").getOrCreate
 # COMMAND ----------
 
 # Carrega dados base de merecimento com todas as diretorias
+print("🔍 Debug: Carregando dados base de merecimento...")
 df_base_merecimento = (
     spark.table('databox.bcg_comum.supply_base_merecimento_diario')
     .filter(F.col("NmAgrupamentoDiretoriaSetor").isin(
@@ -54,6 +55,9 @@ df_base_merecimento = (
 )
 
 print(f"✅ Dados base carregados: {df_base_merecimento.count():,} registros")
+print(f"🔍 Debug: Diretorias encontradas: {df_base_merecimento.select('NmAgrupamentoDiretoriaSetor').distinct().collect()}")
+print(f"🔍 Debug: Período dos dados: {df_base_merecimento.select('year_month').distinct().orderBy('year_month').collect()}")
+print(f"🔍 Debug: Sample de registros: {df_base_merecimento.limit(3).collect()}")
 
 df_base_merecimento.limit(10).display()
 
@@ -96,6 +100,12 @@ df_gemeos = spark.createDataFrame(de_para_gemeos.rename(columns={"sku_loja": "Cd
 # COMMAND ----------
 
 # Join com dados base e região geográfica
+print("🔍 Debug: Verificando dados antes dos joins")
+print(f"🔍 Debug: Total em df_base_merecimento: {df_base_merecimento.count():,}")
+print(f"🔍 Debug: Total em df_gemeos: {df_gemeos.count():,}")
+print(f"🔍 Debug: Sample de SKUs em df_base_merecimento: {df_base_merecimento.select('CdSku').distinct().limit(5).collect()}")
+print(f"🔍 Debug: Sample de SKUs em df_gemeos: {df_gemeos.select('CdSku').distinct().limit(5).collect()}")
+
 df_completo = (
     df_base_merecimento
     .join(df_gemeos, on="CdSku", how="left")
@@ -113,6 +123,9 @@ df_completo = (
 )
 
 print(f"✅ Dados completos preparados: {df_completo.count():,} registros")
+print(f"🔍 Debug: Verificando dados após joins e filtros")
+print(f"🔍 Debug: Gêmeos únicos após filtros: {df_completo.select('gemeos').distinct().count()}")
+print(f"🔍 Debug: Sample de gêmeos após filtros: {df_completo.select('gemeos').distinct().limit(10).collect()}")
 
 # COMMAND ----------
 
@@ -122,12 +135,21 @@ print(f"✅ Dados completos preparados: {df_completo.count():,} registros")
 # COMMAND ----------
 
 # Identifica os top 5 gêmeos de cada diretoria
+print("🔍 Debug: Verificando dados completos antes da identificação dos top gêmeos")
+print(f"🔍 Debug: Total de registros em df_completo: {df_completo.count():,}")
+print(f"🔍 Debug: Gêmeos únicos em df_completo: {df_completo.select('gemeos').distinct().count()}")
+print(f"🔍 Debug: Diretorias únicas em df_completo: {df_completo.select('NmAgrupamentoDiretoriaSetor').distinct().count()}")
+print(f"🔍 Debug: Sample de gêmeos disponíveis: {df_completo.select('gemeos').distinct().limit(10).collect()}")
+
 top_gemeos = (
     df_completo
     .groupBy("NmAgrupamentoDiretoriaSetor", "gemeos")
     .agg(F.sum("QtMercadoria").alias("total_vendas"))
     .orderBy("NmAgrupamentoDiretoriaSetor", F.desc("total_vendas"))
 )
+
+print(f"🔍 Debug: Total de gêmeos após agregação: {top_gemeos.count():,}")
+print(f"🔍 Debug: Sample de top_gemeos: {top_gemeos.limit(5).collect()}")
 
 # Aplica window para pegar top 5 de cada diretoria
 w = Window.partitionBy("NmAgrupamentoDiretoriaSetor").orderBy(F.desc("total_vendas"))
