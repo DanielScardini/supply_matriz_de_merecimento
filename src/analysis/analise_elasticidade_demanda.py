@@ -249,11 +249,12 @@ def criar_grafico_elasticidade_porte(
         horizontal_spacing=0.12,
     )
 
-    ordem = ['PORTE 6','PORTE 5','PORTE 4','PORTE 3','PORTE 2','PORTE 1']
+    ordem = ['PORTE 6','PORTE 5','PORTE 4','PORTE 3','PORTE 2','PORTE 1', 'SEM PORTE']
     portas = [p for p in ordem if p in df_pivot.columns]
     cores = {
         'PORTE 6':'#1a365d','PORTE 5':'#2c5282','PORTE 4':'#3182ce',
-        'PORTE 3':'#4299e1','PORTE 2':'#63b3ed','PORTE 1':'#90cdf4'
+        'PORTE 3':'#4299e1','PORTE 2':'#63b3ed','PORTE 1':'#90cdf4',
+        'SEM PORTE':'#808080'  # Cinza para SEM PORTE
     }
 
     x_labels = pd.to_datetime(df_pivot.index).strftime('%b/%y').tolist()
@@ -383,7 +384,8 @@ def criar_grafico_elasticidade_porte_regiao(
 
     cores = {
         'PORTE 6':'#1a365d','PORTE 5':'#2c5282','PORTE 4':'#3182ce',
-        'PORTE 3':'#4299e1','PORTE 2':'#63b3ed','PORTE 1':'#90cdf4'
+        'PORTE 3':'#4299e1','PORTE 2':'#63b3ed','PORTE 1':'#90cdf4',
+        'SEM PORTE':'#808080'  # Cinza para SEM PORTE
     }
     ordem = list(cores.keys())
     cols_ord = []
@@ -532,11 +534,15 @@ def criar_grafico_elasticidade_regiao(
     print(f"    🔍 Debug: Regiões reais encontradas nas colunas: {regioes_reais}")
     
     # Cria mapeamento de cores dinâmico baseado nas regiões reais
-    cores_disponiveis = ['#1a365d', '#2c5282', '#3182ce', '#4299e1', '#63b3ed', '#90cdf4', '#e53e3e', '#38a169']
+    # Usa tons de azul semelhantes aos portes, com cinza para SEM REGIÃO
+    cores_disponiveis = ['#1a365d', '#2c5282', '#3182ce', '#4299e1', '#63b3ed', '#90cdf4', '#bfdbfe', '#dbeafe']
     cores_regioes = {}
     
     for i, regiao in enumerate(regioes_reais):
-        cores_regioes[regiao] = cores_disponiveis[i % len(cores_disponiveis)]
+        if regiao == 'SEM REGIÃO':
+            cores_regioes[regiao] = '#808080'  # Cinza para SEM REGIÃO
+        else:
+            cores_regioes[regiao] = cores_disponiveis[i % len(cores_disponiveis)]
     
     print(f"    🔍 Debug: Cores atribuídas: {cores_regioes}")
     
@@ -638,7 +644,6 @@ print("   1. APENAS por porte de loja")
 print("   2. Por porte de loja + região geográfica")
 print("   3. APENAS por região geográfica")
 print("🎨 Gráficos configurados com alta resolução para slides profissionais")
-!pip install -U kaleido
 # Configurações globais para alta qualidade
 import plotly.io as pio
 pio.kaleido.scale = 2.0  # Aumenta escala para exportação de alta resolução
