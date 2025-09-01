@@ -613,18 +613,30 @@ print("\n" + "=" * 80)
 print("🎉 ANÁLISE COMPLETA CONCLUÍDA!")
 print("=" * 80)
 
-# Exibe resumo dos resultados
-print("📊 RESUMO DOS RESULTADOS:")
-for categoria, resultado in resultados_analise.items():
-    if resultado["status"] == "SUCESSO":
-        print(f"  ✅ {categoria}: Análise completa")
-        print(f"     • Proporção factual: {resultado['proporcao_factual'].count():,} registros")
-        print(f"     • sMAPE: {resultado['smape'].count():,} registros")
-        print(f"     • Distorções: {resultado['distorcoes'].count():,} registros")
-    else:
-        print(f"  ❌ {categoria}: {resultado['erro']}")
+# # Exibe resumo dos resultados
+# print("📊 RESUMO DOS RESULTADOS:")
+# for categoria, resultado in resultados_analise.items():
+#     if resultado["status"] == "SUCESSO":
+#         print(f"  ✅ {categoria}: Análise completa")
+#         print(f"     • Proporção factual: {resultado['proporcao_factual'].count():,} registros")
+#         print(f"     • sMAPE: {resultado['smape'].count():,} registros")
+#         print(f"     • Distorções: {resultado['distorcoes'].count():,} registros")
+#     else:
+#         print(f"  ❌ {categoria}: {resultado['erro']}")
 
-print("=" * 80)
+# print("=" * 80)
+
+# COMMAND ----------
+
+df_distorcoes = df_distorcoes.filter(F.col("is_Cluster") == 'OBRIGATÓRIO')
+
+df_distorcoes.cache()
+
+df_distorcoes.limit(10).display()
+
+# COMMAND ----------
+
+df_distorcoes.columns
 
 # COMMAND ----------
 
@@ -646,3 +658,24 @@ print("=" * 80)
 # MAGIC - Identificação de distorções
 # MAGIC
 # MAGIC **Este script está completo e finalizado!** 🎉
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Racional para detecção de principais distorções anedotais
+# MAGIC
+# MAGIC 1. Filtro das principais lojas em Receita
+# MAGIC 2. Filtro dos principais SKUs em Ruptura, DDE E Aging (percentis)
+# MAGIC 3. Ordenação por receita dentre esses filtrados (por SKU)
+# MAGIC 4. Lista com SKUs e Lojas com distorções importantes de distribuição
+# MAGIC 5. Filtrar df_distorcoes que contem as matrizes de merecimento comparativas a partir da lista de SKUs ofensores
+
+# COMMAND ----------
+
+df_estoque_receita = (
+    spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3')
+    .filter(F.col('NmAgrupamentoDiretoriaSetor') == 'DIRETORIA DE TELAS')
+    .filter(F.col('year_month') == 202506)
+)
+
+df_estoque_receita.display()
