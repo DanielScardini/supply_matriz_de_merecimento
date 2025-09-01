@@ -31,12 +31,6 @@ hoje_int = int(hoje.strftime("%Y%m%d"))
 
 # COMMAND ----------
 
-# MAGIC %sql SELECT * FROM databox.bcg_comum.supply_base_merecimento_diario_v2
-# MAGIC
-# MAGIC WHERE year_month < 202411
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC ## 1. Carregamento das Matrizes de Merecimento Calculadas
 
@@ -52,11 +46,11 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     print("🔄 Carregando matrizes de merecimento calculadas...")
     
     categorias = [
-        "TELAS",
-        "TELEFONIA_CELULAR", 
-        "LINHA_BRANCA",
-        "LINHA_LEVE",
-        "INFO_GAMES"
+        "DE_TELAS",
+        #"TELEFONIA_CELULAR", 
+        #"LINHA_BRANCA",
+        #"LINHA_LEVE",
+        #"INFO_GAMES"
     ]
     
     matrizes = {}

@@ -186,7 +186,7 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-01-01") -> Data
     print(f"🔄 Carregando dados para categoria: {categoria}")
     
     df_base = (
-        spark.table('databox.bcg_comum.supply_base_merecimento_diario')
+        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3')
         .filter(F.col("NmAgrupamentoDiretoriaSetor") == categoria)
         .filter(F.col("DtAtual") >= data_inicio)
         .withColumn(
@@ -470,7 +470,7 @@ def criar_de_para_filial_cd() -> DataFrame:
     """
     print("🔄 Criando de-para filial → CD...")
     
-    df_base = spark.table('databox.bcg_comum.supply_base_merecimento_diario_v2')
+    df_base = spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3')
     
     de_para_filial_cd = (
         df_base

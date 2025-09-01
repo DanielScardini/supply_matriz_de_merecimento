@@ -23,7 +23,7 @@ from typing import List, Optional
 
 # Inicialização do Spark
 spark = SparkSession.builder.appName("impacto_apostas").getOrCreate()
-hoje = datetime.now() - timedelta(days=304)
+hoje = datetime.now() - timedelta(days=1)
 hoje_str = hoje.strftime("%Y-%m-%d")
 hoje_int = int(hoje.strftime("%Y%m%d"))
 
@@ -42,7 +42,7 @@ def get_data_inicio(hoje: datetime | date | None = None) -> datetime:
     else:
         hoje_d = hoje
 
-    total_meses = hoje_d.year * 12 + hoje_d.month - 19
+    total_meses = hoje_d.year * 12 + hoje_d.month - 1
     ano = total_meses // 12
     mes = total_meses % 12
     if mes == 0:
