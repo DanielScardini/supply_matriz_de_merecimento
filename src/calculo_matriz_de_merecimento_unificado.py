@@ -23,6 +23,10 @@
 
 # COMMAND ----------
 
+spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3').filter(F.col("NmAgrupamentoDiretoriaSetor") == 'DIRETORIA DE TELAS').limit(100).display()
+
+# COMMAND ----------
+
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F, Window
 from datetime import datetime, timedelta, date
@@ -179,12 +183,14 @@ def determinar_grupo_necessidade(categoria: str, df: DataFrame) -> DataFrame:
 
 # COMMAND ----------
 
-def carregar_dados_base(categoria: str, data_inicio: str = "2024-01-01") -> DataFrame:
+def carregar_dados_base(categoria: str, data_inicio: str = "2024-07-01") -> DataFrame:
     """
     Carrega os dados base para a categoria especificada.
     """
     print(f"🔄 Carregando dados para categoria: {categoria}")
     
+
+
     df_base = (
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3')
         .filter(F.col("NmAgrupamentoDiretoriaSetor") == categoria)
@@ -194,12 +200,21 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-01-01") -> Data
             F.date_format(F.col("DtAtual"), "yyyyMM").cast("int")
         )
         .fillna(0, subset=["Receita", "QtMercadoria", "TeveVenda"])
+
+        ###
+        .filter(F.col("NmAgrupamentoDiretoriaSetor") == 'DIRETORIA DE TELAS')
+        .filter(F.col("CdSku") == 5339979)
     )
     
     print(f"✅ Dados carregados para '{categoria}':")
     print(f"  • Total de registros: {df_base.count():,}")
     
     return df_base
+
+# COMMAND ----------
+
+spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3').limit(100).display()
+
 
 # COMMAND ----------
 
@@ -410,7 +425,11 @@ def calcular_medidas_centrais_com_medias_aparadas(df: DataFrame) -> DataFrame:
     """
     print("🔄 Calculando medidas centrais com médias aparadas...")
     
-    df_sem_ruptura = df.filter(F.col("FlagRuptura") == 0)
+    df_sem_ruptura = (
+        df
+        .withColumn("demanda_robusta",
+                    F.col("QtMercadoria") + F.col("deltaRuptura"))
+    )
     
     janelas = {}
     for dias in JANELAS_MOVEIS:
@@ -420,14 +439,14 @@ def calcular_medidas_centrais_com_medias_aparadas(df: DataFrame) -> DataFrame:
     for dias in JANELAS_MOVEIS:
         df_com_medias = df_com_medias.withColumn(
             f"Media{dias}_Qt_venda_sem_ruptura",
-            F.avg("QtMercadoria").over(janelas[dias])
+            F.avg("demanda_robusta").over(janelas[dias])
         )
     
     df_com_medias_aparadas = (
         add_media_aparada_rolling(
             df_com_medias,
             janelas=JANELAS_MOVEIS,
-            col_val="QtMercadoria",
+            col_val="demanda_robusta",
             col_ord="DtAtual",
             grupos=("CdSku","CdFilial"),
             alpha=PERCENTUAL_CORTE_MEDIAS_APARADAS,
@@ -452,7 +471,7 @@ def consolidar_medidas(df: DataFrame) -> DataFrame:
     df_consolidado = (
         df.select(
             "DtAtual", "CdSku", "CdFilial", "grupo_de_necessidade", "year_month",
-            "QtMercadoria", "Receita", "FlagRuptura", "tipo_agrupamento",
+            "QtMercadoria", "Receita", "FlagRuptura", "deltaRuptura", "tipo_agrupamento",
             *colunas_medias,
             *colunas_medias_aparadas
         )
@@ -470,7 +489,11 @@ def criar_de_para_filial_cd() -> DataFrame:
     """
     print("🔄 Criando de-para filial → CD...")
     
-    df_base = spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3')
+    df_base = (
+        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3')
+        .filter(F.col("DtAtual") == "2025-08-01")
+        .filter(F.col("CdSku").isNotNull())
+    )
     
     de_para_filial_cd = (
         df_base
@@ -604,8 +627,10 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
     
     colunas_renomeadas = ["cd_primario", "grupo_de_necessidade"]
     for medida in medidas_disponiveis:
-        colunas_renomeadas.append(F.col(f"Total_{medida}").alias(f"Total_CD_{medida}"))
-        colunas_renomeadas.append(F.col(f"Merecimento_CD_{medida}").alias(f"Merecimento_CD_{medida}"))
+        if f"Total_{medida}" in df_merecimento_cd.columns:
+            colunas_renomeadas.append(F.col(f"Total_{medida}").alias(f"Total_CD_{medida}"))
+        if f"Merecimento_CD_{medida}" in df_merecimento_cd.columns:
+            colunas_renomeadas.append(F.col(f"Merecimento_CD_{medida}").alias(f"Merecimento_CD_{medida}"))
     
     df_merecimento_cd_renomeado = df_merecimento_cd.select(*colunas_renomeadas)
     
@@ -619,7 +644,8 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
     )
     
     for medida in medidas_disponiveis:
-        if medida in df_merecimento_final.columns:
+        if (f"Merecimento_CD_{medida}" in df_merecimento_final.columns and 
+            f"Proporcao_Interna_{medida}" in df_merecimento_final.columns):
             df_merecimento_final = df_merecimento_final.withColumn(
                 f"Merecimento_Final_{medida}",
                 F.col(f"Merecimento_CD_{medida}") * F.col(f"Proporcao_Interna_{medida}")
@@ -636,7 +662,7 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
 # COMMAND ----------
 
 def executar_calculo_matriz_merecimento_completo(categoria: str, 
-                                                data_inicio: str = "2024-01-01",
+                                                data_inicio: str = "2024-01",
                                                 data_calculo: str = "2025-06-30") -> DataFrame:
     """
     Função principal que executa todo o fluxo da matriz de merecimento.
@@ -710,10 +736,10 @@ print("=" * 80)
 # Lista de todas as categorias disponíveis
 categorias = [
     "DIRETORIA DE TELAS",
-    "DIRETORIA TELEFONIA CELULAR", 
-    "DIRETORIA DE LINHA BRANCA",
-    "DIRETORIA LINHA LEVE",
-    "DIRETORIA INFO/PERIFERICOS"
+    # "DIRETORIA TELEFONIA CELULAR", 
+    # "DIRETORIA DE LINHA BRANCA",
+    # "DIRETORIA LINHA LEVE",
+    # "DIRETORIA INFO/PERIFERICOS"
 ]
 
 resultados_finais = {}
@@ -726,7 +752,7 @@ for categoria in categorias:
         # Executa cálculo da matriz de merecimento
         df_matriz_final = executar_calculo_matriz_merecimento_completo(
             categoria=categoria,
-            data_inicio="2024-01-01",
+            data_inicio="2024-07-01",
             data_calculo="2025-06-30"
         )
         
@@ -786,6 +812,10 @@ print("\n" + "=" * 80)
 print("🎯 SCRIPT DE CÁLCULO CONCLUÍDO!")
 print("📋 Próximo passo: Executar script de análise de factual e comparações")
 print("=" * 80)
+
+# COMMAND ----------
+
+spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas').filter(F.col("grupo_de_necessidade") != '-').display()
 
 # COMMAND ----------
 

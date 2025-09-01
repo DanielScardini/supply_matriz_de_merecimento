@@ -174,9 +174,9 @@ df_graficos = df_agregado.toPandas()
 # Converte year_month para formato de data com tratamento de erros
 df_graficos['year_month'] = pd.to_datetime(df_graficos['year_month'].astype(str), format='%Y%m', errors='coerce')
 
-# Remove registros com datas inválidas
-df_graficos = df_graficos[df_graficos['year_month'].notna()].copy()
-print(f"🔍 Debug: Dados após remoção de datas inválidas: {len(df_graficos):,} registros")
+# # Remove registros com datas inválidas
+# df_graficos = df_graficos[df_graficos['year_month'].notna()].copy()
+# print(f"🔍 Debug: Dados após remoção de datas inválidas: {len(df_graficos):,} registros")
 
 # Preenche valores nulos em vez de remover registros
 df_graficos['NmPorteLoja'] = df_graficos['NmPorteLoja'].fillna('SEM PORTE')
@@ -207,9 +207,9 @@ def criar_grafico_elasticidade_porte(
         print(f"⚠️  Nenhum dado encontrado para o gêmeo: {gemeo}")
         return go.Figure()
     
-    print(f"    🔍 Debug: Dados do gêmeo {gemeo}: {len(df_gemeo)} registros")
-    print(f"    🔍 Debug: Meses disponíveis: {sorted(df_gemeo['year_month'].unique())}")
-    print(f"    🔍 Debug: Portes disponíveis: {df_gemeo['NmPorteLoja'].unique()}")
+    # print(f"    🔍 Debug: Dados do gêmeo {gemeo}: {len(df_gemeo)} registros")
+    # print(f"    🔍 Debug: Meses disponíveis: {sorted(df_gemeo['year_month'].unique())}")
+    # print(f"    🔍 Debug: Portes disponíveis: {df_gemeo['NmPorteLoja'].unique()}")
 
     df_agrupado = (
         df_gemeo.groupby(['year_month', 'NmPorteLoja'])
@@ -367,10 +367,10 @@ def criar_grafico_elasticidade_porte_regiao(
             max_col = df_prop.loc[idx].idxmax()
             df_prop.loc[idx, max_col] = 100 - (df_prop.loc[idx].sum() - df_prop.loc[idx, max_col])
     
-    print(f"    🔍 Debug: Verificação das proporções (porte+região):")
-    for idx in df_prop.index:
-        row_sum = df_prop.loc[idx].sum()
-        print(f"      • {idx.strftime('%b/%Y')}: {row_sum:.2f}%")
+    # print(f"    🔍 Debug: Verificação das proporções (porte+região):")
+    # for idx in df_prop.index:
+    #     row_sum = df_prop.loc[idx].sum()
+    #     print(f"      • {idx.strftime('%b/%Y')}: {row_sum:.2f}%")
 
     fig = make_subplots(
         rows=1, cols=2,
@@ -477,9 +477,9 @@ def criar_grafico_elasticidade_regiao(
         print(f"⚠️  Nenhum dado encontrado para o gêmeo: {gemeo}")
         return go.Figure()
     
-    print(f"    🔍 Debug: Dados do gêmeo {gemeo}: {len(df_gemeo)} registros")
-    print(f"    🔍 Debug: Meses disponíveis: {sorted(df_gemeo['year_month'].unique())}")
-    print(f"    🔍 Debug: Regiões disponíveis: {df_gemeo['NmRegiaoGeografica'].unique()}")
+    # print(f"    🔍 Debug: Dados do gêmeo {gemeo}: {len(df_gemeo)} registros")
+    # print(f"    🔍 Debug: Meses disponíveis: {sorted(df_gemeo['year_month'].unique())}")
+    # print(f"    🔍 Debug: Regiões disponíveis: {df_gemeo['NmRegiaoGeografica'].unique()}")
 
     df_agrupado = (
         df_gemeo.groupby(['year_month', 'NmRegiaoGeografica'])
@@ -494,8 +494,8 @@ def criar_grafico_elasticidade_regiao(
         .sort_index()
     )
     
-    print(f"    🔍 Debug: Pivot criado com {len(df_pivot)} meses e {len(df_pivot.columns)} regiões")
-    print(f"    🔍 Debug: Colunas do pivot: {list(df_pivot.columns)}")
+    # print(f"    🔍 Debug: Pivot criado com {len(df_pivot)} meses e {len(df_pivot.columns)} regiões")
+    # print(f"    🔍 Debug: Colunas do pivot: {list(df_pivot.columns)}")
     
     # Calcula proporções garantindo que somem 100% exato
     df_prop = df_pivot.div(df_pivot.sum(axis=1), axis=0) * 100
@@ -514,10 +514,10 @@ def criar_grafico_elasticidade_regiao(
             max_col = df_prop.loc[idx].idxmax()
             df_prop.loc[idx, max_col] = 100 - (df_prop.loc[idx].sum() - df_prop.loc[idx, max_col])
     
-    print(f"    🔍 Debug: Verificação das proporções (região):")
-    for idx in df_pivot.index:
-        row_sum = df_prop.loc[idx].sum()
-        print(f"      • {idx.strftime('%b/%Y')}: {row_sum:.2f}%")
+    # print(f"    🔍 Debug: Verificação das proporções (região):")
+    # for idx in df_pivot.index:
+    #     row_sum = df_prop.loc[idx].sum()
+    #     print(f"      • {idx.strftime('%b/%Y')}: {row_sum:.2f}%")
 
     fig = make_subplots(
         rows=1, cols=2,
@@ -531,31 +531,30 @@ def criar_grafico_elasticidade_regiao(
 
     # Detecta automaticamente os nomes reais das regiões nas colunas
     regioes_reais = list(df_pivot.columns)
-    print(f"    🔍 Debug: Regiões reais encontradas nas colunas: {regioes_reais}")
+    # print(f"    🔍 Debug: Regiões reais encontradas nas colunas: {regioes_reais}")
     
     # Cria mapeamento de cores dinâmico baseado nas regiões reais
     # Usa tons de azul semelhantes aos portes, com cinza para SEM REGIÃO
-    cores_disponiveis = ['#1a365d', '#2c5282', '#3182ce', '#4299e1', '#63b3ed', '#90cdf4', '#bfdbfe', '#dbeafe']
-    cores_regioes = {}
-    
-    for i, regiao in enumerate(regioes_reais):
-        if regiao == 'SEM REGIÃO':
-            cores_regioes[regiao] = '#808080'  # Cinza para SEM REGIÃO
-        else:
-            cores_regioes[regiao] = cores_disponiveis[i % len(cores_disponiveis)]
-    
-    print(f"    🔍 Debug: Cores atribuídas: {cores_regioes}")
+    cores_regioes = {
+        'Sul': '#1a365d',
+        'Sudeste': '#2c5282',
+        'Norte': '#3182ce',
+        'Nordeste': '#4299e1',
+        'Centro Oeste': '#63b3ed',
+        'SEM REGIÃO': '#808080'
+    }    
+    # print(f"    🔍 Debug: Cores atribuídas: {cores_regioes}")
     
     # Usa as regiões reais encontradas
     regioes = regioes_reais
     
-    print(f"    🔍 Debug: Regiões encontradas: {regioes}")
-    print(f"    🔍 Debug: Total de regiões: {len(regioes)}")
+    # print(f"    🔍 Debug: Regiões encontradas: {regioes}")
+    # print(f"    🔍 Debug: Total de regiões: {len(regioes)}")
 
     x_labels = pd.to_datetime(df_pivot.index).strftime('%b/%y').tolist()
     x_labels_prop = pd.to_datetime(df_prop.index).strftime('%b/%y').tolist()
     
-    print(f"    🔍 Debug: Labels X criados: {len(x_labels)} meses")
+    # print(f"    🔍 Debug: Labels X criados: {len(x_labels)} meses")
 
     # Barras para vendas absolutas
     for regiao in regioes:
@@ -574,7 +573,7 @@ def criar_grafico_elasticidade_regiao(
         cor = cores_regioes.get(regiao, '#90cdf4')
         fig.add_trace(
             go.Bar(
-                x=x_labels_prop, y=df_prop[regiao], name=regiao, showlegend=False,
+                x=x_labels_prop, y=df_prop[regiao], name=regiao, showlegend=False, marker_color=cor,
                 marker_line_color="#FFFFFF", marker_line_width=0.7,
                 hovertemplate=f"<b>{regiao}</b><br>Mês: %{ '{' }x{'}' }<br>Proporção: %{ '{' }y:.1f{'}' }%<extra></extra>"
             ),

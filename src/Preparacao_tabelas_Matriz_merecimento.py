@@ -33,7 +33,7 @@ print(hoje, hoje_str, hoje_int)
 
 def get_data_inicio(hoje: datetime | date | None = None) -> datetime:
     """
-    Retorna datetime no dia 1 do mês que está 19 meses antes de 'hoje'.
+    Retorna datetime no dia 1 do mês que está 14 meses antes de 'hoje'.
     """
     if hoje is None:
         hoje_d = date.today()

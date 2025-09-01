@@ -31,6 +31,10 @@ hoje_int = int(hoje.strftime("%Y%m%d"))
 
 # COMMAND ----------
 
+spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3').filter(F.col('year_month') == 202411).display()
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 1. Carregamento das Matrizes de Merecimento Calculadas
 
@@ -77,6 +81,14 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
 
 # COMMAND ----------
 
+(
+    spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3')
+    .filter(F.col('NmAgrupamentoDiretoriaSetor') == 'DIRETORIA DE TELAS')
+    .filter(F.col("DtAtual") == F.lit("2025-01-01"))
+).display()
+
+# COMMAND ----------
+
 def carregar_dados_factual_janela_movel() -> DataFrame:
     """
     Calcula dados factuais baseados na janela móvel de 180 dias (média aparada robusta a ruptura).
@@ -90,13 +102,16 @@ def carregar_dados_factual_janela_movel() -> DataFrame:
     df_base = (
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3')
         .filter(F.col('NmAgrupamentoDiretoriaSetor') == 'DIRETORIA DE TELAS')
-        .filter(F.col("DtAtual") >= F.lit("2024-01-01"))  # Período para cálculo
+        .filter(F.col("DtAtual") >= F.lit("2025-01-01"))  # Período para cálculo
         .select(
             "CdSku", 
             "CdFilial", 
             "DtAtual",
-            "Qt_venda_sem_ruptura"
+            "QtMercadoria",
+            "deltaRuptura"
         )
+        .withColumn("Qt_venda_sem_ruptura",
+                    F.col("QtMercadoria") + F.col("deltaRuptura"))
         .filter(F.col("Qt_venda_sem_ruptura").isNotNull())
         .filter(F.col("Qt_venda_sem_ruptura") >= 0)
     )
@@ -738,11 +753,85 @@ print("=" * 80)
 
 # COMMAND ----------
 
-df_distorcoes = df_distorcoes.filter(F.col("is_Cluster") == 'OBRIGATÓRIO')
+df_proporcao_factual_janela.display()
 
-df_distorcoes.cache()
+# COMMAND ----------
 
-df_distorcoes.limit(10).display()
+df_matriz_renomeado.filter(F.col("CdSku") == 5339979).display()
+
+# COMMAND ----------
+
+carregar_dados_factual_janela_movel().select("CdFilial").distinct().display()
+
+# COMMAND ----------
+
+# Join entre matriz e proporção factual de julho-2025
+# Renomeia colunas para evitar ambiguidade
+c = df_matriz.select(
+    *[F.col(c).alias(f"matriz_{c}") for c in df_matriz.columns if c not in ["CdSku", "CdFilial"]],
+    F.col("CdSku"),
+    F.col("CdFilial")
+)
+
+df_comparacao = (
+    df_matriz_renomeado
+    .join(df_proporcao_factual_janela, on=["CdSku", "CdFilial"], how="outer")
+)
+
+df_comparacao.display()
+
+print(f"    🔍 Debug: Registros após join: {df_comparacao.count():,}")
+
+# COMMAND ----------
+
+df_matriz.display()
+
+# COMMAND ----------
+
+df_matriz.display()
+
+# COMMAND ----------
+
+df_factual.display()
+
+# COMMAND ----------
+
+df_proporcao_factual_janela.display()
+
+# COMMAND ----------
+
+df_com_smape_vs_factual.display()
+
+# COMMAND ----------
+
+matriz_drp_geral.display()
+
+# COMMAND ----------
+
+df_com_smape_vs_factual.display()
+
+# COMMAND ----------
+
+df_investigacao = (
+    df_com_smape_vs_factual
+    .join(matriz_drp_geral,
+          how="inner",
+          on=['CdFilial', 'CdSku'])
+    .filter(F.col("is_Cluster") == 'OBRIGATÓRIO')
+    .select("CdFilial", "CdSku", 
+            F.col("matriz_cd_primario").alias('Cd_primario'), 
+            "matriz_grupo_de_necessidade",
+            "matriz_year_month", 
+            F.round(100*F.col("matriz_Merecimento_Final_Media180_Qt_venda_sem_ruptura"),2).alias('merecimento_calculado'), 
+            F.round(100*F.col("proporcao_factual_MediaAparada180_Qt_venda_sem_ruptura_percentual"), 2).alias('proporcao_factual'),
+            F.round((100*F.col("PercMatrizNeogrid")), 2).alias('PercMatrizNeogrid')
+    )
+)
+
+
+df_investigacao.cache()
+
+df_investigacao.limit(10).display()
 
 # COMMAND ----------
 
@@ -769,15 +858,6 @@ df_distorcoes.columns
 # MAGIC - **sMAPE da matriz DRP vs factual** (janela móvel 180 dias)
 # MAGIC - **Comparação com matriz DRP geral**
 # MAGIC - **Identificação de distorções** vs factual (janela móvel 180 dias)
-# MAGIC
-# MAGIC ### **Principais mudanças implementadas:**
-# MAGIC ✅ **Factual correto**: Usa janela móvel 180 dias (média aparada robusta a ruptura)
-# MAGIC ✅ **Proporção factual correta**: % que SKU vendeu na filial vs total do SKU na empresa
-# MAGIC ✅ **sMAPE vs factual**: Calcula erro para todas as medidas vs factual (janela móvel 180 dias)
-# MAGIC ✅ **sMAPE DRP vs factual**: Calcula erro da matriz DRP vs factual (janela móvel 180 dias)
-# MAGIC ✅ **WMAPE ponderado**: Usa dados da janela móvel 180 dias como peso
-# MAGIC
-# MAGIC **Este script está atualizado e finalizado!** 🎉
 
 # COMMAND ----------
 
@@ -798,4 +878,33 @@ df_estoque_receita = (
     .filter(F.col('year_month') == 202506)
 )
 
-df_estoque_receita.display()
+df_lojas_principais = (
+    df_estoque_receita
+    .groupBy('CdFilial', 'NmLoja')
+    .agg(
+        F.sum('Media90_Receita_venda_estq').alias('Soma_media_receita')
+    )
+    .orderBy(F.desc('Soma_media_receita'))
+    .limit(25)
+)
+
+df_lojas_principais.display()
+
+df_produtos_ofensores = (
+    df_estoque_receita
+    .groupBy('CdSku', 'DsSku', 'NmSku')
+    .agg(
+        F.round(F.sum('Media90_Receita_venda_estq'), 2).alias('Soma_media_receita'),
+        F.round(F.mean('DDE'), 2).alias('DDE_medio'),
+        F.round(F.sum('ReceitaPerdidaRuptura'), 2).alias('ReceitaPerdidaRuptura'),
+    )
+    .withColumn('Aging_pct_receita',
+                F.round(100*F.col('ReceitaPerdidaRuptura')/F.col('Soma_media_receita'),2))
+    .withColumn('score_DDE_aging',
+                F.col('DDE_medio') + 
+                F.col('Aging_pct_receita'))
+    .orderBy(F.desc('score_DDE_aging'),)
+    .limit(50)
+)
+
+df_produtos_ofensores.display()
