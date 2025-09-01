@@ -492,6 +492,7 @@ def criar_de_para_filial_cd() -> DataFrame:
 def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) -> DataFrame:
     """
     Calcula o merecimento a nível CD por grupo de necessidade.
+    Retorna o percentual que cada CD representa dentro da Cia.
     """
     print(f"🔄 Calculando merecimento CD para categoria: {categoria}")
     
@@ -518,6 +519,23 @@ def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) ->
         .agg(*aggs_cd)
     )
     
+    # NOVO: Calcular percentual do CD dentro da Cia
+    for medida in medidas_disponiveis:
+        if medida in df_merecimento_cd.columns:
+            w_total_cia = Window.partitionBy("grupo_de_necessidade")
+            
+            df_merecimento_cd = df_merecimento_cd.withColumn(
+                f"Total_Cia_{medida}",
+                F.sum(F.col(f"Total_{medida}")).over(w_total_cia)
+            )
+            
+            df_merecimento_cd = df_merecimento_cd.withColumn(
+                f"Merecimento_CD_{medida}",
+                F.when(F.col(f"Total_Cia_{medida}") > 0,
+                       F.col(f"Total_{medida}") / F.col(f"Total_Cia_{medida}"))
+                .otherwise(0)
+            )
+    
     print(f"✅ Merecimento CD calculado: {df_merecimento_cd.count():,} registros")
     return df_merecimento_cd
 
@@ -525,7 +543,7 @@ def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) ->
 
 def calcular_merecimento_interno_cd(df: DataFrame, data_calculo: str, categoria: str) -> DataFrame:
     """
-    Calcula o merecimento interno ao CD (filial) por grupo de necessidade.
+    Calcula a proporção interna de cada loja dentro do CD por grupo de necessidade.
     """
     print(f"🔄 Calculando merecimento interno CD para categoria: {categoria}")
     
@@ -559,7 +577,7 @@ def calcular_merecimento_interno_cd(df: DataFrame, data_calculo: str, categoria:
             w_percentual = Window.partitionBy("cd_primario", "grupo_de_necessidade")
             
             df_merecimento_interno = df_merecimento_interno.withColumn(
-                f"Percentual_{medida}",
+                f"Proporcao_Interna_{medida}",
                 F.when(F.col(f"Total_{medida}") > 0,
                        F.col(medida) / F.col(f"Total_{medida}"))
                 .otherwise(0)
@@ -573,7 +591,7 @@ def calcular_merecimento_interno_cd(df: DataFrame, data_calculo: str, categoria:
 def calcular_merecimento_final(df_merecimento_cd: DataFrame, 
                               df_merecimento_interno: DataFrame) -> DataFrame:
     """
-    Calcula o merecimento final combinando CD e interno CD.
+    Calcula o merecimento final: Merecimento_CD × Proporcao_Interna
     """
     print("🔄 Calculando merecimento final...")
     
@@ -587,6 +605,7 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
     colunas_renomeadas = ["cd_primario", "grupo_de_necessidade"]
     for medida in medidas_disponiveis:
         colunas_renomeadas.append(F.col(f"Total_{medida}").alias(f"Total_CD_{medida}"))
+        colunas_renomeadas.append(F.col(f"Merecimento_CD_{medida}").alias(f"Merecimento_CD_{medida}"))
     
     df_merecimento_cd_renomeado = df_merecimento_cd.select(*colunas_renomeadas)
     
@@ -603,7 +622,7 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
         if medida in df_merecimento_final.columns:
             df_merecimento_final = df_merecimento_final.withColumn(
                 f"Merecimento_Final_{medida}",
-                F.col(f"Total_CD_{medida}") * F.col(f"Percentual_{medida}")
+                F.col(f"Merecimento_CD_{medida}") * F.col(f"Proporcao_Interna_{medida}")
             )
     
     print(f"✅ Merecimento final calculado: {df_merecimento_final.count():,} registros")
