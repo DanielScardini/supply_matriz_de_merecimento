@@ -431,10 +431,14 @@ def comparar_com_matriz_drp_geral(df_matriz: DataFrame, df_matriz_geral: DataFra
         "MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada360_Qt_venda_sem_ruptura"
     ]
     
+    print(f"    🔍 Debug: Verificando colunas disponíveis...")
+    print(f"    🔍 Debug: Colunas da matriz renomeada: {[c for c in df_matriz_norm_renomeado.columns if c.startswith('matriz_')]}")
+    print(f"    🔍 Debug: Medidas disponíveis: {medidas_disponiveis}")
+    
     df_com_metricas = df_comparacao
     
     for medida in medidas_disponiveis:
-        if medida in df_matriz.columns:
+        if f"matriz_{medida}" in df_matriz_norm_renomeado.columns:
             df_com_metricas = (
                 df_com_metricas
                 .withColumn(
