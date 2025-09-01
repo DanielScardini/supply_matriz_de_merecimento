@@ -176,8 +176,15 @@ def calcular_smape_comparacao_factual(df_matriz: DataFrame, df_proporcao_factual
     ]
     
     # Join entre matriz e proporção factual
+    # Renomeia colunas para evitar ambiguidade
+    df_matriz_renomeado = df_matriz.select(
+        *[F.col(c).alias(f"matriz_{c}") for c in df_matriz.columns if c not in ["CdSku", "CdFilial"]],
+        F.col("CdSku"),
+        F.col("CdFilial")
+    )
+    
     df_comparacao = (
-        df_matriz
+        df_matriz_renomeado
         .join(df_proporcao_factual, on=["CdSku", "CdFilial"], how="inner")
     )
     
@@ -193,9 +200,9 @@ def calcular_smape_comparacao_factual(df_matriz: DataFrame, df_proporcao_factual
                 .withColumn(
                     f"merecimento_{medida}_percentual",
                     F.when(
-                        F.col(f"Merecimento_Final_{medida}") > 0,
-                        F.col(f"Merecimento_Final_{medida}") / F.sum(f"Merecimento_Final_{medida}").over(
-                            Window.partitionBy("grupo_de_necessidade")
+                        F.col(f"matriz_Merecimento_Final_{medida}") > 0,
+                        F.col(f"matriz_Merecimento_Final_{medida}") / F.sum(f"matriz_Merecimento_Final_{medida}").over(
+                            Window.partitionBy("matriz_grupo_de_necessidade")
                         ) * 100
                     ).otherwise(F.lit(0.0))
                 )
@@ -402,9 +409,16 @@ def comparar_com_matriz_drp_geral(df_matriz: DataFrame, df_matriz_geral: DataFra
         .withColumn("CdFilial", F.col("CdFilial").cast("int"))
     )
     
+    # Renomeia colunas da matriz para evitar ambiguidade
+    df_matriz_norm_renomeado = df_matriz_norm.select(
+        *[F.col(c).alias(f"matriz_{c}") for c in df_matriz_norm.columns if c not in ["CdFilial", "CdSku"]],
+        F.col("CdFilial"),
+        F.col("CdSku")
+    )
+    
     # Join para comparação
     df_comparacao = (
-        df_matriz_norm
+        df_matriz_norm_renomeado
         .join(df_geral_norm, on=["CdFilial", "CdSku"], how="inner")
         .withColumn("categoria", F.lit(categoria))
     )
@@ -426,9 +440,9 @@ def comparar_com_matriz_drp_geral(df_matriz: DataFrame, df_matriz_geral: DataFra
                 .withColumn(
                     f"merecimento_{medida}_percentual",
                     F.when(
-                        F.col(f"Merecimento_Final_{medida}") > 0,
-                        F.col(f"Merecimento_Final_{medida}") / F.sum(f"Merecimento_Final_{medida}").over(
-                            Window.partitionBy("grupo_de_necessidade")
+                        F.col(f"matriz_Merecimento_Final_{medida}") > 0,
+                        F.col(f"matriz_Merecimento_Final_{medida}") / F.sum(f"matriz_Merecimento_Final_{medida}").over(
+                            Window.partitionBy("matriz_grupo_de_necessidade")
                         ) * 100
                     ).otherwise(F.lit(0.0))
                 )
