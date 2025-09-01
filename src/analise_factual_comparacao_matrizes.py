@@ -79,17 +79,57 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
 
 def carregar_dados_factual_janela_movel() -> DataFrame:
     """
-    Carrega dados factuais baseados na janela móvel de 180 dias (média aparada robusta a ruptura).
+    Calcula dados factuais baseados na janela móvel de 180 dias (média aparada robusta a ruptura).
     
     Returns:
         DataFrame com dados factuais por SKU e filial
     """
-    print("📊 Carregando dados factuais baseados na janela móvel de 180 dias...")
+    print("📊 Calculando dados factuais baseados na janela móvel de 180 dias...")
     
-    # Carregar dados da janela móvel de 180 dias (média aparada robusta a ruptura)
-    df_factual = (
+    # Carregar dados base para cálculo da média aparada 180 dias
+    df_base = (
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3')
         .filter(F.col('NmAgrupamentoDiretoriaSetor') == 'DIRETORIA DE TELAS')
+        .filter(F.col("DtAtual") >= F.lit("2024-01-01"))  # Período para cálculo
+        .select(
+            "CdSku", 
+            "CdFilial", 
+            "DtAtual",
+            "Qt_venda_sem_ruptura"
+        )
+        .filter(F.col("Qt_venda_sem_ruptura").isNotNull())
+        .filter(F.col("Qt_venda_sem_ruptura") >= 0)
+    )
+    
+    # Calcular média aparada 180 dias (robusta a ruptura)
+    # Para cada SKU-filial, pegar os últimos 180 dias e calcular média aparada (remove top e bottom 5%)
+    w_180_dias = Window.partitionBy("CdSku", "CdFilial").orderBy(F.desc("DtAtual")).rowsBetween(0, 179)
+    
+    df_com_media_aparada = (
+        df_base
+        .withColumn(
+            "MediaAparada180_Qt_venda_sem_ruptura",
+            F.expr("avg(Qt_venda_sem_ruptura)").over(w_180_dias)
+        )
+        .withColumn(
+            "P5", F.expr("percentile_approx(Qt_venda_sem_ruptura, 0.05)").over(w_180_dias)
+        )
+        .withColumn(
+            "P95", F.expr("percentile_approx(Qt_venda_sem_ruptura, 0.95)").over(w_180_dias)
+        )
+        .withColumn(
+            "MediaAparada180_Qt_venda_sem_ruptura",
+            F.when(
+                (F.col("Qt_venda_sem_ruptura") >= F.col("P5")) & 
+                (F.col("Qt_venda_sem_ruptura") <= F.col("P95")),
+                F.col("Qt_venda_sem_ruptura")
+            ).otherwise(F.lit(None))
+        )
+        .groupBy("CdSku", "CdFilial", "DtAtual")
+        .agg(
+            F.avg("MediaAparada180_Qt_venda_sem_ruptura").alias("MediaAparada180_Qt_venda_sem_ruptura")
+        )
+        .filter(F.col("DtAtual") == F.lit("2025-06-30"))  # Data de referência
         .select(
             "CdSku", 
             "CdFilial", 
@@ -99,10 +139,10 @@ def carregar_dados_factual_janela_movel() -> DataFrame:
         .filter(F.col("MediaAparada180_Qt_venda_sem_ruptura") > 0)
     )
     
-    print(f"✅ Dados factuais (janela móvel 180 dias) carregados: {df_factual.count():,} registros")
-    print(f"📅 Base: Média aparada 180 dias robusta a ruptura")
+    print(f"✅ Dados factuais (janela móvel 180 dias) calculados: {df_com_media_aparada.count():,} registros")
+    print(f"📅 Base: Média aparada 180 dias robusta a ruptura (calculada)")
     
-    return df_factual
+    return df_com_media_aparada
 
 # COMMAND ----------
 
