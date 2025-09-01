@@ -493,10 +493,28 @@ def identificar_distorcoes(df_comparacao: DataFrame, categoria: str) -> DataFram
     # Calcular melhor medida para cada registro
     colunas_smape = [f"smape_vs_drp_{medida}" for medida in medidas_disponiveis if medida in df_comparacao.columns]
     
-    df_com_distorcao = df_comparacao.withColumn(
-        "melhor_smape_vs_drp",
-        F.least(*[F.col(col) for col in colunas_smape])
-    )
+    print(f"    🔍 Debug: Colunas sMAPE encontradas: {colunas_smape}")
+    print(f"    🔍 Debug: Total de colunas sMAPE: {len(colunas_smape)}")
+    
+    # Verifica se há pelo menos 2 colunas para usar F.least
+    if len(colunas_smape) >= 2:
+        df_com_distorcao = df_comparacao.withColumn(
+            "melhor_smape_vs_drp",
+            F.least(*[F.col(col) for col in colunas_smape])
+        )
+    elif len(colunas_smape) == 1:
+        # Se há apenas uma coluna, usa ela diretamente
+        df_com_distorcao = df_comparacao.withColumn(
+            "melhor_smape_vs_drp",
+            F.col(colunas_smape[0])
+        )
+    else:
+        # Se não há colunas, cria coluna com valor padrão
+        print(f"    ⚠️  Nenhuma coluna sMAPE encontrada, criando coluna padrão")
+        df_com_distorcao = df_comparacao.withColumn(
+            "melhor_smape_vs_drp",
+            F.lit(999.0)  # Valor alto para indicar erro
+        )
     
     # Categorizar qualidade
     df_com_distorcao = df_com_distorcao.withColumn(
