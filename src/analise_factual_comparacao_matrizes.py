@@ -77,32 +77,32 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
 
 # COMMAND ----------
 
-def carregar_dados_factual_julho_2025() -> DataFrame:
+def carregar_dados_factual_janela_movel() -> DataFrame:
     """
-    Carrega dados reais de venda de julho-2025 para cálculo do factual.
+    Carrega dados factuais baseados na janela móvel de 180 dias (média aparada robusta a ruptura).
     
     Returns:
-        DataFrame com vendas reais de julho-2025 por SKU e filial
+        DataFrame com dados factuais por SKU e filial
     """
-    print("📊 Carregando dados factuais de venda de julho-2025...")
+    print("📊 Carregando dados factuais baseados na janela móvel de 180 dias...")
     
-    # Carregar dados de venda de julho-2025
-    df_vendas_julho = (
+    # Carregar dados da janela móvel de 180 dias (média aparada robusta a ruptura)
+    df_factual = (
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3')
-        .filter(F.col('year_month') == 202507)  # Julho-2025
         .filter(F.col('NmAgrupamentoDiretoriaSetor') == 'DIRETORIA DE TELAS')
-        .groupBy("CdSku", "CdFilial")
-        .agg(
-            F.sum("Qt_venda_sem_ruptura").alias("vendas_julho_2025"),
-            F.count("*").alias("dias_com_venda")
+        .select(
+            "CdSku", 
+            "CdFilial", 
+            "MediaAparada180_Qt_venda_sem_ruptura"
         )
-        .filter(F.col("vendas_julho_2025") > 0)  # Apenas SKUs com vendas
+        .filter(F.col("MediaAparada180_Qt_venda_sem_ruptura").isNotNull())
+        .filter(F.col("MediaAparada180_Qt_venda_sem_ruptura") > 0)
     )
     
-    print(f"✅ Dados factuais de julho-2025 carregados: {df_vendas_julho.count():,} registros")
-    print(f"📅 Período: Julho-2025 (202507)")
+    print(f"✅ Dados factuais (janela móvel 180 dias) carregados: {df_factual.count():,} registros")
+    print(f"📅 Base: Média aparada 180 dias robusta a ruptura")
     
-    return df_vendas_julho
+    return df_factual
 
 # COMMAND ----------
 
@@ -111,45 +111,46 @@ def carregar_dados_factual_julho_2025() -> DataFrame:
 
 # COMMAND ----------
 
-def calcular_proporcao_factual_julho_2025(df_vendas_julho: DataFrame, categoria: str) -> DataFrame:
+def calcular_proporcao_factual_janela_movel(df_factual: DataFrame, categoria: str) -> DataFrame:
     """
-    Calcula proporção factual baseada em vendas reais de julho-2025.
+    Calcula proporção factual: % que aquele SKU vendeu naquela filial vs total do SKU na empresa.
     
     Args:
-        df_vendas_julho: DataFrame com vendas reais de julho-2025
+        df_factual: DataFrame com dados factuais (janela móvel 180 dias)
         categoria: Nome da categoria/diretoria
         
     Returns:
-        DataFrame com proporção factual calculada por SKU na filial vs total da empresa
+        DataFrame com proporção factual calculada por SKU na filial vs total do SKU na empresa
     """
-    print(f"📈 Calculando proporção factual baseada em vendas reais de julho-2025 para: {categoria}")
-    print("📊 IMPORTANTE: Proporção factual calculada por SKU na FILIAL vs TOTAL DA EMPRESA (julho-2025)")
+    print(f"📈 Calculando proporção factual para: {categoria}")
+    print("📊 IMPORTANTE: Proporção factual = % que SKU vendeu na FILIAL vs TOTAL do SKU na EMPRESA")
     
-    # Calcular total de vendas da empresa em julho-2025
-    w_total_empresa = Window.partitionBy()  # Sem partição = total geral
+    # Calcular total de vendas do SKU na empresa (agrupado por SKU)
+    w_total_sku_empresa = Window.partitionBy("CdSku")  # Total por SKU na empresa
     
     df_proporcao_factual = (
-        df_vendas_julho
+        df_factual
         .withColumn(
-            "total_vendas_empresa_julho",
-            F.sum(F.col("vendas_julho_2025")).over(w_total_empresa)
+            "total_sku_empresa",
+            F.sum(F.col("MediaAparada180_Qt_venda_sem_ruptura")).over(w_total_sku_empresa)
         )
         .withColumn(
-            "proporcao_factual_julho_2025",
+            "proporcao_factual_janela_movel",
             F.when(
-                F.col("total_vendas_empresa_julho") > 0,
-                F.col("vendas_julho_2025") / F.col("total_vendas_empresa_julho")
+                F.col("total_sku_empresa") > 0,
+                F.col("MediaAparada180_Qt_venda_sem_ruptura") / F.col("total_sku_empresa")
             ).otherwise(F.lit(0.0))
         )
         .withColumn(
-            "proporcao_factual_julho_2025_percentual",
-            F.round(F.col("proporcao_factual_julho_2025") * 100, 4)
+            "proporcao_factual_janela_movel_percentual",
+            F.round(F.col("proporcao_factual_janela_movel") * 100, 4)
         )
     )
     
-    print(f"✅ Proporção factual de julho-2025 calculada para {categoria}")
+    print(f"✅ Proporção factual calculada para {categoria}")
     print(f"  • Total de registros: {df_proporcao_factual.count():,}")
-    print(f"  • Total de vendas empresa julho-2025: {df_proporcao_factual.select('total_vendas_empresa_julho').first()[0]:,.0f}")
+    print(f"  • SKUs únicos: {df_proporcao_factual.select('CdSku').distinct().count():,}")
+    print(f"  • Filiais únicas: {df_proporcao_factual.select('CdFilial').distinct().count():,}")
     
     return df_proporcao_factual
 
@@ -160,20 +161,20 @@ def calcular_proporcao_factual_julho_2025(df_vendas_julho: DataFrame, categoria:
 
 # COMMAND ----------
 
-def calcular_smape_vs_factual_julho_2025(df_matriz: DataFrame, df_proporcao_factual: DataFrame, categoria: str) -> DataFrame:
+def calcular_smape_vs_factual_janela_movel(df_matriz: DataFrame, df_proporcao_factual: DataFrame, categoria: str) -> DataFrame:
     """
-    Calcula sMAPE comparando merecimento calculado com proporção factual de julho-2025.
+    Calcula sMAPE comparando merecimento calculado com proporção factual (janela móvel 180 dias).
     
     Args:
         df_matriz: DataFrame com matriz de merecimento calculada
-        df_proporcao_factual: DataFrame com proporção factual de julho-2025
+        df_proporcao_factual: DataFrame com proporção factual (janela móvel 180 dias)
         categoria: Nome da categoria
         
     Returns:
-        DataFrame com sMAPE calculado para todas as medidas vs factual de julho-2025
+        DataFrame com sMAPE calculado para todas as medidas vs factual (janela móvel 180 dias)
     """
-    print(f"📊 Calculando sMAPE vs factual de julho-2025 para: {categoria}")
-    print("🔄 Merecimento calculado vs Proporção Factual de Julho-2025...")
+    print(f"📊 Calculando sMAPE vs factual (janela móvel 180 dias) para: {categoria}")
+    print("🔄 Merecimento calculado vs Proporção Factual (janela móvel 180 dias)...")
     
     medidas_disponiveis = [
         "Media90_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura", 
@@ -216,34 +217,34 @@ def calcular_smape_vs_factual_julho_2025(df_matriz: DataFrame, df_proporcao_fact
                     ).otherwise(F.lit(0.0))
                 )
                 .withColumn(
-                    f"erro_absoluto_vs_factual_julho_{medida}",
-                    F.abs(F.col(f"merecimento_{medida}_percentual") - F.col("proporcao_factual_julho_2025_percentual"))
+                    f"erro_absoluto_vs_factual_janela_{medida}",
+                    F.abs(F.col(f"merecimento_{medida}_percentual") - F.col("proporcao_factual_janela_movel_percentual"))
                 )
                 .withColumn(
-                    f"smape_vs_factual_julho_{medida}",
+                    f"smape_vs_factual_janela_{medida}",
                     F.when(
-                        (F.col(f"merecimento_{medida}_percentual") + F.col("proporcao_factual_julho_2025_percentual")) > 0,
-                        F.lit(2.0) * F.col(f"erro_absoluto_vs_factual_julho_{medida}") / 
-                        (F.col(f"merecimento_{medida}_percentual") + F.col("proporcao_factual_julho_2025_percentual") + F.lit(EPSILON)) * 100
+                        (F.col(f"merecimento_{medida}_percentual") + F.col("proporcao_factual_janela_movel_percentual")) > 0,
+                        F.lit(2.0) * F.col(f"erro_absoluto_vs_factual_janela_{medida}") / 
+                        (F.col(f"merecimento_{medida}_percentual") + F.col("proporcao_factual_janela_movel_percentual") + F.lit(EPSILON)) * 100
                     ).otherwise(F.lit(0.0))
                 )
             )
     
-    print(f"✅ sMAPE vs factual de julho-2025 calculado para {categoria}")
+    print(f"✅ sMAPE vs factual (janela móvel 180 dias) calculado para {categoria}")
     return df_com_smape
 
-def calcular_wmape_vs_factual_julho_2025(df_com_smape: DataFrame, categoria: str) -> Dict[str, DataFrame]:
+def calcular_wmape_vs_factual_janela_movel(df_com_smape: DataFrame, categoria: str) -> Dict[str, DataFrame]:
     """
-    Calcula WMAPE (Weighted Mean Absolute Percentage Error) vs factual de julho-2025 por diferentes agrupamentos.
+    Calcula WMAPE (Weighted Mean Absolute Percentage Error) vs factual (janela móvel 180 dias) por diferentes agrupamentos.
     
     Args:
-        df_com_smape: DataFrame com sMAPE calculado vs factual de julho-2025
+        df_com_smape: DataFrame com sMAPE calculado vs factual (janela móvel 180 dias)
         categoria: Nome da categoria
         
     Returns:
         Dicionário com DataFrames de WMAPE por agrupamento
     """
-    print(f"📊 Calculando WMAPE vs factual de julho-2025 para: {categoria}")
+    print(f"📊 Calculando WMAPE vs factual (janela móvel 180 dias) para: {categoria}")
     
     medidas_disponiveis = [
         "Media90_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura", 
@@ -259,9 +260,9 @@ def calcular_wmape_vs_factual_julho_2025(df_com_smape: DataFrame, categoria: str
     for medida in medidas_disponiveis:
         if medida in df_com_smape.columns:
             aggs_filial.extend([
-                F.sum(F.col(f"erro_absoluto_vs_factual_julho_{medida}") * F.col("vendas_julho_2025")).alias(f"soma_erro_peso_{medida}"),
-                F.sum(F.col("vendas_julho_2025")).alias(f"soma_peso_{medida}"),
-                F.avg(f"smape_vs_factual_julho_{medida}").alias(f"smape_medio_{medida}"),
+                F.sum(F.col(f"erro_absoluto_vs_factual_janela_{medida}") * F.col("MediaAparada180_Qt_venda_sem_ruptura")).alias(f"soma_erro_peso_{medida}"),
+                F.sum(F.col("MediaAparada180_Qt_venda_sem_ruptura")).alias(f"soma_peso_{medida}"),
+                F.avg(f"smape_vs_factual_janela_{medida}").alias(f"smape_medio_{medida}"),
                 F.count("*").alias("total_skus")
             ])
     
@@ -274,7 +275,7 @@ def calcular_wmape_vs_factual_julho_2025(df_com_smape: DataFrame, categoria: str
     for medida in medidas_disponiveis:
         if medida in df_com_smape.columns:
             df_wmape_filial = df_wmape_filial.withColumn(
-                f"wmape_vs_factual_julho_{medida}",
+                f"wmape_vs_factual_janela_{medida}",
                 F.when(
                     F.col(f"soma_peso_{medida}") > 0,
                     F.round(F.col(f"soma_erro_peso_{medida}") / F.col(f"soma_peso_{medida}") * 100, 4)
@@ -290,9 +291,9 @@ def calcular_wmape_vs_factual_julho_2025(df_com_smape: DataFrame, categoria: str
     for medida in medidas_disponiveis:
         if medida in df_com_smape.columns:
             aggs_grupo.extend([
-                F.sum(F.col(f"erro_absoluto_vs_factual_julho_{medida}") * F.col("vendas_julho_2025")).alias(f"soma_erro_peso_{medida}"),
-                F.sum(F.col("vendas_julho_2025")).alias(f"soma_peso_{medida}"),
-                F.avg(f"smape_vs_factual_julho_{medida}").alias(f"smape_medio_{medida}"),
+                F.sum(F.col(f"erro_absoluto_vs_factual_janela_{medida}") * F.col("MediaAparada180_Qt_venda_sem_ruptura")).alias(f"soma_erro_peso_{medida}"),
+                F.sum(F.col("MediaAparada180_Qt_venda_sem_ruptura")).alias(f"soma_peso_{medida}"),
+                F.avg(f"smape_vs_factual_janela_{medida}").alias(f"smape_medio_{medida}"),
                 F.count("*").alias("total_skus")
             ])
     
@@ -305,7 +306,7 @@ def calcular_wmape_vs_factual_julho_2025(df_com_smape: DataFrame, categoria: str
     for medida in medidas_disponiveis:
         if medida in df_com_smape.columns:
             df_wmape_grupo = df_wmape_grupo.withColumn(
-                f"wmape_vs_factual_julho_{medida}",
+                f"wmape_vs_factual_janela_{medida}",
                 F.when(
                     F.col(f"soma_peso_{medida}") > 0,
                     F.round(F.col(f"soma_erro_peso_{medida}") / F.col(f"soma_peso_{medida}") * 100, 4)
@@ -321,9 +322,9 @@ def calcular_wmape_vs_factual_julho_2025(df_com_smape: DataFrame, categoria: str
     for medida in medidas_disponiveis:
         if medida in df_com_smape.columns:
             aggs_categoria.extend([
-                F.sum(F.col(f"erro_absoluto_vs_factual_julho_{medida}") * F.col("vendas_julho_2025")).alias(f"soma_erro_peso_{medida}"),
-                F.sum(F.col("vendas_julho_2025")).alias(f"soma_peso_{medida}"),
-                F.avg(f"smape_vs_factual_julho_{medida}").alias(f"smape_medio_{medida}"),
+                F.sum(F.col(f"erro_absoluto_vs_factual_janela_{medida}") * F.col("MediaAparada180_Qt_venda_sem_ruptura")).alias(f"soma_erro_peso_{medida}"),
+                F.sum(F.col("MediaAparada180_Qt_venda_sem_ruptura")).alias(f"soma_peso_{medida}"),
+                F.avg(f"smape_vs_factual_janela_{medida}").alias(f"smape_medio_{medida}"),
                 F.count("*").alias("total_skus")
             ])
     
@@ -332,7 +333,7 @@ def calcular_wmape_vs_factual_julho_2025(df_com_smape: DataFrame, categoria: str
     for medida in medidas_disponiveis:
         if medida in df_com_smape.columns:
             df_wmape_categoria = df_wmape_categoria.withColumn(
-                f"wmape_vs_factual_julho_{medida}",
+                f"wmape_vs_factual_janela_{medida}",
                 F.when(
                     F.col(f"soma_peso_{medida}") > 0,
                     F.round(F.col(f"soma_erro_peso_{medida}") / F.col(f"soma_peso_{medida}") * 100, 4)
@@ -391,20 +392,20 @@ def carregar_matriz_drp_geral() -> DataFrame:
 
 # COMMAND ----------
 
-def calcular_smape_drp_vs_factual_julho_2025(df_comparacao_drp: DataFrame, df_proporcao_factual: DataFrame, categoria: str) -> DataFrame:
+def calcular_smape_drp_vs_factual_janela_movel(df_comparacao_drp: DataFrame, df_proporcao_factual: DataFrame, categoria: str) -> DataFrame:
     """
-    Calcula sMAPE comparando matriz DRP geral com proporção factual de julho-2025.
+    Calcula sMAPE comparando matriz DRP geral com proporção factual (janela móvel 180 dias).
     
     Args:
         df_comparacao_drp: DataFrame com comparação entre matriz calculada e DRP geral
-        df_proporcao_factual: DataFrame com proporção factual de julho-2025
+        df_proporcao_factual: DataFrame com proporção factual (janela móvel 180 dias)
         categoria: Nome da categoria
         
     Returns:
-        DataFrame com sMAPE da matriz DRP vs factual de julho-2025
+        DataFrame com sMAPE da matriz DRP vs factual (janela móvel 180 dias)
     """
-    print(f"📊 Calculando sMAPE da matriz DRP vs factual de julho-2025 para: {categoria}")
-    print("🔄 Matriz DRP vs Proporção Factual de Julho-2025...")
+    print(f"📊 Calculando sMAPE da matriz DRP vs factual (janela móvel 180 dias) para: {categoria}")
+    print("🔄 Matriz DRP vs Proporção Factual (janela móvel 180 dias)...")
     
     # Join com proporção factual de julho-2025
     df_comparacao_drp_vs_factual = (
@@ -418,20 +419,20 @@ def calcular_smape_drp_vs_factual_julho_2025(df_comparacao_drp: DataFrame, df_pr
     df_com_smape_drp_vs_factual = (
         df_comparacao_drp_vs_factual
         .withColumn(
-            "erro_absoluto_drp_vs_factual_julho",
-            F.abs(F.col("PercMatrizNeogrid") - F.col("proporcao_factual_julho_2025_percentual"))
+            "erro_absoluto_drp_vs_factual_janela",
+            F.abs(F.col("PercMatrizNeogrid") - F.col("proporcao_factual_janela_movel_percentual"))
         )
         .withColumn(
-            "smape_drp_vs_factual_julho",
+            "smape_drp_vs_factual_janela",
             F.when(
-                (F.col("PercMatrizNeogrid") + F.col("proporcao_factual_julho_2025_percentual")) > 0,
-                F.lit(2.0) * F.col("erro_absoluto_drp_vs_factual_julho") / 
-                (F.col("PercMatrizNeogrid") + F.col("proporcao_factual_julho_2025_percentual")) * 100
+                (F.col("PercMatrizNeogrid") + F.col("proporcao_factual_janela_movel_percentual")) > 0,
+                F.lit(2.0) * F.col("erro_absoluto_drp_vs_factual_janela") / 
+                (F.col("PercMatrizNeogrid") + F.col("proporcao_factual_janela_movel_percentual")) * 100
             ).otherwise(F.lit(0.0))
         )
     )
     
-    print(f"✅ sMAPE da matriz DRP vs factual de julho-2025 calculado para {categoria}")
+    print(f"✅ sMAPE da matriz DRP vs factual (janela móvel 180 dias) calculado para {categoria}")
     return df_com_smape_drp_vs_factual
 
 # COMMAND ----------
@@ -553,47 +554,47 @@ def identificar_distorcoes(df_comparacao: DataFrame, categoria: str) -> DataFram
         "MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada360_Qt_venda_sem_ruptura"
     ]
     
-    # Calcular melhor medida para cada registro (sMAPE vs factual de julho-2025)
-    colunas_smape_vs_factual = [f"smape_vs_factual_julho_{medida}" for medida in medidas_disponiveis if f"smape_vs_factual_julho_{medida}" in df_comparacao.columns]
+    # Calcular melhor medida para cada registro (sMAPE vs factual janela móvel 180 dias)
+    colunas_smape_vs_factual = [f"smape_vs_factual_janela_{medida}" for medida in medidas_disponiveis if f"smape_vs_factual_janela_{medida}" in df_comparacao.columns]
     
-    print(f"    🔍 Debug: Colunas sMAPE vs factual julho-2025 encontradas: {colunas_smape_vs_factual}")
+    print(f"    🔍 Debug: Colunas sMAPE vs factual janela móvel encontradas: {colunas_smape_vs_factual}")
     print(f"    🔍 Debug: Total de colunas sMAPE vs factual: {len(colunas_smape_vs_factual)}")
     
     # Verifica se há pelo menos 2 colunas para usar F.least
     if len(colunas_smape_vs_factual) >= 2:
         df_com_distorcao = df_comparacao.withColumn(
-            "melhor_smape_vs_factual_julho",
+            "melhor_smape_vs_factual_janela",
             F.least(*[F.col(col) for col in colunas_smape_vs_factual])
         )
     elif len(colunas_smape_vs_factual) == 1:
         # Se há apenas uma coluna, usa ela diretamente
         df_com_distorcao = df_comparacao.withColumn(
-            "melhor_smape_vs_factual_julho",
+            "melhor_smape_vs_factual_janela",
             F.col(colunas_smape_vs_factual[0])
         )
     else:
         # Se não há colunas, cria coluna com valor padrão
         print(f"    ⚠️  Nenhuma coluna sMAPE vs factual encontrada, criando coluna padrão")
         df_com_distorcao = df_comparacao.withColumn(
-            "melhor_smape_vs_factual_julho",
+            "melhor_smape_vs_factual_janela",
             F.lit(999.0)  # Valor alto para indicar erro
         )
     
     # Categorizar qualidade vs factual de julho-2025
     df_com_distorcao = df_com_distorcao.withColumn(
-        "categoria_qualidade_vs_factual_julho",
-        F.when(F.col("melhor_smape_vs_factual_julho") < 10, "Excelente")
-        .when(F.col("melhor_smape_vs_factual_julho") < 20, "Muito Boa")
-        .when(F.col("melhor_smape_vs_factual_julho") < 30, "Boa")
-        .when(F.col("melhor_smape_vs_factual_julho") < 50, "Regular")
+        "categoria_qualidade_vs_factual_janela",
+        F.when(F.col("melhor_smape_vs_factual_janela") < 10, "Excelente")
+        .when(F.col("melhor_smape_vs_factual_janela") < 20, "Muito Boa")
+        .when(F.col("melhor_smape_vs_factual_janela") < 30, "Boa")
+        .when(F.col("melhor_smape_vs_factual_janela") < 50, "Regular")
         .otherwise("Ruim")
     )
     
     # Identificar distorções significativas (sMAPE > 50%)
     df_distorcoes = (
         df_com_distorcao
-        .filter(F.col("melhor_smape_vs_factual_julho") > 50)
-        .orderBy(F.col("melhor_smape_vs_factual_julho").desc())
+        .filter(F.col("melhor_smape_vs_factual_janela") > 50)
+        .orderBy(F.col("melhor_smape_vs_factual_janela").desc())
     )
     
     print(f"✅ Distorções identificadas para {categoria}")
@@ -634,24 +635,24 @@ for categoria, df_matriz in matrizes_calculadas.items():
         print("-" * 60)
         
         try:
-            # Carregar dados factuais de julho-2025
-            df_vendas_julho = carregar_dados_factual_julho_2025()
+            # Carregar dados factuais (janela móvel 180 dias)
+            df_factual = carregar_dados_factual_janela_movel()
             
-            # Calcular proporção factual baseada em vendas reais de julho-2025
-            df_proporcao_factual_julho = calcular_proporcao_factual_julho_2025(df_vendas_julho, categoria)
+            # Calcular proporção factual baseada na janela móvel 180 dias
+            df_proporcao_factual_janela = calcular_proporcao_factual_janela_movel(df_factual, categoria)
             
-            # Calcular sMAPE vs factual de julho-2025
-            df_com_smape_vs_factual = calcular_smape_vs_factual_julho_2025(df_matriz, df_proporcao_factual_julho, categoria)
+            # Calcular sMAPE vs factual (janela móvel 180 dias)
+            df_com_smape_vs_factual = calcular_smape_vs_factual_janela_movel(df_matriz, df_proporcao_factual_janela, categoria)
             
-            # Calcular WMAPE vs factual de julho-2025
-            dict_wmape_vs_factual = calcular_wmape_vs_factual_julho_2025(df_com_smape_vs_factual, categoria)
+            # Calcular WMAPE vs factual (janela móvel 180 dias)
+            dict_wmape_vs_factual = calcular_wmape_vs_factual_janela_movel(df_com_smape_vs_factual, categoria)
             
             # Comparar com matriz DRP geral (usando factual de julho-2025 como referência)
             df_comparacao_drp = comparar_com_matriz_drp_geral(df_matriz, matriz_drp_geral, categoria)
             
-            # Calcular sMAPE da matriz DRP vs factual de julho-2025
-            df_comparacao_drp_vs_factual = calcular_smape_drp_vs_factual_julho_2025(
-                df_comparacao_drp, df_proporcao_factual_julho, categoria
+            # Calcular sMAPE da matriz DRP vs factual (janela móvel 180 dias)
+            df_comparacao_drp_vs_factual = calcular_smape_drp_vs_factual_janela_movel(
+                df_comparacao_drp, df_proporcao_factual_janela, categoria
             )
             
             # Identificar distorções
@@ -659,11 +660,11 @@ for categoria, df_matriz in matrizes_calculadas.items():
             
             # Armazenar resultados
             resultados_analise[categoria] = {
-                "proporcao_factual_julho": df_proporcao_factual_julho,
-                "smape_vs_factual_julho": df_com_smape_vs_factual,
-                "wmape_vs_factual_julho": dict_wmape_vs_factual,
+                "proporcao_factual_janela": df_proporcao_factual_janela,
+                "smape_vs_factual_janela": df_com_smape_vs_factual,
+                "wmape_vs_factual_janela": dict_wmape_vs_factual,
                 "comparacao_drp": df_comparacao_drp,
-                "smape_drp_vs_factual_julho": df_comparacao_drp_vs_factual,
+                "smape_drp_vs_factual_janela": df_comparacao_drp_vs_factual,
                 "distorcoes": df_distorcoes,
                 "status": "SUCESSO"
             }
@@ -686,9 +687,9 @@ print("📊 RESUMO DOS RESULTADOS:")
 for categoria, resultado in resultados_analise.items():
     if resultado["status"] == "SUCESSO":
         print(f"  ✅ {categoria}: Análise completa")
-        print(f"     • Proporção factual julho-2025: {resultado['proporcao_factual_julho'].count():,} registros")
-        print(f"     • sMAPE vs factual julho-2025: {resultado['smape_vs_factual_julho'].count():,} registros")
-        print(f"     • sMAPE DRP vs factual julho-2025: {resultado['smape_drp_vs_factual_julho'].count():,} registros")
+        print(f"     • Proporção factual janela móvel: {resultado['proporcao_factual_janela'].count():,} registros")
+        print(f"     • sMAPE vs factual janela móvel: {resultado['smape_vs_factual_janela'].count():,} registros")
+        print(f"     • sMAPE DRP vs factual janela móvel: {resultado['smape_drp_vs_factual_janela'].count():,} registros")
         print(f"     • Distorções vs factual julho-2025: {resultado['distorcoes'].count():,} registros")
     else:
         print(f"  ❌ {categoria}: {resultado['erro']}")
@@ -714,26 +715,27 @@ df_distorcoes.columns
 # MAGIC
 # MAGIC ### **O que este script faz:**
 # MAGIC 1. **Carrega matrizes calculadas** de todas as categorias
-# MAGIC 2. **Carrega dados factuais de julho-2025** (vendas reais)
-# MAGIC 3. **Calcula proporção factual baseada em julho-2025** (dados reais, não médias históricas)
-# MAGIC 4. **Calcula sMAPE e WMAPE** comparando merecimento vs factual de julho-2025
+# MAGIC 2. **Carrega dados factuais** (janela móvel 180 dias - média aparada robusta a ruptura)
+# MAGIC 3. **Calcula proporção factual**: % que SKU vendeu na filial vs total do SKU na empresa
+# MAGIC 4. **Calcula sMAPE e WMAPE** comparando merecimento vs factual (janela móvel 180 dias)
 # MAGIC 5. **Carrega matriz DRP geral** para comparação
-# MAGIC 6. **Calcula sMAPE da matriz DRP vs factual de julho-2025**
+# MAGIC 6. **Calcula sMAPE da matriz DRP vs factual** (janela móvel 180 dias)
 # MAGIC 7. **Compara matrizes calculadas** com DRP geral
-# MAGIC 8. **Identifica distorções** significativas vs factual de julho-2025
+# MAGIC 8. **Identifica distorções** significativas vs factual (janela móvel 180 dias)
 # MAGIC
 # MAGIC ### **Resultados gerados:**
-# MAGIC - **Proporção factual de julho-2025** (dados reais de venda)
-# MAGIC - **sMAPE e WMAPE vs factual de julho-2025** para todas as medidas (médias e médias aparadas)
-# MAGIC - **sMAPE da matriz DRP vs factual de julho-2025**
+# MAGIC - **Proporção factual** (janela móvel 180 dias - média aparada robusta a ruptura)
+# MAGIC - **sMAPE e WMAPE vs factual** para todas as medidas (médias e médias aparadas)
+# MAGIC - **sMAPE da matriz DRP vs factual** (janela móvel 180 dias)
 # MAGIC - **Comparação com matriz DRP geral**
-# MAGIC - **Identificação de distorções** vs factual de julho-2025
+# MAGIC - **Identificação de distorções** vs factual (janela móvel 180 dias)
 # MAGIC
 # MAGIC ### **Principais mudanças implementadas:**
-# MAGIC ✅ **Factual real**: Usa vendas reais de julho-2025 em vez de médias históricas
-# MAGIC ✅ **sMAPE vs factual**: Calcula erro para todas as medidas vs factual de julho-2025
-# MAGIC ✅ **sMAPE DRP vs factual**: Calcula erro da matriz DRP vs factual de julho-2025
-# MAGIC ✅ **WMAPE ponderado**: Usa vendas reais de julho-2025 como peso
+# MAGIC ✅ **Factual correto**: Usa janela móvel 180 dias (média aparada robusta a ruptura)
+# MAGIC ✅ **Proporção factual correta**: % que SKU vendeu na filial vs total do SKU na empresa
+# MAGIC ✅ **sMAPE vs factual**: Calcula erro para todas as medidas vs factual (janela móvel 180 dias)
+# MAGIC ✅ **sMAPE DRP vs factual**: Calcula erro da matriz DRP vs factual (janela móvel 180 dias)
+# MAGIC ✅ **WMAPE ponderado**: Usa dados da janela móvel 180 dias como peso
 # MAGIC
 # MAGIC **Este script está atualizado e finalizado!** 🎉
 
