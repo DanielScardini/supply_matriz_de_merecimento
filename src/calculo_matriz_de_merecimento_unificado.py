@@ -651,7 +651,7 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
 
 def executar_calculo_matriz_merecimento_completo(categoria: str, 
                                                 data_inicio: str = "2024-07-01",
-                                                data_calculo: str = "2025-06-30") -> DataFrame:
+                                                data_calculo: str = "2025-07-31") -> DataFrame:
     """
     Função principal que executa todo o fluxo da matriz de merecimento.
     """
@@ -723,7 +723,7 @@ print("=" * 80)
 
 # Lista de todas as categorias disponíveis
 categorias = [
-    # "DIRETORIA DE TELAS",
+    "DIRETORIA DE TELAS",
     "DIRETORIA TELEFONIA CELULAR", 
     # "DIRETORIA DE LINHA BRANCA",
     # "DIRETORIA LINHA LEVE",
