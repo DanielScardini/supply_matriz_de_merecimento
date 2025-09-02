@@ -278,7 +278,18 @@ def aplicar_mapeamentos_produtos(df: DataFrame, categoria: str,
             on="CdSku",
             how="left"
         )
+        df_com_mapeamentos = (
+            df_com_mapeamentos
+            .withColumn("gemeos",
+                        F.when(F.col("gemeos") == '-', F.col("modelos"))
+                        .otherwise(F.col("gemeos"))
+            )
+        )
         print("✅ Mapeamento de gêmeos aplicado")
+
+        df_com_mapeamentos = df_com_mapeamentos.orderBy('CdSku').dropDuplicates(subset=['CdSku'])
+        print("ℹ️  Mapeamento de gêmeos aplicado: ", df_com_mapeamentos.count())       
+
     else:
         df_com_mapeamentos = df_com_modelos
         print("ℹ️  Mapeamento de gêmeos não aplicado")
@@ -371,7 +382,7 @@ def filtrar_meses_atipicos(df: DataFrame, df_meses_atipicos: DataFrame) -> DataF
 
 # COMMAND ----------
 
-def add_media_aparada_rolling(df, janelas, col_val="QtMercadoria", col_ord="DtAtual", 
+def add_media_aparada_rolling(df, janelas, col_val="demanda_robusta", col_ord="DtAtual", 
                               grupos=("CdSku","CdFilial"), alpha=0.10, min_obs=10):
     """
     Adiciona médias aparadas rolling para diferentes janelas.
@@ -491,7 +502,6 @@ def criar_de_para_filial_cd() -> DataFrame:
             "cd_primario",
             F.coalesce(F.col("cd_primario"), F.lit("SEM_CD"))
         )
-        .orderBy("cdfilial")
     )
     
     print(f"✅ De-para filial → CD criado: {de_para_filial_cd.count():,} filiais")
@@ -558,6 +568,11 @@ def calcular_merecimento_interno_cd(df: DataFrame, data_calculo: str, categoria:
     print(f"🔄 Calculando merecimento interno CD para categoria: {categoria}")
     
     df_data_calculo = df.filter(F.col("DtAtual") == data_calculo)
+    df_data_calculo = (
+        df_data_calculo
+        .orderBy('CdSku', 'CdFilial')
+        .dropDuplicates(subset=['CdSku', 'CdFilial'])
+    )
     
     medidas_disponiveis = [
         "Media90_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura", 
@@ -603,6 +618,7 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
                               df_merecimento_interno: DataFrame) -> DataFrame:
     """
     Calcula o merecimento final: Merecimento_CD × Proporcao_Interna
+    Retorna apenas CdFilial x grupo_de_necessidade com os merecimentos finais
     """
     print("🔄 Calculando merecimento final...")
     
@@ -613,24 +629,37 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
         "MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada360_Qt_venda_sem_ruptura"
     ]
     
-    colunas_renomeadas = ["cd_primario", "grupo_de_necessidade"]
+    # 1. Preparar dados do merecimento CD (cd_primario x grupo_de_necessidade)
+    colunas_cd = ["cd_primario", "grupo_de_necessidade"]
     for medida in medidas_disponiveis:
-        if f"Total_{medida}" in df_merecimento_cd.columns:
-            colunas_renomeadas.append(F.col(f"Total_{medida}").alias(f"Total_CD_{medida}"))
         if f"Merecimento_CD_{medida}" in df_merecimento_cd.columns:
-            colunas_renomeadas.append(F.col(f"Merecimento_CD_{medida}").alias(f"Merecimento_CD_{medida}"))
+            colunas_cd.append(f"Merecimento_CD_{medida}")
     
-    df_merecimento_cd_renomeado = df_merecimento_cd.select(*colunas_renomeadas)
+    df_merecimento_cd_limpo = df_merecimento_cd.select(*colunas_cd)
     
-    df_merecimento_final = (
+    # 2. Adicionar cd_primario ao merecimento interno (especificando qual coluna usar)
+    de_para_filial_cd = criar_de_para_filial_cd()
+    df_merecimento_interno_com_cd = (
         df_merecimento_interno
+        .join(de_para_filial_cd, on="CdFilial", how="left")
+        .withColumn("cd_primario_final", F.coalesce(de_para_filial_cd["cd_primario"], F.lit("SEM_CD")))
+        .drop("cd_primario")  # Remove a coluna ambígua
+        .withColumnRenamed("cd_primario_final", "cd_primario")  # Renomeia para o nome final
+    )
+    
+    # 3. Join entre merecimento CD e merecimento interno
+    df_merecimento_final = (
+        df_merecimento_interno_com_cd
+        .orderBy("CdFilial", "cd_primario", "grupo_de_necessidade")
+        .dropDuplicates(subset=["CdFilial", "cd_primario", "grupo_de_necessidade"])
         .join(
-            df_merecimento_cd_renomeado,
+            df_merecimento_cd_limpo,
             on=["cd_primario", "grupo_de_necessidade"],
             how="left"
         )
     )
     
+    # 4. Calcular merecimento final (multiplicação)
     for medida in medidas_disponiveis:
         if (f"Merecimento_CD_{medida}" in df_merecimento_final.columns and 
             f"Proporcao_Interna_{medida}" in df_merecimento_final.columns):
@@ -639,8 +668,112 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
                 F.col(f"Merecimento_CD_{medida}") * F.col(f"Proporcao_Interna_{medida}")
             )
     
-    print(f"✅ Merecimento final calculado: {df_merecimento_final.count():,} registros")
-    return df_merecimento_final
+    # 5. Selecionar apenas colunas finais: CdFilial x grupo_de_necessidade
+    colunas_finais = ["CdFilial", "grupo_de_necessidade"]
+    for medida in medidas_disponiveis:
+        coluna_final = f"Merecimento_Final_{medida}"
+        if coluna_final in df_merecimento_final.columns:
+            colunas_finais.append(coluna_final)
+    
+    df_merecimento_final_limpo = df_merecimento_final.select(*colunas_finais)
+    
+    print(f"✅ Merecimento final calculado: {df_merecimento_final_limpo.count():,} registros")
+    print(f"📊 Colunas finais: {colunas_finais}")
+    
+    # VALIDAÇÃO: Verificar se a multiplicação ainda soma 100% por grupo de necessidade
+    print("🔍 Validando se a multiplicação dos dois níveis ainda soma 100%...")
+    
+    for medida in medidas_disponiveis:
+        coluna_final = f"Merecimento_Final_{medida}"
+        if coluna_final in df_merecimento_final_limpo.columns:
+            print(f"  Verificando medida: {medida}")
+            
+            # Calcular soma por grupo de necessidade
+            df_validacao = (
+                df_merecimento_final_limpo
+                .groupBy("grupo_de_necessidade")
+                .agg(F.sum(coluna_final).alias("soma_merecimento_final"))
+                .withColumn("diferenca_100", F.abs(F.col("soma_merecimento_final") - 1.0))
+                .orderBy(F.desc("diferenca_100"))
+            )
+
+    
+    return df_merecimento_final_limpo
+
+# COMMAND ----------
+
+def criar_esqueleto_matriz_completa(df_merecimento_interno: DataFrame, data_calculo: str = "2025-07-31") -> DataFrame:
+    """
+    Cria esqueleto completo da matriz com cross join entre todas as filiais e SKUs.
+    
+    Processo:
+    1. Pega todas as filiais de roteirizacaolojaativa
+    2. Pega todos os SKUs que existem em df_base no dia especificado
+    3. Faz cross join entre filiais e SKUs
+    4. Adiciona grupo_de_necessidade para cada SKU
+    5. Retorna esqueleto pronto para join com merecimento final
+    
+    Args:
+        data_calculo: Data para buscar os SKUs (formato YYYY-MM-DD)
+        
+    Returns:
+        DataFrame com CdFilial, CdSku, grupo_de_necessidade
+    """
+    print(f"🚀 Criando esqueleto da matriz completa para data: {data_calculo}")
+    print("=" * 80)
+    
+    # 1. Carregar todas as filiais ativas
+    print("📊 Passo 1: Carregando todas as filiais ativas...")
+    df_filiais = (
+        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+        .select("CdFilial", "NmRegiaoGeografica", "NmPorteLoja")
+        .distinct()
+        .filter(F.col("CdFilial").isNotNull())
+    )
+    
+    filiais_count = df_filiais.count()
+    print(f"  ✅ {filiais_count:,} filiais carregadas")
+
+    df_gdn = df_merecimento_interno.select("CdSku", "grupo_de_necessidade").distinct()
+    
+    # 2. Carregar todos os SKUs que existem na data especificada
+    print(f"📊 Passo 2: Carregando SKUs existentes em {data_calculo}...")
+    df_skus_data = (
+        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3')
+        .filter(F.col("DtAtual") == data_calculo)
+        .select("CdSku")
+        .distinct()
+        .join(df_gdn, on="CdSku", how="inner")
+        .filter(F.col("CdSku").isNotNull())
+        .filter(F.col("grupo_de_necessidade").isNotNull())
+    )
+    
+    skus_count = df_skus_data.count()
+    print(f"  ✅ {skus_count:,} SKUs únicos encontrados")
+    
+    # 3. Cross join entre filiais e SKUs
+    print("📊 Passo 3: Criando cross join filiais × SKUs...")
+    df_esqueleto = (
+        df_filiais
+        .crossJoin(df_skus_data)
+    )
+    
+    esqueleto_count = df_esqueleto.count()
+    print(f"  ✅ Cross join criado: {esqueleto_count:,} combinações (filiais × SKUs)")
+    
+    # 4. Adicionar informações adicionais das filiais
+    print("📊 Passo 4: Adicionando informações das filiais...")
+    df_esqueleto_final = df_esqueleto.select(
+        "CdFilial",
+        "CdSku", 
+        "grupo_de_necessidade",
+        "NmRegiaoGeografica",
+        "NmPorteLoja"
+    )
+
+
+    return df_esqueleto_final
+
 
 # COMMAND ----------
 
@@ -662,7 +795,7 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         # 1. Carregamento dos dados base
         df_base = carregar_dados_base(categoria, data_inicio)
         df_base.cache()
-        
+
         # 2. Carregamento dos mapeamentos
         de_para_modelos, de_para_gemeos = carregar_mapeamentos_produtos(categoria)  
 
@@ -699,12 +832,33 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         
         # 9.3 Merecimento final
         df_merecimento_final = calcular_merecimento_final(df_merecimento_cd, df_merecimento_interno)
+
+        # Criar o esqueleto
+        df_esqueleto = criar_esqueleto_matriz_completa(df_merecimento_interno, "2025-07-31")
+
+        # Primeiro, identificar todas as colunas de merecimento final
+        colunas_merecimento_final = [col for col in df_merecimento_final.columns 
+                                if col.startswith('Merecimento_Final_')]
+
+
+        # Criar dicionário de fillna
+        fillna_dict = {col: 0.0 for col in colunas_merecimento_final}
+
+        df_merecimento_sku_filial = (
+            df_esqueleto
+            .join(
+                df_merecimento_final.select('grupo_de_necessidade', 'CdFilial', *colunas_merecimento_final).dropDuplicates(subset=['grupo_de_necessidade', 'CdFilial']), 
+                on=['grupo_de_necessidade', 'CdFilial'], 
+                how='left'
+            )
+            .fillna(fillna_dict)
+        )
         
         print("=" * 80)
         print(f"✅ Cálculo da matriz de merecimento concluído para: {categoria}")
-        print(f"📊 Total de registros finais: {df_merecimento_final.count():,}")
+        print(f"📊 Total de registros finais: {df_merecimento_sku_filial.count():,}")
         
-        return df_merecimento_final
+        return df_merecimento_sku_filial
         
     except Exception as e:
         print(f"❌ Erro durante o cálculo: {str(e)}")
@@ -741,7 +895,7 @@ for categoria in categorias:
         df_matriz_final = executar_calculo_matriz_merecimento_completo(
             categoria=categoria,
             data_inicio="2024-07-01",
-            data_calculo="2025-06-30"
+            data_calculo="2025-07-31"
         )
         
         # Salva em tabela específica da categoria
@@ -800,10 +954,6 @@ print("\n" + "=" * 80)
 print("🎯 SCRIPT DE CÁLCULO CONCLUÍDO!")
 print("📋 Próximo passo: Executar script de análise de factual e comparações")
 print("=" * 80)
-
-# COMMAND ----------
-
-spark.table('databox.bcg_comum.supply_matriz_merecimento_TELEFONIA_CELULAR').groupBy('CdSku').agg(F.sum("Merecimento_Final_Media180_Qt_venda_sem_ruptura")).display()
 
 # COMMAND ----------
 

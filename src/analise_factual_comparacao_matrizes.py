@@ -16,17 +16,6 @@
 
 # COMMAND ----------
 
-# MAGIC %sql SELECT * FROM data_engineering_prd.app_logistica.gi_boss_qualidade_estoque
-# MAGIC limit 10
-
-# COMMAND ----------
-
-# MAGIC %sql SELECT * FROM data_engineering_prd.app_logistica.gi_boss_qualidade_estoque
-# MAGIC
-# MAGIC WHERE CdFilial = 3000 AND DsSku LIKE '%TV 60" LED LG 4K 60UQ8050PSB%' AND DtAtual > '2025-04-01'
-
-# COMMAND ----------
-
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F, Window
 from datetime import datetime, timedelta, date
@@ -84,7 +73,7 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 2. Carregamento dos Dados Factuais de Julho-2025
+# MAGIC ## 2. Carregamento dos Dados Factuais de Agosto-2025
 
 # COMMAND ----------
 
@@ -143,7 +132,7 @@ def carregar_dados_factual_janela_movel() -> DataFrame:
         .agg(
             F.avg("MediaAparada180_Qt_venda_sem_ruptura").alias("MediaAparada180_Qt_venda_sem_ruptura")
         )
-        .filter(F.col("DtAtual") == F.lit("2025-06-30"))  # Data de referência
+        .filter(F.col("DtAtual") == F.lit("2025-07-31"))  # Data de referência
         .select(
             "CdSku", 
             "CdFilial", 
@@ -161,7 +150,7 @@ def carregar_dados_factual_janela_movel() -> DataFrame:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 3. Cálculo da Proporção Factual Baseada em Julho-2025
+# MAGIC ## 3. Cálculo da Proporção Factual Baseada em Agosto-2025
 
 # COMMAND ----------
 
@@ -209,7 +198,7 @@ def calcular_proporcao_factual_janela_movel(df_factual: DataFrame, categoria: st
     return df_proporcao_factual
 
 
-def carregar_dados_factual_julho_completo() -> DataFrame:
+def carregar_dados_factual_completo() -> DataFrame:
     """
     Calcula dados factuais baseados no mês completo de julho (Qt_venda_sem_ruptura total do mês).
     
@@ -222,7 +211,7 @@ def carregar_dados_factual_julho_completo() -> DataFrame:
     df_base = (
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3')
         .filter(F.col('NmAgrupamentoDiretoriaSetor') == 'DIRETORIA DE TELAS')
-        .filter(F.col("year_month") == 202507)  # Julho de 2025
+        .filter(F.col("year_month") == 202508)  # Agosto de 2025
         .select(
             "CdSku", 
             "CdFilial", 
@@ -777,7 +766,7 @@ for categoria, df_matriz in matrizes_calculadas.items():
         try:
         # Carregar dados factuais (janela móvel 180 dias)
         # Carregar dados de julho completo
-            df_factual_julho = carregar_dados_factual_julho_completo()
+            df_factual_julho = carregar_dados_factual_completo()
 
             # Calcular proporções
             df_proporcao_julho = calcular_proporcao_factual_julho_completo(df_factual_julho, "DIRETORIA DE TELAS")
@@ -853,7 +842,7 @@ df_com_smape_vs_factual.display()
 df_investigacao = (
     df_com_smape_vs_factual
     .join(matriz_drp_geral,
-          how="inner",
+          how="outer",
           on=['CdFilial', 'CdSku'])
     #.filter(F.col("is_Cluster") == 'OBRIGATÓRIO')
     .filter(F.col("matriz_grupo_de_necessidade") != '-')
@@ -888,6 +877,112 @@ df_investigacao = (
 df_investigacao.cache()
 
 df_investigacao.display()
+
+# COMMAND ----------
+
+df_lojas = (
+    df_investigacao
+    .filter(F.col('CdSku') != 5266254)
+    .groupBy("CdFilial", "NmPorteLoja", "matriz_grupo_de_necessidade")
+    .agg(
+        F.mean('merecimento_calculado').alias('Nova_matriz_médio_loja'),
+        F.mean('proporcao_factual').alias('Factual_médio_loja'),
+        F.mean('PercMatrizNeogrid').alias('Neogrid_médio_loja'),
+    )
+)
+# Função coluna sMAPE
+def smape_col(y_true, y_pred):
+    den = F.abs(y_true) + F.abs(y_pred)
+    return F.when(den == 0, F.lit(0.0)).otherwise(
+        2 * F.abs(y_pred - y_true) / den
+    )
+
+# Adiciona colunas de sMAPE para cada métrica
+df_smape = (
+    df_lojas
+    .withColumn("smape_calc", smape_col(F.col("Factual_médio_loja"), F.col("Nova_matriz_médio_loja")))
+    .withColumn("smape_neogrid", smape_col(F.col("Factual_médio_loja"), F.col("Neogrid_médio_loja")))
+)
+
+# Agrega o sMAPE médio (em %)
+df_smape_avg = (
+    df_smape
+    .agg(
+        (100*F.mean("smape_calc")).alias("sMAPE_Calculado_vs_Factual"),
+        (100*F.mean("smape_neogrid")).alias("sMAPE_Neogrid_vs_Factual")
+    )
+)
+
+df_smape_avg.display()
+
+# COMMAND ----------
+
+import plotly.express as px
+
+# Coleta em Pandas
+pdf = (
+    df_lojas
+    .select("CdFilial", "NmPorteLoja", "Nova_matriz_médio_loja", "Factual_médio_loja", "Neogrid_médio_loja")
+    .toPandas()
+)
+
+# Defina aqui os limites desejados
+XMIN, XMAX = 0, 3
+YMIN, YMAX = 0, 3
+
+# =========================
+# Scatter 1: Nova Matriz vs Factual
+# =========================
+fig1 = px.scatter(
+    pdf,
+    x="Factual_médio_loja",
+    y="Nova_matriz_médio_loja",
+    color="NmPorteLoja",
+    #text="CdFilial",
+    title="Lojas: Nova Matriz (Y) vs Factual (X)",
+    labels={
+        "Factual_médio_loja": "Factual médio da loja",
+        "Nova_matriz_médio_loja": "Nova matriz média da loja"
+    }
+)
+fig1.add_shape(  # linha y=x
+    type="line", x0=0, y0=0,
+    x1=10, y1=10,
+    line=dict(color="black", dash="dot")
+)
+fig1.update_traces(textposition="top center")
+fig1.update_layout(
+    xaxis=dict(range=[XMIN, XMAX]),
+    yaxis=dict(range=[YMIN, YMAX])
+)
+fig1.show()
+
+# =========================
+# Scatter 2: Neogrid vs Factual
+# =========================
+fig2 = px.scatter(
+    pdf,
+    x="Factual_médio_loja",
+    y="Neogrid_médio_loja",
+    color="NmPorteLoja",
+    #text="CdFilial",
+    title="Lojas: Neogrid (Y) vs Factual (X)",
+    labels={
+        "Factual_médio_loja": "Factual médio da loja",
+        "Neogrid_médio_loja": "Neogrid médio da loja"
+    }
+)
+fig2.add_shape(
+    type="line", x0=0, y0=0,
+    x1=10, y1=10,
+        line=dict(color="black", dash="dot")
+)
+fig2.update_traces(textposition="top center")
+fig2.update_layout(
+    xaxis=dict(range=[XMIN, XMAX]),
+    yaxis=dict(range=[YMIN, YMAX])
+)
+fig2.show()
 
 # COMMAND ----------
 
@@ -1118,7 +1213,7 @@ display(dde_counts_pd.T)
 
 # COMMAND ----------
 
-df_estoque_receita.filter(F.col('CdSku') == 5314089).filter(F.col("DtAtual") == '2025-07-31').display()
+df_estoque_receita.filter(F.col('CdSku') == 5314089).filter(F.col("DtAtual") == '2025-08-3').display()
 
 # COMMAND ----------
 
