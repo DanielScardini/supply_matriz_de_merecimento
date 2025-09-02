@@ -23,10 +23,6 @@
 
 # COMMAND ----------
 
-spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3').filter(F.col("NmAgrupamentoDiretoriaSetor") == 'DIRETORIA DE TELAS').limit(100).display()
-
-# COMMAND ----------
-
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F, Window
 from datetime import datetime, timedelta, date
@@ -199,22 +195,13 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-07-01") -> Data
             "year_month",
             F.date_format(F.col("DtAtual"), "yyyyMM").cast("int")
         )
-        .fillna(0, subset=["Receita", "QtMercadoria", "TeveVenda"])
-
-        ###
-        .filter(F.col("NmAgrupamentoDiretoriaSetor") == 'DIRETORIA DE TELAS')
-        .filter(F.col("CdSku") == 5339979)
+        .fillna(0, subset=["Receita", "QtMercadoria", "TeveVenda", "deltaRuptura"])
     )
     
     print(f"✅ Dados carregados para '{categoria}':")
     print(f"  • Total de registros: {df_base.count():,}")
     
     return df_base
-
-# COMMAND ----------
-
-spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3').limit(100).display()
-
 
 # COMMAND ----------
 
@@ -544,21 +531,21 @@ def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) ->
     
     # NOVO: Calcular percentual do CD dentro da Cia
     for medida in medidas_disponiveis:
-        if medida in df_merecimento_cd.columns:
+        coluna_total = f"Total_{medida}"
+        if coluna_total in df_merecimento_cd.columns:  # ← VERIFICAR Total_{medida}
             w_total_cia = Window.partitionBy("grupo_de_necessidade")
             
             df_merecimento_cd = df_merecimento_cd.withColumn(
                 f"Total_Cia_{medida}",
-                F.sum(F.col(f"Total_{medida}")).over(w_total_cia)
+                F.sum(F.col(coluna_total)).over(w_total_cia)  # ← USAR coluna_total
             )
             
             df_merecimento_cd = df_merecimento_cd.withColumn(
                 f"Merecimento_CD_{medida}",
                 F.when(F.col(f"Total_Cia_{medida}") > 0,
-                       F.col(f"Total_{medida}") / F.col(f"Total_Cia_{medida}"))
+                    F.col(coluna_total) / F.col(f"Total_Cia_{medida}"))  # ← USAR coluna_total
                 .otherwise(0)
             )
-    
     print(f"✅ Merecimento CD calculado: {df_merecimento_cd.count():,} registros")
     return df_merecimento_cd
 
@@ -596,16 +583,17 @@ def calcular_merecimento_interno_cd(df: DataFrame, data_calculo: str, categoria:
     df_merecimento_interno = df_com_totais
     
     for medida in medidas_disponiveis:
-        if medida in df_com_totais.columns:
+        coluna_total = f"Total_{medida}"
+        if coluna_total in df_com_totais.columns:  # ← VERIFICAR Total_{medida}
             w_percentual = Window.partitionBy("cd_primario", "grupo_de_necessidade")
             
             df_merecimento_interno = df_merecimento_interno.withColumn(
                 f"Proporcao_Interna_{medida}",
-                F.when(F.col(f"Total_{medida}") > 0,
-                       F.col(medida) / F.col(f"Total_{medida}"))
+                F.when(F.col(coluna_total) > 0,
+                    F.col(medida) / F.col(coluna_total))  # ← USAR coluna_total
                 .otherwise(0)
             )
-    
+
     print(f"✅ Merecimento interno CD calculado: {df_merecimento_interno.count():,} registros")
     return df_merecimento_interno
 
@@ -662,7 +650,7 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
 # COMMAND ----------
 
 def executar_calculo_matriz_merecimento_completo(categoria: str, 
-                                                data_inicio: str = "2024-01",
+                                                data_inicio: str = "2024-07-01",
                                                 data_calculo: str = "2025-06-30") -> DataFrame:
     """
     Função principal que executa todo o fluxo da matriz de merecimento.
@@ -735,8 +723,8 @@ print("=" * 80)
 
 # Lista de todas as categorias disponíveis
 categorias = [
-    "DIRETORIA DE TELAS",
-    # "DIRETORIA TELEFONIA CELULAR", 
+    # "DIRETORIA DE TELAS",
+    "DIRETORIA TELEFONIA CELULAR", 
     # "DIRETORIA DE LINHA BRANCA",
     # "DIRETORIA LINHA LEVE",
     # "DIRETORIA INFO/PERIFERICOS"
@@ -815,7 +803,7 @@ print("=" * 80)
 
 # COMMAND ----------
 
-spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas').filter(F.col("grupo_de_necessidade") != '-').display()
+spark.table('databox.bcg_comum.supply_matriz_merecimento_TELEFONIA_CELULAR').groupBy('CdSku').agg(F.sum("Merecimento_Final_Media180_Qt_venda_sem_ruptura")).display()
 
 # COMMAND ----------
 

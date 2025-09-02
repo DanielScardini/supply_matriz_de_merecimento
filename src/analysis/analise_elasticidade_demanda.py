@@ -720,16 +720,393 @@ print("🎨 Fundo concrete (#F2F2F2) aplicado para estética profissional")
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ## 9. Resumo dos Top Gêmeos por Diretoria
+from typing import Dict, List, Optional
+
+def analisar_elasticidade_demanda_com_estatisticas(df_base: DataFrame, categoria: str) -> Dict[str, DataFrame]:
+    """
+    Analisa elasticidade de demanda com cálculo de média e desvio padrão da participação
+    para cada agrupamento (porte, porte+região, região) e flagga meses com desvios significativos.
+    """
+    print(f"�� Analisando elasticidade de demanda com estatísticas para: {categoria}")
+    
+    # Filtrar dados da categoria específica
+    df_categoria = df_base.filter(F.col("NmAgrupamentoDiretoriaSetor") == categoria)
+    
+    # Carregar mapeamento de gêmeos
+    try:
+        de_para_gemeos = (
+            pd.read_csv('/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/dados_analise/ITENS_GEMEOS 2.csv',
+                        delimiter=";", encoding='iso-8859-1')
+            .drop_duplicates()
+        )
+        
+        # Normalização de nomes de colunas
+        de_para_gemeos.columns = (
+            de_para_gemeos.columns
+            .str.strip()
+            .str.lower()
+            .str.replace(r"[^\w]+", "_", regex=True)
+            .str.strip("_")
+        )
+        
+        df_gemeos = spark.createDataFrame(de_para_gemeos.rename(columns={"sku_loja": "CdSku"}))
+        
+    except Exception as e:
+        print(f"⚠️  Erro ao carregar mapeamento de gêmeos: {e}")
+        return {}
+    
+    # Join com dados de gêmeos e região
+    df_completo = (
+        df_categoria
+        .join(df_gemeos, on="CdSku", how="left")
+        .join(
+            spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+            .select("CdFilial", "NmRegiaoGeografica")
+            .distinct(),
+            on="CdFilial", how="left"
+        )
+        .filter(F.col("gemeos").isNotNull())
+        .filter(~F.col("gemeos").contains("Chip"))
+        .filter(F.col("gemeos") != "-")
+    )
+    
+    # Identificar top 5 gêmeos
+    top_gemeos = (
+        df_completo
+        .groupBy("gemeos")
+        .agg(F.sum("QtMercadoria").alias("total_vendas"))
+        .orderBy(F.desc("total_vendas"))
+        .limit(5)
+    )
+    
+    # Filtrar apenas top gêmeos
+    df_top = df_completo.join(top_gemeos.select("gemeos"), on="gemeos", how="inner")
+    
+    # Preparar dados agregados por mês
+    df_agregado = (
+        df_top
+        .groupBy("year_month", "gemeos", "NmPorteLoja", "NmRegiaoGeografica")
+        .agg(F.sum("QtMercadoria").alias("qt_vendas"))
+        .orderBy("year_month", "gemeos")
+    )
+    
+    resultados = {}
+    
+    # 1. ANÁLISE POR PORTE DE LOJA
+    print("📊 Calculando estatísticas por porte de loja...")
+    df_porte = analisar_agrupamento_estatisticas(df_agregado, "NmPorteLoja", "PORTE")
+    resultados["porte"] = df_porte
+    
+    # 2. ANÁLISE POR PORTE + REGIÃO
+    print("📊 Calculando estatísticas por porte + região...")
+    df_agregado_porte_regiao = (
+        df_agregado
+        .withColumn("porte_regiao", F.concat_ws(" - ", F.col("NmPorteLoja"), F.col("NmRegiaoGeografica")))
+        .groupBy("year_month", "gemeos", "porte_regiao")
+        .agg(F.sum("qt_vendas").alias("qt_vendas"))
+    )
+    df_porte_regiao = analisar_agrupamento_estatisticas(df_agregado_porte_regiao, "porte_regiao", "PORTE_REGIAO")
+    resultados["porte_regiao"] = df_porte_regiao
+    
+    # 3. ANÁLISE POR REGIÃO
+    print("📊 Calculando estatísticas por região...")
+    df_regiao = analisar_agrupamento_estatisticas(df_agregado, "NmRegiaoGeografica", "REGIAO")
+    resultados["regiao"] = df_regiao
+    
+    print(f"✅ Análise de elasticidade com estatísticas concluída para {categoria}")
+    return resultados
+
+def analisar_agrupamento_estatisticas(df_agregado: DataFrame, coluna_agrupamento: str, tipo_agrupamento: str) -> DataFrame:
+    """
+    Calcula estatísticas (média, desvio padrão) da participação para um agrupamento específico
+    e flagga meses com desvios significativos.
+    """
+    print(f"  🔍 Processando agrupamento: {tipo_agrupamento}")
+    
+    # Calcular participação por mês e gêmeo
+    w_total_mes_gemeo = Window.partitionBy("year_month", "gemeos")
+    
+    df_com_participacao = (
+        df_agregado
+        .withColumn("total_mes_gemeo", F.sum("qt_vendas").over(w_total_mes_gemeo))
+        .withColumn(
+            "participacao_percentual",
+            F.when(F.col("total_mes_gemeo") > 0,
+                   F.col("qt_vendas") / F.col("total_mes_gemeo") * 100)
+            .otherwise(0.0)
+        )
+        .filter(F.col("total_mes_gemeo") > 0)  # Remove meses sem vendas
+    )
+    
+    # Calcular estatísticas por agrupamento e gêmeo
+    w_stats = Window.partitionBy("gemeos", coluna_agrupamento)
+    
+    df_com_stats = (
+        df_com_participacao
+        .withColumn("media_participacao", F.avg("participacao_percentual").over(w_stats))
+        .withColumn("desvio_padrao_participacao", F.stddev("participacao_percentual").over(w_stats))
+        .withColumn("min_participacao", F.min("participacao_percentual").over(w_stats))
+        .withColumn("max_participacao", F.max("participacao_percentual").over(w_stats))
+        .withColumn("qtd_meses", F.count("year_month").over(w_stats))
+    )
+    
+    # Calcular flags de desvio
+    df_com_flags = (
+        df_com_stats
+        .withColumn("desvio_1_sigma", F.abs(F.col("participacao_percentual") - F.col("media_participacao")))
+        .withColumn(
+            "flag_1_desvio_acima",
+            F.when(F.col("participacao_percentual") > (F.col("media_participacao") + F.col("desvio_padrao_participacao")), F.lit(1)).otherwise(0)
+        )
+        .withColumn(
+            "flag_1_desvio_abaixo",
+            F.when(F.col("participacao_percentual") < (F.col("media_participacao") - F.col("desvio_padrao_participacao")), F.lit(1)).otherwise(0)
+        )
+        .withColumn(
+            "flag_2_desvios_acima",
+            F.when(F.col("participacao_percentual") > (F.col("media_participacao") + 2 * F.col("desvio_padrao_participacao")), F.lit(1)).otherwise(0)
+        )
+        .withColumn(
+            "flag_2_desvios_abaixo",
+            F.when(F.col("participacao_percentual") < (F.col("media_participacao") - 2 * F.col("desvio_padrao_participacao")), F.lit(1)).otherwise(0)
+        )
+        .withColumn(
+            "flag_3_desvios_acima",
+            F.when(F.col("participacao_percentual") > (F.col("media_participacao") + 3 * F.col("desvio_padrao_participacao")), F.lit(1)).otherwise(0)
+        )
+        .withColumn(
+            "flag_3_desvios_abaixo",
+            F.when(F.col("participacao_percentual") < (F.col("media_participacao") - 3 * F.col("desvio_padrao_participacao")), F.lit(1)).otherwise(0)
+        )
+        .withColumn("tipo_agrupamento", F.lit(tipo_agrupamento))
+    )
+    
+    # Selecionar colunas finais
+    colunas_finais = [
+        "year_month", "gemeos", coluna_agrupamento, "qt_vendas", "participacao_percentual",
+        "media_participacao", "desvio_padrao_participacao", "min_participacao", "max_participacao",
+        "qtd_meses", "desvio_1_sigma",
+        "flag_1_desvio_acima", "flag_1_desvio_abaixo",
+        "flag_2_desvios_acima", "flag_2_desvios_abaixo", 
+        "flag_3_desvios_acima", "flag_3_desvios_abaixo",
+        "tipo_agrupamento"
+    ]
+    
+    df_resultado = df_com_flags.select(*colunas_finais)
+    
+    print(f"    ✅ Estatísticas calculadas para {tipo_agrupamento}")
+    print(f"    📊 Registros processados: {df_resultado.count():,}")
+    
+    return df_resultado
+
+    # Executar análise
+resultados = analisar_elasticidade_demanda_com_estatisticas(df_base_merecimento, "DIRETORIA DE TELAS")
+
+# Acessar resultados por agrupamento
+df_porte = resultados["porte"]
+df_porte_regiao = resultados["porte_regiao"] 
+df_regiao = resultados["regiao"]
 
 # COMMAND ----------
 
-# Exibe resumo dos top gêmeos
-print("📋 Resumo dos Top Gêmeos por Diretoria:")
-top_gemeos_pandas = top_5_gemeos.toPandas()
-for diretoria in top_gemeos_pandas['NmAgrupamentoDiretoriaSetor'].unique():
-    print(f"\n{diretoria}:")
-    gemeos_diretoria = top_gemeos_pandas[top_gemeos_pandas['NmAgrupamentoDiretoriaSetor'] == diretoria]
-    for _, row in gemeos_diretoria.iterrows():
-        print(f"  • {row['gemeos']}: {row['total_vendas']:,.0f} unidades")
+(
+    df_porte
+    .filter(F.col("flag_2_desvios_acima"))
+    .display()
+
+# COMMAND ----------
+
+df_porte.cache()
+df_porte_regiao.cache()
+df_regiao.cache()
+
+df_porte_regiao.display()
+df_regiao.display()
+
+# COMMAND ----------
+
+df_graficos.cache()
+df_graficos.display()
+
+# COMMAND ----------
+
+df_graficos.display()
+
+# COMMAND ----------
+
+# Faz o pivot: linhas = Porte, colunas = Mês, valores = soma das vendas
+pivot_df = (
+    df_graficos
+    .query("gemeos == 'TV 50 ALTO P'")
+    .query("NmPorteLoja != '-'")
+    .query("NmPorteLoja != 'SEM PORTE'")
+
+    .pivot_table(
+        index="NmPorteLoja",
+        columns=df_graficos["year_month"].dt.to_period("M"),
+        values="qt_vendas",
+        aggfunc="sum",
+        fill_value=0
+    ).sort_index(ascending=False)
+)
+
+# Converte os nomes das colunas para string (ano/mês)
+pivot_df.columns = pivot_df.columns.astype(str)
+
+# Resetando o index para enxergar como coluna
+pivot_df = pivot_df.reset_index()
+
+print('TV 50 ALTO P')
+pivot_df.display()
+
+# COMMAND ----------
+
+import pandas as pd
+
+def build_pivots_por_porte(
+    df_graficos: pd.DataFrame,
+    gemeos_list: list[str],
+    excluir_portes: tuple[str, ...] = ("-", "SEM PORTE"),
+) -> tuple[dict[str, pd.DataFrame], dict[str, pd.DataFrame]]:
+    """
+    Para cada 'gemeos' na lista:
+      - faz pivot com soma de qt_vendas por Porte x Mês
+      - gera uma versão em percentuais coluna-a-coluna (cada mês = 100%)
+      - percentuais formatados como string com vírgula decimal
+    Retorna dois dicts: {gemeos: pivot_valores}, {gemeos: pivot_percentual}
+    """
+
+    work = (
+        df_graficos
+        .loc[
+            df_graficos["gemeos"].isin(gemeos_list)
+            & ~df_graficos["NmPorteLoja"].isin(excluir_portes)
+        ]
+        .assign(period=df_graficos["year_month"].dt.to_period("M"))
+    )
+
+    pivots_val = {}
+    pivots_pct = {}
+
+    for g in gemeos_list:
+        sub = work.loc[work["gemeos"] == g, ["NmPorteLoja", "period", "qt_vendas"]]
+
+        # Pivot valores absolutos
+        pivot_df = (
+            sub.pivot_table(
+                index="NmPorteLoja",
+                columns="period",
+                values="qt_vendas",
+                aggfunc="sum",
+                fill_value=0,
+            )
+            .sort_index(ascending=False)
+        )
+
+        pivot_df.columns = pivot_df.columns.astype(str)
+        pivot_df = pivot_df.reset_index()
+        pivot_df.insert(0, "gemeos", g)
+        pivots_val[g] = pivot_df
+
+        # Pivot percentuais
+        pct = pivot_df.drop(columns=["gemeos", "NmPorteLoja"])
+        col_sums = pct.sum(axis=0)
+        pct_df = (pct.div(col_sums.where(col_sums != 0), axis=1) * 100).round(2)
+
+        # Converte para string e troca ponto por vírgula
+        pct_df = pct_df.astype(str).apply(lambda col: col.str.replace(".", ","))
+
+        pct_df.insert(0, "NmPorteLoja", pivot_df["NmPorteLoja"])
+        pct_df.insert(0, "gemeos", g)
+        pivots_pct[g] = pct_df
+
+    return pivots_val, pivots_pct
+
+
+# -----------------------
+# Exemplo de uso
+# -----------------------
+gemeos_alvo = ["TV 50 ALTO P", "Iphone 13 128GB"]
+pivots, pct_pivots = build_pivots_por_porte(df_graficos, gemeos_alvo)
+
+print("Valores - TV 50 ALTO P")
+display(pivots["TV 50 ALTO P"])
+
+print("Percentuais - TV 50 ALTO P")
+display(pct_pivots["TV 50 ALTO P"])
+
+# COMMAND ----------
+
+import pandas as pd
+
+def build_pivots_por_porte(
+    df_graficos: pd.DataFrame,
+    gemeos_list: list[str],
+    excluir_portes: tuple[str, ...] = ("-", "SEM PORTE", "SEM REGIÃO"),
+) -> tuple[dict[str, pd.DataFrame], dict[str, pd.DataFrame]]:
+    """
+    Para cada 'gemeos' na lista:
+      - faz pivot com soma de qt_vendas por Porte x Mês
+      - gera uma versão em percentuais coluna-a-coluna (cada mês = 100%)
+      - percentuais formatados como string com vírgula decimal
+    Retorna dois dicts: {gemeos: pivot_valores}, {gemeos: pivot_percentual}
+    """
+
+    work = (
+        df_graficos
+        .loc[
+            df_graficos["gemeos"].isin(gemeos_list)
+            & ~df_graficos["NmRegiaoGeografica"].isin(excluir_portes)
+        ]
+        .assign(period=df_graficos["year_month"].dt.to_period("M"))
+    )
+
+    pivots_val = {}
+    pivots_pct = {}
+
+    for g in gemeos_list:
+        sub = work.loc[work["gemeos"] == g, ["NmRegiaoGeografica", "period", "qt_vendas"]]
+
+        # Pivot valores absolutos
+        pivot_df = (
+            sub.pivot_table(
+                index="NmRegiaoGeografica",
+                columns="period",
+                values="qt_vendas",
+                aggfunc="sum",
+                fill_value=0,
+            )
+            .sort_index(ascending=False)
+        )
+
+        pivot_df.columns = pivot_df.columns.astype(str)
+        pivot_df = pivot_df.reset_index()
+        pivot_df.insert(0, "gemeos", g)
+        pivots_val[g] = pivot_df
+
+        # Pivot percentuais
+        pct = pivot_df.drop(columns=["gemeos", "NmRegiaoGeografica"])
+        col_sums = pct.sum(axis=0)
+        pct_df = (pct.div(col_sums.where(col_sums != 0), axis=1) * 100).round(2)
+
+        # Converte para string e troca ponto por vírgula
+        pct_df = pct_df.astype(str).apply(lambda col: col.str.replace(".", ","))
+
+        pct_df.insert(0, "NmRegiaoGeografica", pivot_df["NmRegiaoGeografica"])
+        pct_df.insert(0, "gemeos", g)
+        pivots_pct[g] = pct_df
+
+    return pivots_val, pivots_pct
+
+
+# -----------------------
+# Exemplo de uso
+# -----------------------
+gemeos_alvo = ["TV 50 ALTO P", "Iphone 13 128GB"]
+pivots, pct_pivots = build_pivots_por_porte(df_graficos, gemeos_alvo)
+
+print("Valores - TV 50 ALTO P")
+display(pivots["TV 50 ALTO P"])
+
+print("Percentuais - TV 50 ALTO P")
+display(pct_pivots["TV 50 ALTO P"])

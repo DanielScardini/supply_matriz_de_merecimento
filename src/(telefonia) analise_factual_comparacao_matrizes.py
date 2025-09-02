@@ -46,8 +46,8 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     print("🔄 Carregando matrizes de merecimento calculadas...")
     
     categorias = [
-        "DE_TELAS",
-        #"TELEFONIA_CELULAR", 
+        #"DE_TELAS",
+        "TELEFONIA_CELULAR", 
         #"LINHA_BRANCA",
         #"LINHA_LEVE",
         #"INFO_GAMES"
@@ -89,7 +89,7 @@ def carregar_dados_factual_janela_movel() -> DataFrame:
     # Carregar dados base para cálculo da média aparada 180 dias
     df_base = (
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3')
-        .filter(F.col('NmAgrupamentoDiretoriaSetor') == 'DIRETORIA DE TELAS')
+        .filter(F.col('NmAgrupamentoDiretoriaSetor') == 'DIRETORIA TELEFONIA CELULAR')
         .filter(F.col("DtAtual") >= F.lit("2025-01-01"))  # Período para cálculo
         .select(
             "CdSku", 
@@ -210,7 +210,7 @@ def carregar_dados_factual_julho_completo() -> DataFrame:
     # Carregar dados base para julho completo
     df_base = (
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3')
-        .filter(F.col('NmAgrupamentoDiretoriaSetor') == 'DIRETORIA DE TELAS')
+        .filter(F.col('NmAgrupamentoDiretoriaSetor') == 'DIRETORIA TELEFONIA CELULAR')
         .filter(F.col("year_month") == 202507)  # Julho de 2025
         .select(
             "CdSku", 
@@ -769,7 +769,7 @@ for categoria, df_matriz in matrizes_calculadas.items():
             df_factual_julho = carregar_dados_factual_julho_completo()
 
             # Calcular proporções
-            df_proporcao_julho = calcular_proporcao_factual_julho_completo(df_factual_julho, "DIRETORIA DE TELAS")
+            df_proporcao_julho = calcular_proporcao_factual_julho_completo(df_factual_julho, "DIRETORIA TELEFONIA CELULAR")
 
 
             # Resultado: DataFrame com proporção de cada filial vs total do SKU na empresa em julho
@@ -839,6 +839,10 @@ df_com_smape_vs_factual.display()
 
 # COMMAND ----------
 
+df_com_smape_vs_factual.display()
+
+# COMMAND ----------
+
 df_investigacao = (
     df_com_smape_vs_factual
     .join(matriz_drp_geral,
@@ -853,8 +857,7 @@ df_investigacao = (
             "matriz_year_month", 
             F.round(100*F.col("matriz_Merecimento_Final_Media180_Qt_venda_sem_ruptura"),2).alias('merecimento_calculado'), 
             F.round(F.col("proporcao_factual_julho_percentual"), 2).alias('proporcao_factual'),
-            F.round(F.col("PercMatrizNeogrid"), 2).alias('PercMatrizNeogrid'),
-            'matriz_Media180_Qt_venda_sem_ruptura'
+            F.round(F.col("PercMatrizNeogrid"), 2).alias('PercMatrizNeogrid')
     )
     .withColumn('deltaCalculadoFactual',
                 F.round(F.col('merecimento_calculado') - F.col('proporcao_factual'), 2))
@@ -862,135 +865,12 @@ df_investigacao = (
                 F.round(F.col('PercMatrizNeogrid') - F.col('proporcao_factual'),2))
     .withColumn('deltaNeogridCalculado',
                 F.round(F.col('PercMatrizNeogrid') - F.col('merecimento_calculado'),2))
-    .withColumn('deltaPctCalculado',
-                F.round(100*F.col('deltaCalculadoFactual')/F.col('proporcao_factual'),0)
-                )
-    .withColumn('deltaPctNeogrid',
-                F.round(100*F.col('deltaNeogridFactual')/F.col('proporcao_factual'),0)
-                )
-    .join(spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
-          .select("CdFilial", "NmFilial", "NmPorteLoja"), 
-          how="left", on='CdFilial')
 )
 
 
 df_investigacao.cache()
 
 df_investigacao.display()
-
-# COMMAND ----------
-
-from pyspark.sql import functions as F
-import pandas as pd
-import matplotlib.pyplot as plt
-
-# -----------------------------
-# 1) Definições
-# -----------------------------
-labels = ["-100 a -60", "-60 a -20", "-20 a 20", "20 a 60", "60 a 100", ">100"]
-
-def bucketize(colname):
-    c = F.col(colname)
-    return (
-        F.when((c >= -100) & (c < -60), "-100 a -60")
-         .when((c >= -60) & (c < -20), "-60 a -20")
-         .when((c >= -20) & (c < 20), "-20 a 20")
-         .when((c >= 20) & (c < 60), "20 a 60")
-         .when((c >= 60) & (c < 100), "60 a 100")
-         .otherwise(">100")
-    )
-
-portes_maiores = ["PORTE 4", "PORTE 5", "PORTE 6"]
-
-# -----------------------------
-# 2) Preparação no Spark
-# -----------------------------
-df_buckets = (
-    df_investigacao
-    .filter(F.col("CdSku") == 5159393)
-    .withColumn(
-        "porte_grp",
-        F.when(F.col("NmPorteLoja").isin(portes_maiores), F.lit("Maiores")).otherwise(F.lit("Menores"))
-    )
-    .withColumn("bucket_calc", bucketize("deltaPctCalculado"))
-    .withColumn("bucket_neogrid", bucketize("deltaPctNeogrid"))
-)
-
-# -----------------------------
-# 3) Agregações por grupo de porte
-# -----------------------------
-# Calculado
-calc_maiores = (
-    df_buckets.filter(F.col("porte_grp") == "Maiores")
-    .groupBy("bucket_calc").count()
-    .withColumnRenamed("count","calc_count")
-    .toPandas().set_index("bucket_calc").reindex(labels).fillna(0)
-)
-
-calc_menores = (
-    df_buckets.filter(F.col("porte_grp") == "Menores")
-    .groupBy("bucket_calc").count()
-    .withColumnRenamed("count","calc_count")
-    .toPandas().set_index("bucket_calc").reindex(labels).fillna(0)
-)
-
-# Neogrid
-neogrid_maiores = (
-    df_buckets.filter(F.col("porte_grp") == "Maiores")
-    .groupBy("bucket_neogrid").count()
-    .withColumnRenamed("count","neogrid_count")
-    .toPandas().set_index("bucket_neogrid").reindex(labels).fillna(0)
-)
-
-neogrid_menores = (
-    df_buckets.filter(F.col("porte_grp") == "Menores")
-    .groupBy("bucket_neogrid").count()
-    .withColumnRenamed("count","neogrid_count")
-    .toPandas().set_index("bucket_neogrid").reindex(labels).fillna(0)
-)
-
-# -----------------------------
-# 4) Plots (4 figuras separadas)
-# -----------------------------
-# deltaPctCalculado - Maiores
-plt.figure(figsize=(10,5))
-calc_maiores["calc_count"].plot(kind="bar")
-plt.title("deltaPctCalculado — Portes Maiores")
-plt.xlabel("Faixas (%)")
-plt.ylabel("Frequência")
-plt.xticks(rotation=0)
-plt.tight_layout()
-plt.show()
-
-# deltaPctCalculado - Menores
-plt.figure(figsize=(10,5))
-calc_menores["calc_count"].plot(kind="bar")
-plt.title("deltaPctCalculado — Portes Menores")
-plt.xlabel("Faixas (%)")
-plt.ylabel("Frequência")
-plt.xticks(rotation=0)
-plt.tight_layout()
-plt.show()
-
-# deltaPctNeogrid - Maiores
-plt.figure(figsize=(10,5))
-neogrid_maiores["neogrid_count"].plot(kind="bar")
-plt.title("deltaPctNeogrid — Portes Maiores")
-plt.xlabel("Faixas (%)")
-plt.ylabel("Frequência")
-plt.xticks(rotation=0)
-plt.tight_layout()
-plt.show()
-
-# deltaPctNeogrid - Menores
-plt.figure(figsize=(10,5))
-neogrid_menores["neogrid_count"].plot(kind="bar")
-plt.title("deltaPctNeogrid — Portes Menores")
-plt.xlabel("Faixas (%)")
-plt.ylabel("Frequência")
-plt.xticks(rotation=0)
-plt.tight_layout()
-plt.show()
 
 # COMMAND ----------
 
@@ -1033,7 +913,7 @@ df_investigacao.count()
 
 df_estoque_receita = (
     spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3')
-    .filter(F.col('NmAgrupamentoDiretoriaSetor') == 'DIRETORIA DE TELAS')
+    .filter(F.col('NmAgrupamentoDiretoriaSetor') == 'DIRETORIA TELEFONIA CELULAR')
     .filter(F.col('year_month') == 202507)
 )
 
@@ -1064,19 +944,10 @@ df_produtos_ofensores = (
                 F.col('DDE_medio') + 
                 F.col('Ruptura_pct_receita'))
     .orderBy(F.desc('score_DDE_Ruptura'),)
-    .limit(25)
+    .limit(50)
 )
 
 df_produtos_ofensores.display()
-
-# COMMAND ----------
-
-(
-    df_estoque_receita
-    .filter(F.col("CdSku") == 5314089)
-    .filter(F.col("DtAtual") == '2025-07-31')
-    .display()
-    )
 
 # COMMAND ----------
 
@@ -1088,21 +959,49 @@ df_distorcoes_matriz_fixa = (
     .join(df_lojas_principais,
           how="inner",
           on=['CdFilial'])
+    .filter(F.col("CdSku") == 5341230)
 )
 
-df_distorcoes_matriz_fixa.select("DsSku", "CdFilial", "NmLoja", "proporcao_factual", "PercMatrizNeogrid", "merecimento_calculado").display()
+df_distorcoes_matriz_fixa.display()
 
 # COMMAND ----------
 
-df_samsung_60 = (
+df_oppo = (
     df_investigacao
-    .filter(F.col("CdSku") == 5159393)
+    .filter(F.col("CdSku") == 5341230)
     .join(spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
-          .select("CdFilial", "NmFilial", "NmPorteLoja"), 
-          how="left", on='CdFilial')
+        .select("CdFilial", "NmFilial", "NmPorteLoja"), 
+        how="left", on='CdFilial')
+)
+df_oppo.display()
+
+# COMMAND ----------
+
+
+# Definição da fórmula do SMAPE
+def smape_column(y_true, y_pred):
+    re        2 * np.abs(y_pred - y_true) / (np.abs(y_true) + np.abs(y_pred))    )
+
+# SMAPE entre merecimento_calculado e proporcao_factual
+df_smape_merecimento = df_samsung_60.withColumn(
+    "smape_merecimento", smape_column(F.col("proporcao_factual"), F.col("merecimento_calculado"))
 )
 
-df_samsung_60.display()
+smape_merecimento = df_smape_merecimento.agg(
+    F.mean("smape_merecimento") * 100
+).collect()[0][0]
+
+# SMAPE entre PercMatrizNeogrid e proporcao_factual
+df_smape_neogrid = df_samsung_60.withColumn(
+    "smape_neogrid", smape_column(F.col("proporcao_factual"), F.col("PercMatrizNeogrid"))
+)
+
+smape_neogrid = df_smape_neogrid.agg(
+    F.mean("smape_neogrid") * 100
+).collect()[0][0]
+
+print("SMAPE merecimento_calculado vs proporcao_factual:", smape_merecimento)
+print("SMAPE PercMatrizNeogrid vs proporcao_factual:", smape_neogrid)
 
 # COMMAND ----------
 
