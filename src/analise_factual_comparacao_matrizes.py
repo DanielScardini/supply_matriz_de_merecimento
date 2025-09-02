@@ -16,6 +16,17 @@
 
 # COMMAND ----------
 
+# MAGIC %sql SELECT * FROM data_engineering_prd.app_logistica.gi_boss_qualidade_estoque
+# MAGIC limit 10
+
+# COMMAND ----------
+
+# MAGIC %sql SELECT * FROM data_engineering_prd.app_logistica.gi_boss_qualidade_estoque
+# MAGIC
+# MAGIC WHERE CdFilial = 3000 AND DsSku LIKE '%TV 60" LED LG 4K 60UQ8050PSB%' AND DtAtual > '2025-04-01'
+
+# COMMAND ----------
+
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F, Window
 from datetime import datetime, timedelta, date
@@ -1071,12 +1082,43 @@ df_produtos_ofensores.display()
 
 # COMMAND ----------
 
-(
+# Filtrar e categorizar DDE em buckets
+df_buckets = (
     df_estoque_receita
     .filter(F.col("CdSku") == 5314089)
     .filter(F.col("DtAtual") == '2025-07-31')
-    .display()
+    .withColumn(
+        "bucket_dde",
+        F.when(F.col("DDE") < 15, "0-15")
+         .when((F.col("DDE") >= 15) & (F.col("DDE") < 30), "15-30")
+         .when((F.col("DDE") >= 30) & (F.col("DDE") < 60), "30-60")
+         .when((F.col("DDE") >= 60) & (F.col("DDE") < 90), "60-90")
+         .otherwise("90+")
     )
+)
+
+# Contar observações por bucket
+dde_counts = (
+    df_buckets.groupBy("bucket_dde").count()
+)
+
+# Reordenar manualmente os buckets
+order = ["0-15","15-30","30-60","60-90","90+"]
+
+dde_counts_pd = (
+    dde_counts.toPandas()
+    .set_index("bucket_dde")
+    .reindex(order)
+    .reset_index()
+    .fillna(0)
+)
+
+# Mostrar tabela resultante
+display(dde_counts_pd.T)
+
+# COMMAND ----------
+
+df_estoque_receita.filter(F.col('CdSku') == 5314089).filter(F.col("DtAtual") == '2025-07-31').display()
 
 # COMMAND ----------
 
@@ -1094,15 +1136,9 @@ df_distorcoes_matriz_fixa.select("DsSku", "CdFilial", "NmLoja", "proporcao_factu
 
 # COMMAND ----------
 
-df_samsung_60 = (
-    df_investigacao
-    .filter(F.col("CdSku") == 5159393)
-    .join(spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+df_investigacao.filter(F.col("CdSku") == 5314089).join(spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
           .select("CdFilial", "NmFilial", "NmPorteLoja"), 
-          how="left", on='CdFilial')
-)
-
-df_samsung_60.display()
+          how="left", on='CdFilial').display()
 
 # COMMAND ----------
 
@@ -1114,7 +1150,7 @@ df_samsung_60.display()
             F.round(F.mean('DDE'), 2).alias('DDE_medio'),
             F.round(F.sum('ReceitaPerdidaRuptura'), 2).alias('ReceitaPerdidaRuptura'),
         )
-        .filter(F.col("CdSku") == 5159393)
+        .filter(F.col("CdSku") == 5314089)
         .withColumn('Ruptura_pct_receita',
                     F.round(100*F.col('ReceitaPerdidaRuptura')/F.col('Soma_media_receita'),2))
         .withColumn('score_DDE_Ruptura',

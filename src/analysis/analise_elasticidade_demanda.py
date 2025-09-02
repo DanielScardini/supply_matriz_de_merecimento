@@ -909,24 +909,12 @@ df_regiao = resultados["regiao"]
 
 # COMMAND ----------
 
-(
-    df_porte
-    .filter(F.col("flag_2_desvios_acima"))
-    .display()
-
-# COMMAND ----------
-
 df_porte.cache()
 df_porte_regiao.cache()
 df_regiao.cache()
 
 df_porte_regiao.display()
 df_regiao.display()
-
-# COMMAND ----------
-
-df_graficos.cache()
-df_graficos.display()
 
 # COMMAND ----------
 
@@ -958,82 +946,6 @@ pivot_df = pivot_df.reset_index()
 
 print('TV 50 ALTO P')
 pivot_df.display()
-
-# COMMAND ----------
-
-import pandas as pd
-
-def build_pivots_por_porte(
-    df_graficos: pd.DataFrame,
-    gemeos_list: list[str],
-    excluir_portes: tuple[str, ...] = ("-", "SEM PORTE"),
-) -> tuple[dict[str, pd.DataFrame], dict[str, pd.DataFrame]]:
-    """
-    Para cada 'gemeos' na lista:
-      - faz pivot com soma de qt_vendas por Porte x Mês
-      - gera uma versão em percentuais coluna-a-coluna (cada mês = 100%)
-      - percentuais formatados como string com vírgula decimal
-    Retorna dois dicts: {gemeos: pivot_valores}, {gemeos: pivot_percentual}
-    """
-
-    work = (
-        df_graficos
-        .loc[
-            df_graficos["gemeos"].isin(gemeos_list)
-            & ~df_graficos["NmPorteLoja"].isin(excluir_portes)
-        ]
-        .assign(period=df_graficos["year_month"].dt.to_period("M"))
-    )
-
-    pivots_val = {}
-    pivots_pct = {}
-
-    for g in gemeos_list:
-        sub = work.loc[work["gemeos"] == g, ["NmPorteLoja", "period", "qt_vendas"]]
-
-        # Pivot valores absolutos
-        pivot_df = (
-            sub.pivot_table(
-                index="NmPorteLoja",
-                columns="period",
-                values="qt_vendas",
-                aggfunc="sum",
-                fill_value=0,
-            )
-            .sort_index(ascending=False)
-        )
-
-        pivot_df.columns = pivot_df.columns.astype(str)
-        pivot_df = pivot_df.reset_index()
-        pivot_df.insert(0, "gemeos", g)
-        pivots_val[g] = pivot_df
-
-        # Pivot percentuais
-        pct = pivot_df.drop(columns=["gemeos", "NmPorteLoja"])
-        col_sums = pct.sum(axis=0)
-        pct_df = (pct.div(col_sums.where(col_sums != 0), axis=1) * 100).round(2)
-
-        # Converte para string e troca ponto por vírgula
-        pct_df = pct_df.astype(str).apply(lambda col: col.str.replace(".", ","))
-
-        pct_df.insert(0, "NmPorteLoja", pivot_df["NmPorteLoja"])
-        pct_df.insert(0, "gemeos", g)
-        pivots_pct[g] = pct_df
-
-    return pivots_val, pivots_pct
-
-
-# -----------------------
-# Exemplo de uso
-# -----------------------
-gemeos_alvo = ["TV 50 ALTO P", "Iphone 13 128GB"]
-pivots, pct_pivots = build_pivots_por_porte(df_graficos, gemeos_alvo)
-
-print("Valores - TV 50 ALTO P")
-display(pivots["TV 50 ALTO P"])
-
-print("Percentuais - TV 50 ALTO P")
-display(pct_pivots["TV 50 ALTO P"])
 
 # COMMAND ----------
 
@@ -1102,7 +1014,107 @@ def build_pivots_por_porte(
 # -----------------------
 # Exemplo de uso
 # -----------------------
-gemeos_alvo = ["TV 50 ALTO P", "Iphone 13 128GB"]
+gemeos_alvo = ["TV 50 ALTO P", "TV 43 PP", "Telef pp", "Telef Medio 256GB"]
+pivots, pct_pivots = build_pivots_por_porte(df_graficos, gemeos_alvo)
+
+print("Valores - TV 50 ALTO P")
+display(pivots["TV 50 ALTO P"])
+
+print("Percentuais - TV 50 ALTO P")
+display(pct_pivots["TV 50 ALTO P"])
+
+# COMMAND ----------
+
+print("Valores - TV 43 PP")
+display(pivots["TV 43 PP"])
+
+print("Percentuais - TV 43 PP")
+display(pct_pivots["TV 43 PP"])
+
+# COMMAND ----------
+
+print("Valores - Telef pp")
+display(pivots["Telef pp"])
+
+print("Percentuais - Telef pp")
+display(pct_pivots["Telef pp"])
+
+# COMMAND ----------
+
+print("Valores - Telef Medio 256GB")
+display(pivots["Telef Medio 256GB"])
+
+print("Percentuais - Telef Medio 256GB")
+display(pct_pivots["Telef Medio 256GB"])
+
+# COMMAND ----------
+
+import pandas as pd
+
+def build_pivots_por_porte(
+    df_graficos: pd.DataFrame,
+    gemeos_list: list[str],
+    excluir_portes: tuple[str, ...] = ("-", "SEM PORTE", "SEM REGIÃO"),
+) -> tuple[dict[str, pd.DataFrame], dict[str, pd.DataFrame]]:
+    """
+    Para cada 'gemeos' na lista:
+      - faz pivot com soma de qt_vendas por Porte x Mês
+      - gera uma versão em percentuais coluna-a-coluna (cada mês = 100%)
+      - percentuais formatados como string com vírgula decimal
+    Retorna dois dicts: {gemeos: pivot_valores}, {gemeos: pivot_percentual}
+    """
+
+    work = (
+        df_graficos
+        .loc[
+            df_graficos["gemeos"].isin(gemeos_list)
+            & ~df_graficos["NmPorteLoja"].isin(excluir_portes)
+        ]
+        .assign(period=df_graficos["year_month"].dt.to_period("M"))
+    )
+
+    pivots_val = {}
+    pivots_pct = {}
+
+    for g in gemeos_list:
+        sub = work.loc[work["gemeos"] == g, ["NmPorteLoja", "period", "qt_vendas"]]
+
+        # Pivot valores absolutos
+        pivot_df = (
+            sub.pivot_table(
+                index="NmPorteLoja",
+                columns="period",
+                values="qt_vendas",
+                aggfunc="sum",
+                fill_value=0,
+            )
+            .sort_index(ascending=False)
+        )
+
+        pivot_df.columns = pivot_df.columns.astype(str)
+        pivot_df = pivot_df.reset_index()
+        pivot_df.insert(0, "gemeos", g)
+        pivots_val[g] = pivot_df
+
+        # Pivot percentuais
+        pct = pivot_df.drop(columns=["gemeos", "NmPorteLoja"])
+        col_sums = pct.sum(axis=0)
+        pct_df = (pct.div(col_sums.where(col_sums != 0), axis=1) * 100).round(2)
+
+        # Converte para string e troca ponto por vírgula
+        pct_df = pct_df.astype(str).apply(lambda col: col.str.replace(".", ","))
+
+        pct_df.insert(0, "NmPorteLoja", pivot_df["NmPorteLoja"])
+        pct_df.insert(0, "gemeos", g)
+        pivots_pct[g] = pct_df
+
+    return pivots_val, pivots_pct
+
+
+# -----------------------
+# Exemplo de uso
+# -----------------------
+gemeos_alvo = ["TV 50 ALTO P", "TV 43 PP", "Telef pp", "Telef Medio 256GB"]
 pivots, pct_pivots = build_pivots_por_porte(df_graficos, gemeos_alvo)
 
 print("Valores - TV 50 ALTO P")
