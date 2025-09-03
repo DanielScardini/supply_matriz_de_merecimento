@@ -167,7 +167,7 @@ df_vendas_estoque_telas.limit(1).display()
 
 # Mapeamento de modelos e tecnologia para telas
 de_para_modelos_tecnologia_telas = (
-    pd.read_csv('dados_analise/MODELOS_AJUSTE (1).csv', 
+    pd.read_csv('/Users/scardinidaniel/Library/CloudStorage/OneDrive-TheBostonConsultingGroup,Inc/Documents/GitHub/CB_supply_matriz_merecimento/supply_matriz_de_merecimento/src/dados_analise/MODELOS_AJUSTE (1).csv', 
                 delimiter=';')
     .drop_duplicates()
 )
@@ -183,7 +183,7 @@ de_para_modelos_tecnologia_telas.columns = (
 
 # Mapeamento de produtos similares (gêmeos) para telas
 de_para_gemeos_tecnologia_telas = (
-    pd.read_csv('dados_analise/ITENS_GEMEOS 2.csv',
+    pd.read_csv('/Users/scardinidaniel/Library/CloudStorage/OneDrive-TheBostonConsultingGroup,Inc/Documents/GitHub/CB_supply_matriz_merecimento/supply_matriz_de_merecimento/src/dados_analise/ITENS_GEMEOS 2.csv',
                 delimiter=";",
                 encoding='iso-8859-1')
     .drop_duplicates()
@@ -330,7 +330,7 @@ df_pct_telas.limit(1).display()
 
 !pip install openpyxl # Leitura da matriz de merecimento para telas
 df_matriz_telas_pd = pd.read_excel(
-    "dados_analise/Base analise- Telas.xlsx", 
+    "/Users/scardinidaniel/Library/CloudStorage/OneDrive-TheBostonConsultingGroup,Inc/Documents/GitHub/CB_supply_matriz_merecimento/supply_matriz_de_merecimento/src/dados_analise/Base analise- Telas.xlsx", 
     sheet_name="AJUSTADO"
 )
 

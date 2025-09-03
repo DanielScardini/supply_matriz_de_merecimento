@@ -29,7 +29,7 @@ def carregar_mapeamentos_produtos(categoria: str) -> tuple:
     print("🔄 Carregando mapeamentos de produtos...")
     
     de_para_modelos_tecnologia = (
-        pd.read_csv('dados_analise/MODELOS_AJUSTE (1).csv', 
+        pd.read_csv('/Users/scardinidaniel/Library/CloudStorage/OneDrive-TheBostonConsultingGroup,Inc/Documents/GitHub/CB_supply_matriz_merecimento/supply_matriz_de_merecimento/src/dados_analise/MODELOS_AJUSTE (1).csv', 
                     delimiter=';')
         .drop_duplicates()
     )
@@ -44,7 +44,7 @@ def carregar_mapeamentos_produtos(categoria: str) -> tuple:
     
     try:
         de_para_gemeos_tecnologia = (
-            pd.read_csv('dados_analise/ITENS_GEMEOS 2.csv',
+            pd.read_csv('/Users/scardinidaniel/Library/CloudStorage/OneDrive-TheBostonConsultingGroup,Inc/Documents/GitHub/CB_supply_matriz_merecimento/supply_matriz_de_merecimento/src/dados_analise/ITENS_GEMEOS 2.csv',
                         delimiter=";",
                         encoding='iso-8859-1')
             .drop_duplicates()
@@ -101,7 +101,7 @@ df_matriz_nova['TELEFONIA'] = (
 df_matriz_neogrid = (
     spark.createDataFrame(
         pd.read_csv(
-            "/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/dados_analise/(DRP)_MATRIZ_20250902160333.csv",
+            "/Users/scardinidaniel/Library/CloudStorage/OneDrive-TheBostonConsultingGroup,Inc/Documents/GitHub/CB_supply_matriz_merecimento/supply_matriz_de_merecimento/src/dados_analise/(DRP)_MATRIZ_20250902160333.csv",
             delimiter=";",
         )
     )

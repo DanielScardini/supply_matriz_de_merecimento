@@ -64,7 +64,7 @@ df_base_merecimento.cache()
 # Carrega mapeamento de gêmeos
 
 de_para_gemeos = (
-    pd.read_csv('../dados_analise/ITENS_GEMEOS 2.csv',
+    pd.read_csv('/Users/scardinidaniel/Library/CloudStorage/OneDrive-TheBostonConsultingGroup,Inc/Documents/GitHub/CB_supply_matriz_merecimento/supply_matriz_de_merecimento/src/dados_analise/ITENS_GEMEOS 2.csv',
                 delimiter=";",
                 encoding='iso-8859-1')
     .drop_duplicates()

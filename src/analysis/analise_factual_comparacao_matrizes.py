@@ -498,7 +498,7 @@ def carregar_matriz_drp_geral() -> DataFrame:
     df_matriz_geral = (
         spark.createDataFrame(
             pd.read_csv(
-                "/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/dados_analise/(DRP)_MATRIZ_20250829135142.csv",
+                "/Users/scardinidaniel/Library/CloudStorage/OneDrive-TheBostonConsultingGroup,Inc/Documents/GitHub/CB_supply_matriz_merecimento/supply_matriz_de_merecimento/src/dados_analise/(DRP)_MATRIZ_20250829135142.csv",
                 delimiter=";",
             )
         )

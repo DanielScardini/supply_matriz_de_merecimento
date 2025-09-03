@@ -167,7 +167,7 @@ df_vendas_estoque_telefonia.limit(1).display()
 
 # Mapeamento de modelos e tecnologia
 de_para_modelos_tecnologia = (
-    pd.read_csv('dados_analise/MODELOS_AJUSTE (1).csv', 
+    pd.read_csv('/Users/scardinidaniel/Library/CloudStorage/OneDrive-TheBostonConsultingGroup,Inc/Documents/GitHub/CB_supply_matriz_merecimento/supply_matriz_de_merecimento/src/dados_analise/MODELOS_AJUSTE (1).csv', 
                 delimiter=';')
     .drop_duplicates()
 )
@@ -183,7 +183,7 @@ de_para_modelos_tecnologia.columns = (
 
 # Mapeamento de produtos similares (gêmeos)
 de_para_gemeos_tecnologia = (
-    pd.read_csv('dados_analise/ITENS_GEMEOS 2.csv',
+    pd.read_csv('/Users/scardinidaniel/Library/CloudStorage/OneDrive-TheBostonConsultingGroup,Inc/Documents/GitHub/CB_supply_matriz_merecimento/supply_matriz_de_merecimento/src/dados_analise/ITENS_GEMEOS 2.csv',
                 delimiter=";",
                 encoding='iso-8859-1')
     .drop_duplicates()
@@ -339,7 +339,7 @@ df_pct_telefonia.limit(1).display()
 
 # Leitura da matriz de merecimento
 df_matriz_telefonia_pd = pd.read_excel(
-    "dados_analise/(DRP)_MATRIZ_20250825174952.csv.xlsx", 
+    "/Users/scardinidaniel/Library/CloudStorage/OneDrive-TheBostonConsultingGroup,Inc/Documents/GitHub/CB_supply_matriz_merecimento/supply_matriz_de_merecimento/src/dados_analise/(DRP)_MATRIZ_20250825174952.csv.xlsx", 
     sheet_name="(DRP)_MATRIZ_20250825174952"
 )
 
