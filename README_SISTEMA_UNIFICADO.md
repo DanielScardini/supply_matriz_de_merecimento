@@ -14,7 +14,7 @@ Este sistema unifica o cálculo da matriz de merecimento para todas as categoria
 
 ## 🏗️ Arquitetura
 
-### Abstração `grupo_de_necessidade`
+### **Abstração `grupo_de_necessidade`**
 
 O sistema usa uma abstração inteligente chamada `grupo_de_necessidade` que **copia os valores reais** da coluna especificada para cada categoria:
 
@@ -31,7 +31,7 @@ O sistema usa uma abstração inteligente chamada `grupo_de_necessidade` que **c
 - **NÃO** é um valor fixo, mas sim os dados originais da coluna
 - Permite agrupamento inteligente baseado nos dados reais de cada categoria
 
-### Fluxo de Processamento
+### **Fluxo de Processamento**
 
 ```
 1. Carregamento de Dados Base
@@ -51,7 +51,7 @@ O sistema usa uma abstração inteligente chamada `grupo_de_necessidade` que **c
 
 ## 🔧 Funcionalidades
 
-### Medidas Centrais Calculadas
+### **Medidas Centrais Calculadas**
 
 Para cada janela móvel (90, 180, 270, 360 dias):
 
@@ -59,14 +59,14 @@ Para cada janela móvel (90, 180, 270, 360 dias):
 - **Medianas Móveis**: Mediana para robustez a outliers
 - **Médias Móveis Aparadas**: Média excluindo valores extremos (10% superior e inferior)
 
-### Detecção de Outliers
+### **Detecção de Outliers**
 
 - **Meses Atípicos**: Remove meses com QtMercadoria > 3σ da média
 - **Outliers Históricos CD**: Remove registros > 3σ por grupo_de_necessidade
 - **Outliers Históricos Loja**: Remove registros > 3σ por grupo_de_necessidade-loja
 - **Parâmetros Configuráveis**: Desvios padrão ajustáveis por categoria
 
-### Filtros Inteligentes
+### **Filtros Inteligentes**
 
 - **Filtro de Ruptura**: Considera apenas dias sem ruptura para cálculo de demanda
 - **Filtro por Gêmeo**: Remove meses atípicos apenas do grupo específico
@@ -78,18 +78,23 @@ Para cada janela móvel (90, 180, 270, 360 dias):
 src/
 ├── calculo_matriz_de_merecimento_unificado.py    # Sistema principal unificado
 ├── Preparacao_tabelas_Matriz_merecimento.py     # Preparação de dados para matriz
-├── analysis/                                     # Notebooks de análise e utilitários
-│   ├── __init__.py                              # Pacote Python
-│   ├── README.md                                # Documentação da pasta analysis
-│   ├── Analise_demanda_matriz_telas.py          # Análise para telas
-│   ├── Analise_demanda_matriz_antiga.py         # Análise da matriz antiga
-│   └── metricas_matriz_merecimento.py           # Cálculo de métricas
-└── ...                                          # Outros arquivos
+├── Salvar_matrizes_calculadas_csv.py            # Exportação para CSV
+├── README.md                                     # Documentação do src/
+└── analysis/                                     # Notebooks de análise e utilitários
+    ├── __init__.py                               # Pacote Python
+    ├── README.md                                 # Documentação da pasta analysis
+    ├── README_ELASTICIDADE_DATABRICKS.md         # Documentação específica para Databricks
+    ├── Analise_demanda_matriz_telas.py           # Análise para telas
+    ├── Analise_demanda_matriz_antiga.py          # Análise da matriz antiga
+    ├── analise_elasticidade_demanda.py           # Análise de elasticidade
+    ├── analise_elasticidade_eventos.py           # Análise de eventos
+    ├── analise_factual_comparacao_matrizes.py    # Análise factual
+    └── analise_resultados_factuais.py            # Análise de resultados
 ```
 
 ## 🚀 Como Usar
 
-### Uso Básico
+### **Uso Básico**
 
 ```python
 from calculo_matriz_de_merecimento_unificado import (
@@ -114,7 +119,7 @@ df_resultado_personalizado = executar_calculo_matriz_merecimento(
 validar_resultados(df_resultado, "DIRETORIA DE TELAS")
 ```
 
-### Exemplos por Categoria
+### **Exemplos por Categoria**
 
 ```python
 # TELAS (usa gêmeos)
@@ -127,9 +132,9 @@ df_telefonia = executar_calculo_matriz_merecimento("DIRETORIA TELEFONIA CELULAR"
 df_linha_branca = executar_calculo_matriz_merecimento("DIRETORIA LINHA BRANCA")
 ```
 
-### Parâmetros Configuráveis
+### **Parâmetros Configuráveis**
 
-#### Parâmetros Sigma para Outliers
+#### **Parâmetros Sigma para Outliers**
 
 ```python
 # Função principal com parâmetros sigma configuráveis
@@ -145,7 +150,7 @@ def executar_calculo_matriz_merecimento(
     # Implementação...
 ```
 
-#### Guia de Sensibilidade Sigma
+#### **Guia de Sensibilidade Sigma**
 
 | Faixa Sigma | Sensibilidade | Comportamento | Uso Recomendado |
 |-------------|---------------|---------------|------------------|
@@ -154,7 +159,7 @@ def executar_calculo_matriz_merecimento(
 | **3.0σ - 4.0σ** | Moderado | Menos sensível | Dados com ruído moderado |
 | **4.0σ+** | Muito permissivo | Poucos outliers detectados | Dados muito ruidosos |
 
-#### Outros Parâmetros
+#### **Outros Parâmetros**
 
 ```python
 # Janelas móveis
@@ -166,13 +171,13 @@ PERCENTUAL_CORTE_MEDIAS_APARADAS = 0.10  # 10%
 
 ## 📊 Saída do Sistema
 
-### Colunas Principais
+### **Colunas Principais**
 
 - **Identificação**: `DtAtual`, `CdSku`, `CdFilial`, `grupo_de_necessidade`
 - **Dados Base**: `QtMercadoria`, `Receita`, `FlagRuptura`
 - **Agrupamento**: `tipo_agrupamento`, `year_month`
 
-### Medidas Calculadas
+### **Medidas Calculadas**
 
 Para cada janela móvel (exemplo para 90 dias):
 
@@ -184,7 +189,7 @@ MediaAparada90_Qt_venda_sem_ruptura   # Média móvel aparada
 
 ## 🔍 Validação e Monitoramento
 
-### Função de Validação
+### **Função de Validação**
 
 ```python
 def validar_resultados(df: DataFrame, categoria: str):
@@ -193,7 +198,7 @@ def validar_resultados(df: DataFrame, categoria: str):
     # Validação de integridade
 ```
 
-### Métricas de Qualidade
+### **Métricas de Qualidade**
 
 - Total de registros processados
 - Contagem de SKUs e lojas únicos
@@ -202,13 +207,13 @@ def validar_resultados(df: DataFrame, categoria: str):
 
 ## ⚡ Performance e Otimizações
 
-### Estratégias de Cache
+### **Estratégias de Cache**
 
 - Cache automático de DataFrames intermediários
 - Cache de mapeamentos de produtos
 - Cache de estatísticas por grupo
 
-### Otimizações PySpark
+### **Otimizações PySpark**
 
 - Uso eficiente de janelas móveis
 - Particionamento inteligente por SKU-loja
@@ -216,14 +221,14 @@ def validar_resultados(df: DataFrame, categoria: str):
 
 ## 🛠️ Manutenção e Extensibilidade
 
-### Adicionar Nova Categoria
+### **Adicionar Nova Categoria**
 
 1. Adicionar entrada em `REGRAS_AGRUPAMENTO`
 2. Definir coluna de agrupamento
 3. Especificar tipo e descrição
 4. Sistema se adapta automaticamente
 
-### Modificar Parâmetros
+### **Modificar Parâmetros**
 
 - Ajustar `PARAMETROS_OUTLIERS` para diferentes sensibilidades
 - Modificar `JANELAS_MOVEIS` para novos períodos
@@ -231,7 +236,7 @@ def validar_resultados(df: DataFrame, categoria: str):
 
 ## 📈 Análise e Comparação
 
-### Comparação entre Categorias
+### **Comparação entre Categorias**
 
 ```python
 def comparar_categorias(lista_dataframes, lista_categorias):
@@ -240,7 +245,7 @@ def comparar_categorias(lista_dataframes, lista_categorias):
     # Verificação de qualidade
 ```
 
-### Análise das Médias Aparadas
+### **Análise das Médias Aparadas**
 
 ```python
 def analisar_medias_aparadas(df: DataFrame, categoria: str):
@@ -251,13 +256,13 @@ def analisar_medias_aparadas(df: DataFrame, categoria: str):
 
 ## 💾 Exportação de Resultados
 
-### Formatos Suportados
+### **Formatos Suportados**
 
 - **Delta**: Formato nativo do Databricks (recomendado)
 - **Parquet**: Formato otimizado para análise
 - **CSV**: Para datasets pequenos ou análise externa
 
-### Estrutura de Nomenclatura
+### **Estrutura de Nomenclatura**
 
 ```
 /tmp/matriz_merecimento_diretoria_de_telas/
@@ -267,7 +272,7 @@ def analisar_medias_aparadas(df: DataFrame, categoria: str):
 
 ## 🔮 Próximos Passos
 
-### Melhorias Planejadas
+### **Melhorias Planejadas**
 
 1. **Validações de Negócio**: Regras específicas por categoria
 2. **Dashboards**: Interface visual para monitoramento
@@ -275,7 +280,7 @@ def analisar_medias_aparadas(df: DataFrame, categoria: str):
 4. **Alertas**: Notificações para anomalias detectadas
 5. **Histórico**: Versionamento de parâmetros e resultados
 
-### Extensões Técnicas
+### **Extensões Técnicas**
 
 1. **Métricas Avançadas**: Coeficientes de variação, assimetria
 2. **Análise Temporal**: Sazonalidade, tendências
@@ -284,15 +289,19 @@ def analisar_medias_aparadas(df: DataFrame, categoria: str):
 
 ## 📚 Referências e Documentação
 
-### Arquivos Relacionados
+### **Arquivos Relacionados**
 
 - `src/analysis/`: Pasta com notebooks de análise e utilitários
   - `Analise_demanda_matriz_telas.py`: Análise de efetividade para telas
   - `Analise_demanda_matriz_antiga.py`: Análise da matriz antiga
-  - `metricas_matriz_merecimento.py`: Métricas de avaliação
+  - `analise_elasticidade_demanda.py`: Análise de elasticidade por gêmeos
+  - `analise_elasticidade_eventos.py`: Análise de impacto de eventos
+  - `analise_factual_comparacao_matrizes.py`: Comparação entre matrizes
+  - `analise_resultados_factuais.py`: Análise de resultados factuais
 - `Preparacao_tabelas_Matriz_merecimento.py`: Preparação de dados (em src/)
+- `Salvar_matrizes_calculadas_csv.py`: Exportação para CSV (em src/)
 
-### Dependências
+### **Dependências**
 
 - PySpark 3.x+
 - Pandas
@@ -300,14 +309,14 @@ def analisar_medias_aparadas(df: DataFrame, categoria: str):
 
 ## 🤝 Contribuição
 
-### Padrões de Código
+### **Padrões de Código**
 
 - Seguir PEP 8 para Python
 - Documentar todas as funções públicas
 - Usar type hints
 - Implementar testes unitários
 
-### Processo de Desenvolvimento
+### **Processo de Desenvolvimento**
 
 1. Criar branch para nova funcionalidade
 2. Implementar com testes
@@ -326,6 +335,6 @@ Para dúvidas ou problemas:
 
 ---
 
-**Versão**: 1.0.0  
-**Última Atualização**: Dezembro 2024  
+**Versão**: 2.0.0  
+**Última Atualização**: Janeiro 2025  
 **Mantenedor**: Equipe de Supply Chain Analytics

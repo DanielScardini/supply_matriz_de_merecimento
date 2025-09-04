@@ -1,10 +1,10 @@
 # Supply Matriz de Merecimento - Sistema Unificado
 
-## Visão Geral
+## 📋 Visão Geral
 
 Este projeto implementa um **sistema unificado e automatizado para cálculo da matriz de merecimento SKU-loja** utilizando Databricks, substituindo o processo manual atual por uma solução robusta, governada e configurável para todas as categorias de produtos.
 
-## Contexto do Negócio
+## 🎯 Contexto do Negócio
 
 ### Processo de Abastecimento de Lojas
 
@@ -25,17 +25,17 @@ O abastecimento de lojas é definido por uma série de processos sequenciais:
    - Verificação de parâmetros (cluster, voltagem)
    - Cálculo do envio considerando múltiplos fatores
 
-## Sistema Unificado de Merecimento
+## 🚀 Sistema Unificado de Merecimento
 
-### 🚀 **Arquitetura Unificada para Todas as Categorias**
+### **Arquitetura Unificada para Todas as Categorias**
 
 O novo sistema unifica o cálculo de merecimento para **todas as diretorias** através de uma arquitetura flexível e configurável:
 
 #### **📊 Categorias Suportadas**
 - **DIRETORIA DE TELAS** → Agrupamento por gêmeos (produtos similares)
 - **DIRETORIA TELEFONIA CELULAR** → Agrupamento por gêmeos (produtos similares)
-- **DIRETORIA LINHA BRANCA** → Agrupamento por espécie gerencial
-- **DIRETORIA LINHA LEVE** → Agrupamento por espécie gerencial
+- **DIRETORIA LINHA BRANCA** → Agrupamento por espécie gerencial + voltagem
+- **DIRETORIA LINHA LEVE** → Agrupamento por espécie gerencial + voltagem
 - **DIRETORIA INFO/GAMES** → Agrupamento por espécie gerencial
 
 #### **🎯 Abstração de Grupo de Necessidade**
@@ -51,7 +51,7 @@ REGRAS_AGRUPAMENTO = {
     "DIRETORIA LINHA BRANCA": {
         "coluna_grupo_necessidade": "NmEspecieGerencial",
         "tipo_agrupamento": "espécie_gerencial",
-        "descricao": "Agrupamento por espécie gerencial"
+        "descricao": "Agrupamento por espécie gerencial + voltagem"
     }
     # ... outras categorias
 }
@@ -63,7 +63,7 @@ REGRAS_AGRUPAMENTO = {
 - **Janelas móveis**: 90, 180, 270, 360 dias
 - **Tipos de medida**: Médias, medianas e médias aparadas
 
-### 🔄 **Fluxo de Execução Unificado**
+### **Fluxo de Execução Unificado**
 
 ```
 1. Carregamento de dados base (sem grupo_de_necessidade)
@@ -79,7 +79,7 @@ REGRAS_AGRUPAMENTO = {
 11. Cálculo de merecimento final (CD × Interno CD)
 ```
 
-### 📈 **Cálculo de Merecimento em Duas Camadas**
+### **Cálculo de Merecimento em Duas Camadas**
 
 #### **🏗️ Primeira Camada: Merecimento a Nível CD**
 - **Agregação**: Por CD + grupo_de_necessidade
@@ -96,190 +96,61 @@ REGRAS_AGRUPAMENTO = {
 Merecimento Final = Merecimento CD × Percentual Interno CD
 ```
 
-### 🔧 **Funcionalidades Técnicas**
+## 🔧 Funcionalidades Técnicas
 
-#### **📊 Medidas Calculadas**
+### **Medidas Calculadas**
 - **Médias móveis normais**: 90, 180, 270, 360 dias
 - **Medianas móveis**: 90, 180, 270, 360 dias (robustas a outliers)
 - **Médias móveis aparadas**: 90, 180, 270, 360 dias (equilibra robustez e informação)
 
-#### **🚨 Detecção de Outliers**
+### **Detecção de Outliers**
 - **Meses atípicos**: Identificação automática por grupo_de_necessidade
 - **Parâmetros sigma configuráveis**: Diferentes níveis de sensibilidade por categoria
 - **Filtragem inteligente**: Remove apenas meses atípicos identificados
 
-#### **🔄 Mapeamento Filial → CD**
+### **Mapeamento Filial → CD**
 - **De-para automático**: Criado a partir da tabela base
 - **Distinct**: cdfilial + cd_primario
 - **Join inteligente**: Evita referências circulares
 
-## Problemas do Método Atual
+## 📊 Análise e Métricas
 
-### Processos Manuais por Categoria
+### **Sistema de Métricas Implementado**
 
-O método atual envolve **4 grandes etapas manuais** que apresentam diversas limitações:
+O sistema inclui um conjunto robusto de métricas para avaliação da qualidade das alocações:
 
-1. **Agrupamento de Produtos**
-   - Filtragem por grupo de necessidade (gêmeos)
-   - ⚠️ **Problema**: Processo demorado, time evita atualizações sem demanda clara
-
-2. **Dados Históricos de Vendas**
-   - Remoção de meses com demanda anormal (eventos)
-   - ⚠️ **Problema**: Racional robusto, mas execução muito sujeita a erros
-
-3. **Cálculo de Demanda**
-   - Média das médias móveis 3M, 6M, 9M, 12M
-   - ⚠️ **Problema**: "Falsa robustez analítica", pouco responsivo a tendências
-
-4. **Divisão entre Lojas**
-   - Percentual da demanda em cada loja vs. total da empresa
-   - ⚠️ **Problema**: Demandas pontuais atribuem percentual a lojas que quase nunca vendem
-
-## Solução Proposta
-
-### Ferramenta Automatizada no Databricks
-
-A nova ferramenta traz **maior robustez e melhor governança** através de:
-
-#### 🔧 **Unificação do Racional de Cálculo**
-- Padronização para todas as categorias
-- Alinhamento com cada área através de mapeamento SKU x Grupo de Necessidade
-- Governança para atualizações e revisões periódicas
-
-#### ⏰ **Automação e Agendamento**
-- Rodadas de cálculo automáticas agendadas
-- Atualizações periódicas garantidas
-- **Benefício**: Desonera a equipe e evita erros de execução
-
-#### 📊 **Gestão Flexível de Grupos de Necessidade**
-- Planilha para input manual de SKU x grupo de necessidade
-- Flexibilidade para diferentes categorias de produtos
-
-#### 🔍 **Checagem de Anomalias**
-- Geração de alertas estruturados para distorções relevantes
-- Pós-processamento dos resultados com validações
-- Tratamento robusto de outliers e vendas B2B
-
-#### 🛠️ **Sustentação e Suporte Internos**
-- Suporte dedicado ao time de supply
-- Infraestrutura interna para manutenção e evolução
-
-## Benefícios Esperados
-
-### Robustez Analítica
-- Métodos estatísticos robustos a outliers
-- Cálculo de demanda robusto a rupturas
-- Uso de demanda média quando havia estoque disponível
-
-### Governança
-- Processos estruturados e documentados
-- Verificações automatizadas de anomalias
-- Rotina estabelecida de cálculo e revisão
-
-### Eficiência Operacional
-- Eliminação de processos manuais demorados
-- Atualizações automáticas seguindo evolução das vendas
-- Redução de erros de execução
-
-## Tecnologias
-
-- **Databricks**: Plataforma principal para processamento e automação
-- **PySpark**: Framework para processamento distribuído de dados
-- **Python**: Linguagem principal para implementação dos algoritmos
-- **SQL**: Consultas para extração e transformação de dados
-- **Agendamento**: Automação de rodadas de cálculo
-- **Alertas**: Sistema de notificações para anomalias
-
-## Métricas de Avaliação da Matriz de Merecimento
-
-### Visão Geral
-
-Implementamos um sistema robusto de métricas para avaliar a qualidade das alocações da matriz de merecimento, permitindo comparação entre valores previstos e reais de demanda.
-
-### Métricas Implementadas
-
-#### 🔍 **wMAPE (Weighted Mean Absolute Percentage Error)**
+#### **🔍 wMAPE (Weighted Mean Absolute Percentage Error)**
 - **Descrição**: Erro percentual absoluto ponderado pelo volume
 - **Interpretação**: Quanto menor, melhor a precisão da matriz
 - **Escala**: < 10% = Excelente, 10-20% = Bom, > 20% = Precisa melhorar
 
-#### 🔍 **SE (Share Error)**
+#### **🔍 SE (Share Error)**
 - **Descrição**: Erro na distribuição de participações entre filiais
 - **Interpretação**: Quanto menor, melhor a distribuição
 - **Escala**: < 5 pp = Excelente, 5-10 pp = Bom, > 10 pp = Precisa melhorar
 
-#### 🔍 **Cross Entropy**
+#### **🔍 Cross Entropy**
 - **Descrição**: Medida de divergência entre distribuições reais e previstas
 - **Interpretação**: Quanto menor, mais similares as distribuições
 - **Escala**: < 0.1 = Excelente, 0.1-0.3 = Bom, > 0.3 = Precisa melhorar
 
-#### 🔍 **KL Divergence**
+#### **🔍 KL Divergence**
 - **Descrição**: Divergência de Kullback-Leibler para comparação de distribuições
 - **Interpretação**: Quanto menor, mais similares as distribuições
 - **Escala**: < 0.1 = Excelente, 0.1-0.3 = Bom, > 0.3 = Precisa melhorar
 
-### Funcionalidades do Sistema de Métricas
+### **Análise de Elasticidade de Demanda**
 
-#### 📊 **Cálculo Automático**
-- Métricas calculadas para todas as 8 abordagens de demanda (4 médias + 4 medianas)
-- Agregação por diferentes níveis: global, CD, gêmeo, CD-gêmeo
-- Validação automática de dados antes do cálculo
+Sistema completo para análise de elasticidade de demanda por produtos gêmeos:
 
-#### 📈 **Análise Comparativa**
-- Comparação entre diferentes métodos de cálculo de demanda
-- Ranking de performance por CD e gêmeo
-- Identificação de oportunidades de melhoria
+- **Identificação automática** dos top 5 gêmeos por diretoria
+- **Análise temporal** com quebras por porte de loja e região geográfica
+- **Visualizações profissionais** com gráficos de barras empilhadas
+- **Duas versões de análise**: apenas porte de loja e porte + região
 
-#### 📋 **Resumos Estatísticos**
-- Estatísticas descritivas das métricas (média, desvio padrão, min, max, mediana)
-- Agrupamento por diferentes dimensões de análise
-- Exportação para tabelas Delta para análise posterior
+## 🏗️ Arquitetura do Código
 
-### Arquivos de Implementação
-
-- **`metricas_matriz_merecimento.py`**: Módulo principal com todas as funções de métricas
-- **`exemplo_uso_metricas.py`**: Notebook de demonstração com exemplos práticos
-- **`calculo_matriz_de_merecimento.py`**: Integração das métricas no cálculo principal
-
-### Uso das Métricas
-
-#### 🔧 **Implementação Automática**
-As métricas são calculadas automaticamente após o cálculo da matriz de merecimento, comparando:
-- **Valores previstos**: Merecimentos calculados pela matriz
-- **Valores reais**: Demandas observadas (médias móveis e medianas)
-
-#### 📊 **Análise e Monitoramento**
-- **Monitoramento contínuo**: Cálculo regular das métricas para acompanhamento da evolução
-- **Análise por segmento**: Identificação de padrões por CD, gêmeo, região
-- **Ações corretivas**: Uso dos resultados para otimização da matriz
-
-#### 🎯 **Benefícios para o Negócio**
-- **Qualidade da matriz**: Avaliação objetiva da precisão das alocações
-- **Identificação de gaps**: Detecção de problemas específicos por segmento
-- **Otimização contínua**: Base para melhorias iterativas da matriz
-
-## Estrutura do Projeto
-
-```
-supply_matriz_de_merecimento/
-├── README.md                      # Documentação principal do sistema
-├── src/                           # Código fonte Python
-│   ├── calculo_matriz_de_merecimento_unificado.py  # 🆕 Sistema unificado principal
-│   ├── Preparacao_tabelas_Matriz_merecimento.py    # Preparação de tabelas base
-│   └── analysis/                  # Notebooks de análise
-│       ├── Analise_demanda_matriz_telas.py         # Análise específica para telas
-│       └── Analise_demanda_matriz_antiga.py        # Análise do sistema anterior
-├── .cursor/                       # Regras e configurações do Cursor
-│   └── rules/
-│       ├── python.mdc            # Regras para Python
-│       ├── typescript.mdc        # Regras para TypeScript
-│       └── pyspark.mdc           # Regras para PySpark
-└── docs/                         # Documentação técnica
-```
-
-## Arquitetura do Código
-
-### 🔧 **Sistema Unificado Principal**
+### **Sistema Unificado Principal**
 
 O **`calculo_matriz_de_merecimento_unificado.py`** é o núcleo do sistema, implementando uma arquitetura modular e configurável:
 
@@ -320,29 +191,35 @@ O **`calculo_matriz_de_merecimento_unificado.py`** é o núcleo do sistema, impl
 - **Parâmetros configuráveis**: Categoria, datas, sensibilidade sigma
 - **Resultado limpo**: SKU x loja x gêmeo com todos os merecimentos
 
-### 📚 **Padrões de Qualidade**
+## 📁 Estrutura do Projeto
 
-- **Type Hints**: Tipagem completa para todos os parâmetros e retornos
-- **Docstrings**: Documentação detalhada seguindo padrão Google
-- **Funções Modulares**: Cada função com responsabilidade única
-- **Nomenclatura Consistente**: Padrões de nomenclatura Python
-- **Tratamento de Erros**: Validações e verificações robustas
-- **Evita Referências Circulares**: Ordem de execução otimizada
+```
+supply_matriz_de_merecimento/
+├── README.md                                    # Documentação principal
+├── README_SISTEMA_UNIFICADO.md                 # Documentação do sistema unificado
+├── RESUMO_IMPLEMENTACAO_ELASTICIDADE_DATABRICKS.md  # Resumo da implementação
+├── src/                                         # Código fonte Python
+│   ├── calculo_matriz_de_merecimento_unificado.py  # Sistema principal unificado
+│   ├── Preparacao_tabelas_Matriz_merecimento.py    # Preparação de tabelas base
+│   ├── Salvar_matrizes_calculadas_csv.py           # Exportação para CSV
+│   ├── README.md                                   # Documentação do src/
+│   └── analysis/                                   # Notebooks de análise
+│       ├── __init__.py                             # Pacote Python
+│       ├── README.md                               # Documentação da pasta analysis
+│       ├── README_ELASTICIDADE_DATABRICKS.md       # Documentação específica Databricks
+│       ├── Analise_demanda_matriz_telas.py         # Análise para telas
+│       ├── Analise_demanda_matriz_antiga.py        # Análise da matriz antiga
+│       ├── analise_elasticidade_demanda.py         # Análise de elasticidade
+│       ├── analise_elasticidade_eventos.py         # Análise de eventos
+│       ├── analise_factual_comparacao_matrizes.py  # Análise factual
+│       └── analise_resultados_factuais.py          # Análise de resultados
+├── tests/                                        # Testes unitários
+└── docs/                                         # Documentação técnica adicional
+```
 
-### 🚀 **Funcionalidades Principais**
+## 🚀 Como Usar o Sistema Unificado
 
-1. **Sistema Unificado**: Uma função para todas as categorias
-2. **Agrupamento Inteligente**: Adapta-se automaticamente por categoria
-3. **Detecção de Outliers**: Configurável e robusta
-4. **Múltiplas Medidas**: Médias, medianas e aparadas para diferentes períodos
-5. **Merecimento em Duas Camadas**: CD + Participação interna
-6. **Resultado Limpo**: Dados agregados, sem granularidade desnecessária
-
-
-
-## Como Usar o Sistema Unificado
-
-### **🚀 Execução Simplificada**
+### **Execução Simplificada**
 
 O sistema unificado pode ser executado com **uma única linha de código** para qualquer categoria:
 
@@ -363,7 +240,7 @@ df_linha_leve = executar_calculo_matriz_merecimento("DIRETORIA LINHA LEVE")
 df_info_games = executar_calculo_matriz_merecimento("DIRETORIA INFO/GAMES")
 ```
 
-### **⚙️ Configuração Avançada**
+### **Configuração Avançada**
 
 #### **Parâmetros Personalizáveis**
 ```python
@@ -391,7 +268,9 @@ df_resultado = executar_calculo_matriz_merecimento(
 "DIRETORIA INFO/GAMES" → sigma_meses_atipicos=3.0
 ```
 
-### **📊 Estrutura do Resultado**
+## 📊 Saída do Sistema
+
+### **Estrutura do Resultado**
 
 O sistema retorna um DataFrame com **uma linha por SKU + loja + gêmeo** contendo:
 
@@ -442,9 +321,9 @@ O sistema retorna um DataFrame com **uma linha por SKU + loja + gêmeo** contend
 - `Merecimento_Final_MediaAparada270_Qt_venda_sem_ruptura`: Merecimento final (média aparada 270 dias)
 - `Merecimento_Final_MediaAparada360_Qt_venda_sem_ruptura`: Merecimento final (média aparada 360 dias)
 
-### **🔍 Análise dos Resultados**
+## 🔍 Análise dos Resultados
 
-#### **Exemplo de Uso para Análise**
+### **Exemplo de Uso para Análise**
 ```python
 # Análise por CD
 df_por_cd = df_resultado.groupBy("cd_primario").agg(
@@ -465,33 +344,75 @@ df_por_loja = df_resultado.groupBy("cdfilial").agg(
 )
 ```
 
-### **Pré-requisitos**
-- Databricks workspace configurado
-- Acesso às tabelas de dados necessárias
-- Permissões para criação de tabelas Delta
+## 🛠️ Notebooks de Análise
 
-### **Configuração**
-- Ajustar datas de início e fim conforme necessário
-- Configurar parâmetros de filtro para diferentes categorias
-- Personalizar regras de negócio específicas
+### **Análise de Efetividade**
+- **`Analise_demanda_matriz_telas.py`**: Análise específica para produtos de telas
+- **`Analise_demanda_matriz_antiga.py`**: Análise comparativa com matriz anterior
 
-## Status do Projeto
+### **Análise de Elasticidade**
+- **`analise_elasticidade_demanda.py`**: Análise de elasticidade de demanda por gêmeos
+- **`analise_elasticidade_eventos.py`**: Análise de impacto de eventos na demanda
 
-✅ **Sistema Unificado Implementado** - Cálculo de merecimento para todas as categorias
-✅ **Arquitetura Robusta** - Detecção de outliers, médias aparadas, merecimento em duas camadas
-✅ **Código Refatorado e Documentado** - Estrutura modular implementada
-🚧 **Em Produção** - Sistema funcional para uso operacional
+### **Análise Factual**
+- **`analise_factual_comparacao_matrizes.py`**: Comparação entre matrizes calculadas e DRP
+- **`analise_resultados_factuais.py`**: Análise de resultados factuais vs. previstos
+
+## 🔧 Tecnologias
+
+- **Databricks**: Plataforma principal para processamento e automação
+- **PySpark**: Framework para processamento distribuído de dados
+- **Python**: Linguagem principal para implementação dos algoritmos
+- **SQL**: Consultas para extração e transformação de dados
+- **Plotly**: Visualizações interativas para análise
+- **Pandas**: Manipulação de dados para análises locais
+
+## 📈 Benefícios Esperados
+
+### **Robustez Analítica**
+- Métodos estatísticos robustos a outliers
+- Cálculo de demanda robusto a rupturas
+- Uso de demanda média quando havia estoque disponível
+
+### **Governança**
+- Processos estruturados e documentados
+- Verificações automatizadas de anomalias
+- Rotina estabelecida de cálculo e revisão
+
+### **Eficiência Operacional**
+- Eliminação de processos manuais demorados
+- Atualizações automáticas seguindo evolução das vendas
+- Redução de erros de execução
+
+## 🚀 Status do Projeto
+
+✅ **Sistema Unificado Implementado** - Cálculo de merecimento para todas as categorias  
+✅ **Arquitetura Robusta** - Detecção de outliers, médias aparadas, merecimento em duas camadas  
+✅ **Código Refatorado e Documentado** - Estrutura modular implementada  
+✅ **Análises Implementadas** - Notebooks de análise de efetividade e elasticidade  
+✅ **Métricas de Qualidade** - Sistema completo de avaliação da matriz  
+🚧 **Em Produção** - Sistema funcional para uso operacional  
 
 ### **Últimas Atualizações**
 - **🆕 Sistema unificado** implementado para todas as diretorias
 - **🆕 Cálculo de merecimento** em duas camadas (CD + participação interna)
 - **🆕 Detecção de outliers** configurável por categoria
 - **🆕 Médias aparadas** para robustez estatística
-- **🆕 Resultado limpo** (SKU x loja x gêmeo) sem dados granulares
+- **🆕 Análise de elasticidade** com visualizações profissionais
+- **🆕 Métricas de qualidade** para avaliação da matriz
+- **🆕 Paths corrigidos** para execução no Databricks
 - **Refatoração completa** do código para funções modulares
 - **Documentação completa** com docstrings e type hints
 - **Organização estrutural** seguindo melhores práticas Python/PySpark
-- **Padrões de qualidade** implementados para manutenibilidade
+
+## 📞 Suporte
+
+Para dúvidas ou problemas:
+
+1. Verificar documentação existente
+2. Consultar exemplos de uso nos notebooks
+3. Revisar logs de execução
+4. Contatar equipe de desenvolvimento
 
 ---
 
@@ -499,4 +420,4 @@ df_por_loja = df_resultado.groupBy("cdfilial").agg(
 
 **Autor**: Scardini  
 **Data**: 2025  
-**Versão**: 1.1 - Sistema Unificado de Merecimento Implementado
+**Versão**: 2.0 - Sistema Unificado Completo com Análises e Métricas
