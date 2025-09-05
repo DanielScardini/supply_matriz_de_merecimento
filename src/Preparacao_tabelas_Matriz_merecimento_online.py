@@ -42,7 +42,7 @@ def get_data_inicio(hoje: datetime | date | None = None) -> datetime:
     else:
         hoje_d = hoje
 
-    total_meses = hoje_d.year * 12 + hoje_d.month - 1
+    total_meses = hoje_d.year * 12 + hoje_d.month - 4
     ano = total_meses // 12
     mes = total_meses % 12
     if mes == 0:
@@ -80,10 +80,8 @@ def load_estoque_loja_data(spark: SparkSession) -> DataFrame:
     return (
         spark.read.table("data_engineering_prd.app_logistica.gi_boss_qualidade_estoque")
         .filter(F.col("DtAtual") >= data_inicio)
-        .filter(F.col("StLoja") == "ATIVA")
-        .filter(F.col("DsEstoqueLojaDeposito") == "L")
-
-
+        #.filter(F.col("StLoja") == "ATIVA")
+        #.filter(F.col("DsEstoqueLojaDeposito") == "L")
         .select(
             "CdFilial", 
             "CdSku",
@@ -94,18 +92,94 @@ def load_estoque_loja_data(spark: SparkSession) -> DataFrame:
             "StLinha",
             "DsObrigatorio",
             "DsVoltagem",
+            "DsEstoqueLojaDeposito",
             F.col("DsTipoEntrega").alias("TipoEntrega"),
             F.col("CdEstoqueFilialAbastecimento").alias("QtdEstoqueCDVinculado"),
             (F.col("VrTotalVv")/F.col("VrVndCmv")).alias("DDE"),
-            F.col("QtEstoqueBoaOff").alias("EstoqueLoja"),
+            F.col("QtEstoqueBoaOn").alias("EstoqueLoja"),
             F.col("DsFaixaDde").alias("ClassificacaoDDE"),
             F.col("data_ingestao"),
             F.date_format(F.col("data_ingestao"), "yyyy-MM-dd").alias("DtAtual")    
         )
         .dropDuplicates(["DtAtual", "CdSku", "CdFilial"])
+
+        #### Embutindo CD 14 no 1401
+        .withColumn("CdFilial",
+                    F.when
+                    (
+                        F.col("CdFilial") == 14, F.lit(1401)
+                    )
+                    .otherwise(F.col("CdFilial"))
+        )
+
     )
 
+def consolidar_filial_14_para_1401(df: DataFrame) -> DataFrame:
+    """
+    Consolida 14 -> 1401.
+    - Chave: DtAtual, CdSku, CdFilial(target)
+    - Numéricos: soma
+    - Categorias: pegar do 1401; se não houver, usar qualquer disponível
+    - DDE recalculado = sum(VrTotalVv) / sum(VrVndCmv)
+    """
+    # manter original para seleção de categorias
+    df_aug = (
+        df
+        .withColumn("CdFilialOriginal", F.col("CdFilial"))
+        .withColumn("CdFilial", F.when(F.col("CdFilial") == 14, F.lit(1401)).otherwise(F.col("CdFilial")))
+    )
+
+    chave = ["DtAtual", "CdSku", "CdFilial", "DsSku",
+        "DsSetor",
+        "DsCurva",
+        "DsCurvaAbcLoja",
+        "StLinha",
+        "DsObrigatorio",
+        "DsVoltagem",
+        "DsEstoqueLojaDeposito",
+        "TipoEntrega",
+        "ClassificacaoDDE",]
+
+    # colunas numéricas a somar
+    num_cols = {
+        "QtdEstoqueCDVinculado": "sum",
+        "EstoqueLoja": "sum",
+        "DDE": "mean"
+    }
+
+    # colunas categóricas: preferir 1401
+    cat_cols = [
+        "ClassificacaoDDE",
+    ]
+
+    agg_exprs = []
+
+    # numéricos
+    for c, fn in num_cols.items():
+        agg_exprs.append(getattr(F, fn)(F.col(c)).alias(c))
+
+    # categorias: coalesce(max(IF(orig=1401, col)), max(col))
+    for c in cat_cols:
+        agg_exprs.append(
+            F.coalesce(
+                F.max(F.when(F.col("CdFilialOriginal") == 1401, F.col(c))),
+                F.max(F.col(c))
+            ).alias(c)
+        )
+
+    # data_ingestao mais recente
+    agg_exprs.append(F.max("data_ingestao").alias("data_ingestao"))
+
+    df_agg = df_aug.groupBy(chave).agg(*agg_exprs)
+
+    return df_agg
+
+# Exemplo de uso com seu dataframe já carregado:
 df_estoque_loja = load_estoque_loja_data(spark)
+
+df_consolidado = consolidar_filial_14_para_1401(df_estoque_loja)
+df_consolidado.cache()
+df_consolidado#.display()
 
 # COMMAND ----------
 
@@ -152,6 +226,7 @@ def load_mercadoria_data(spark: SparkSession) -> DataFrame:
     )
 
 df_mercadoria = load_mercadoria_data(spark)
+df_mercadoria.cache()
 
 # COMMAND ----------
 
@@ -190,7 +265,7 @@ def build_sales_view(
     df = (
         df_rateada
 
-        .filter(F.col("NmTipoNegocio") == 'LOJA FISICA')
+        .filter(F.col("NmTipoNegocio") != 'LOJA FISICA')
         .join(df_nao_rateada.select("ChaveFatos","QtMercadoria"), on="ChaveFatos")
         .filter(
             F.col("DtAprovacao").between(start_date, end_date)
@@ -202,7 +277,15 @@ def build_sales_view(
             "year_month",
             F.date_format(F.to_date(F.col("DtAprovacao").cast("string"), "yyyyMMdd"), "yyyyMM").cast("int")
         )
-        .withColumnRenamed("CdFilialVenda", "CdFilial")
+        .withColumnRenamed("CdFilialEmissao", "CdFilial")
+
+        #### Agregação do CD 14 embaixo do 1401
+        .withColumn("CdFilial",
+                    F.when(F.col("CdFilial") == 14,
+                           F.lit(1401))
+                    .otherwise(F.col("CdFilial"))
+                    )
+
         .withColumn("DtAtual",
             F.date_format(F.to_date(F.col("DtAprovacao").cast("string"), "yyyyMMdd"), "yyyy-MM-dd"))
     )
@@ -272,6 +355,8 @@ def build_sales_view(
 
 # Executar a função de vendas
 sales_df = build_sales_view(spark)
+sales_df.cache()
+sales_df#.display()
 
 # COMMAND ----------
 
@@ -303,6 +388,10 @@ def create_base_merecimento(
     )
 
 df_merecimento_base = create_base_merecimento(df_estoque_loja, sales_df, df_mercadoria)
+df_merecimento_base.cache()
+
+df_merecimento_base#.display()
+
 
 # COMMAND ----------
 
@@ -413,6 +502,9 @@ def create_analysis_with_rupture_flags(df: DataFrame) -> DataFrame:
 
 df_merecimento_base_r90 = add_rolling_90_metrics(df_merecimento_base)
 df_merecimento_base_r90 = create_analysis_with_rupture_flags(df_merecimento_base_r90)
+
+df_merecimento_base_r90.cache()
+df_merecimento_base_r90#.display()
 
 # COMMAND ----------
 
@@ -576,7 +668,7 @@ def create_complete_supply_mapping(
     return (
         de_para_filial_CD
         # Características da loja
-        .join(F.broadcast(caracteristicas_loja), on="CdFilial", how="inner")
+        .join(F.broadcast(caracteristicas_loja), on="CdFilial", how="left")
         .select(
             F.col("CdFilial").alias("CdFilial").cast("string"),
             "BandeiraLoja", "NmLoja", "NmCidadeLoja", "NmUFLoja", "CEPLoja",
@@ -615,10 +707,13 @@ def create_complete_supply_mapping(
             "QtdSegunda", "QtdTerca", "QtdQuarta", "QtdQuinta",
             "QtdSexta", "QtdSabado", "QtdDomingo"
         )
+        .dropna(subset=["NmLoja"])
     )
 
 # Carregar mapeamento completo
 de_para_filial_CD = create_complete_supply_mapping(spark, hoje)
+de_para_filial_CD.cache()
+de_para_filial_CD#.display()
 
 # COMMAND ----------
 
@@ -641,14 +736,41 @@ def create_final_merecimento_base(
     Returns:
         DataFrame final com todas as informações de merecimento e abastecimento
     """
+
+    cond = F.col('DsEstoqueLojaDeposito') == 'D'
     return (
         df_merecimento
         .join(supply_mapping, on="CdFilial", how="left")
+        .join(
+            F.broadcast(
+                spark.table('data_engineering_prd.app_operacoesloja.roteirizacaocentrodistribuicao')
+                .select("CdFilial",
+                        F.col("NmFilial").alias("NmCD"))
+                .distinct()
+            ),
+            on="CdFilial",
+            how="left"
+        )
+        .withColumn("NmLoja",
+                    F.when(F.col("DsEstoqueLojaDeposito") == "D", 
+                        F.concat_ws(
+                            " - ", 
+                            F.lit("CD"), 
+                            F.col("NmCD")
+                            )    )                
+                        .otherwise(F.col("NmLoja"))
+                    )
+        .drop("NmCD")
         .withColumn("year_month",
                     F.date_format(F.col("DtAtual_date"), "yyyyMM").cast("int"))
     )
 
 df_merecimento_base_cd_loja = create_final_merecimento_base(df_merecimento_base_r90, de_para_filial_CD)
+df_merecimento_base_cd_loja.cache()
+
+# COMMAND ----------
+
+df_merecimento_base_cd_loja#.display()
 
 # COMMAND ----------
 
@@ -669,6 +791,7 @@ def save_merecimento_table(df: DataFrame, table_name: str) -> None:
         df.write
         .mode("overwrite")
         .option("overwriteSchema", "true")
+        
         .format("delta")
         .saveAsTable(table_name)
     )
@@ -676,7 +799,7 @@ def save_merecimento_table(df: DataFrame, table_name: str) -> None:
 # # Salvar tabela final
 # save_merecimento_table(
 #     df_merecimento_base_cd_loja, 
-#     "databox.bcg_comum.supply_base_merecimento_diario_v3"
+#     "databox.bcg_comum.supply_base_merecimento_diario_v3_online"
 # )
 
 # COMMAND ----------
@@ -799,7 +922,7 @@ def process_monthly_batch(
     spark: SparkSession,
     start_date: datetime,
     end_date: datetime,
-    table_name: str = "databox.bcg_comum.supply_base_merecimento_diario_v3"
+    table_name: str = "databox.bcg_comum.supply_base_merecimento_diario_v3_online"
 ) -> DataFrame:
     """
     Processa um lote de meses específico com gestão inteligente de memória.
@@ -825,14 +948,15 @@ def process_monthly_batch(
             spark.read.table("data_engineering_prd.app_logistica.gi_boss_qualidade_estoque")
             .filter(F.col("DtAtual") >= start_date)
             .filter(F.col("DtAtual") <= end_date)
-            .filter(F.col("StLoja") == "ATIVA")
-            .filter(F.col("DsEstoqueLojaDeposito") == "L")
+            #.filter(F.col("StLoja") == "ATIVA")
+            #.filter(F.col("DsEstoqueLojaDeposito") == "L")
             .select(
                 "CdFilial", "CdSku", "DsSku", "DsSetor", "DsCurva", "DsCurvaAbcLoja",
                 "StLinha", "DsObrigatorio", "DsVoltagem", F.col("DsTipoEntrega").alias("TipoEntrega"),
                 F.col("CdEstoqueFilialAbastecimento").alias("QtdEstoqueCDVinculado"),
                 (F.col("VrTotalVv")/F.col("VrVndCmv")).alias("DDE"),
                 F.col("QtEstoqueBoaOff").alias("EstoqueLoja"),
+                "DsEstoqueLojaDeposito",
                 F.col("DsFaixaDde").alias("ClassificacaoDDE"),
                 F.col("data_ingestao"),
                 F.date_format(F.col("data_ingestao"), "yyyy-MM-dd").alias("DtAtual")    
@@ -936,7 +1060,8 @@ def append_monthly_batch_to_table(
         (
             df_batch.write
             .mode(mode)
-            .option("overwriteSchema", "false")  # Manter schema existente
+            .option("overwriteSchema", "True")
+            .option("mergeSchema", "true")
             .format("delta")
             .saveAsTable(table_name)
         )
@@ -952,7 +1077,7 @@ def process_incremental_from_start_date(
     start_date: datetime,
     end_date: datetime,
     batch_size_months: int = 3,
-    table_name: str = "databox.bcg_comum.supply_base_merecimento_diario_v3"
+    table_name: str = "databox.bcg_comum.supply_base_merecimento_diario_v3_online"
 ) -> None:
     """
     Processa dados incrementalmente desde a data de início até hoje com gestão de memória.
@@ -1099,4 +1224,10 @@ def monitor_memory_usage(spark: SparkSession) -> None:
 
 # Executar processamento incremental
 # Descomente a linha abaixo para executar
-process_incremental_from_start_date(spark, data_inicio, hoje, batch_size_months=3)
+process_incremental_from_start_date(spark, data_inicio, hoje, batch_size_months=4)
+
+# COMMAND ----------
+
+# MAGIC %sql SELECT * FROM databox.bcg_comum.supply_base_merecimento_diario_v3_online
+# MAGIC
+# MAGIC WHERE DtAtual > 2025-09-01

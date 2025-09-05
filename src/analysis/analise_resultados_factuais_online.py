@@ -90,12 +90,12 @@ de_para_modelos_gemeos = (
 df_matriz_nova = {}
 
 df_matriz_nova['TELAS'] = (
-  spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas')
+  spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_online')
   .select('grupo_de_necessidade','CdFilial', 'CdSku', 'Merecimento_Final_Media90_Qt_venda_sem_ruptura')
 )
 
 df_matriz_nova['TELEFONIA'] = (
-  spark.table('databox.bcg_comum.supply_matriz_merecimento_telefonia_celular')
+  spark.table('databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online')
   .select('grupo_de_necessidade','CdFilial', 'CdSku', 'Merecimento_Final_Media90_Qt_venda_sem_ruptura')
 
 )
@@ -103,7 +103,7 @@ df_matriz_nova['TELEFONIA'] = (
 df_matriz_neogrid = (
     spark.createDataFrame(
         pd.read_csv(
-            "/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/dados_analise/(DRP)_MATRIZ_20250902160333.csv",
+            "/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/dados_analise/(DRP)_MATRIZ_20250904123325_online.csv",
             delimiter=";",
         )
     )
@@ -122,7 +122,7 @@ df_matriz_neogrid = (
 )
 
 df_base_calculo_factual = (
-  spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3')
+  spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3_online')
   .filter(F.col('DtAtual') >= '2025-08-01')
 )
 
@@ -168,23 +168,7 @@ df_proporcao_factual_pct.filter(F.col("grupo_de_necessidade") == 'Telef Medio 12
 
 # COMMAND ----------
 
-(
-    df_base_calculo_factual
-    .filter(F.col("NmAgrupamentoDiretoriaSetor").isin('DIRETORIA TELEFONIA CELULAR', 'DIRETORIA DE TELAS'))
-    .fillna(0, subset=['deltaRuptura', 'QtMercadoria'])
-    .withColumn("QtDemanda", F.col("QtMercadoria") + F.col("deltaRuptura"))
-    .join(de_para_modelos_gemeos,
-          how='left',
-          on='CdSku')
-    .withColumn('grupo_de_necessidade', F.col("gemeos"))
-    .filter(F.col('gemeos') == 'TV 50 ALTO P')
-
-    # .groupBy('CdSku')
-    # .agg(
-    #     F.sum('QtDemanda').alias('QtDemanda'),
-    # )
-    .orderBy(F.desc('QtDemanda'))
-).display()
+df_proporcao_factual_pct.filter(F.col("grupo_de_necessidade") == 'Telef Medio 128GB').agg(F.sum("QtDemanda")).display()
 
 # COMMAND ----------
 
@@ -214,10 +198,14 @@ df_matriz_nova_agg['TELEFONIA'] = (
 )
 
 
+# COMMAND ----------
+
 (
-  df_matriz_nova_agg['TELEFONIA']
-  .filter(F.col("CdFilial") == 2052)
-  .filter(F.col("grupo_de_necessidade") == 'Telef Medio 128GB')
+    df_matriz_neogrid_agg
+    #.filter(F.col("CdFilial"))
+    .filter(F.col("grupo_de_necessidade") == 'Telef pp')
+    .groupBy('grupo_de_necessidade')
+    .agg(F.sum('PercMatrizNeogrid'))
 ).display()
 
 # COMMAND ----------
@@ -253,10 +241,6 @@ df_comparacao['TELAS'].count()
 
 df_comparacao['TELEFONIA'].cache()
 df_comparacao['TELEFONIA'].count()
-
-# COMMAND ----------
-
-df_comparacao['TELEFONIA'].display()
 
 # COMMAND ----------
 
@@ -306,8 +290,106 @@ df_result_wsmape = df_wsmape.agg(
 )
 
 # # resultados
-# df_result_smape.display()
-# df_result_wsmape.display()
+df_result_smape.display()
+df_result_wsmape.display()
+
+# COMMAND ----------
+
+# === Plotly scatters ===
+import plotly.express as px
+
+
+df_filial_mean = (
+    df_comparacao['TELAS']
+    .join(
+        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+        .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
+        on="CdFilial",
+        how="left"
+    )
+    .groupBy("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica")
+    .agg(
+        F.avg("Percentual_QtDemanda").alias("x_real"),
+        F.avg("PercMatrizNova").alias("y_nova"),
+        F.avg("PercMatrizNeogrid").alias("y_neogrid"),
+    )
+    # Extrai o número do porte
+    .withColumn("PorteNum_raw", F.regexp_replace(F.col("NmPorteLoja"), "[^0-9]", ""))
+    .withColumn("PorteNum", F.col("PorteNum_raw").cast("int"))
+    # Garante valores válidos 1–6
+    .withColumn("PorteNum", F.when(F.col("PorteNum").between(1,6), F.col("PorteNum")*1.5).otherwise(F.lit(1)))
+)
+
+pdf = df_filial_mean.toPandas()
+
+
+# Definição de paleta: tons de azul e vermelho
+# Ajuste a ordem ou adicione mais se tiver >2 regiões
+palette = ["#1f77b4", "#d62728", "#aec7e8", "#ff9896"]
+
+def make_scatter(df, y_col, y_label, title):
+    fig = px.scatter(
+        df,
+        x="x_real",
+        y=y_col,
+        size="PorteNum",                 
+        color="NmRegiaoGeografica",      
+        color_discrete_sequence=palette,
+        size_max=12,                     
+        opacity=0.75,
+        labels={
+            "x_real": "Percentual_QtDemanda médio por filial (real)",
+            y_col:   y_label,
+            "NmRegiaoGeografica": "Região Geográfica",
+            "PorteNum": "Porte"
+        },
+        hover_data={
+            "CdFilial": True,
+            "NmFilial": True,
+            "NmPorteLoja": True,
+            "NmRegiaoGeografica": True,
+            "x_real": ":.3f",
+            y_col: ":.3f",
+        }
+    )
+    fig.update_layout(
+        title=dict(text=title, x=0.5, xanchor="center"),
+        paper_bgcolor="#f2f2f2",
+        plot_bgcolor="#f2f2f2",
+        margin=dict(l=40, r=40, t=60, b=40),
+        xaxis=dict(
+            showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)",
+            zeroline=False, range=[0,0.6]
+        ),
+        yaxis=dict(
+            showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)",
+            zeroline=False, range=[0,2]
+        ),
+        legend=dict(
+            title="Região Geográfica",
+            orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5
+        ),
+        width=1200,   # largura 4
+        height=400,   # altura 3
+    )
+
+    fig.update_traces(marker=dict(line=dict(width=0.6, color="rgba(0,0,0,0.35)")))
+    # linha de referência y=x
+    fig.add_shape(
+        type="line", x0=0, y0=0, x1=1, y1=1,
+        line=dict(color="rgba(0,0,0,0.45)", width=0.2, dash="dash")
+    )
+    return fig
+
+fig_nova = make_scatter(pdf, "y_nova",
+                        "PercMatrizNova médio por filial (previsão)",
+                        "Real vs Matriz Nova – por filial")
+fig_neogrid = make_scatter(pdf, "y_neogrid",
+                           "PercMatrizNeogrid médio por filial (previsão)",
+                           "Real vs Matriz Neogrid – por filial")
+
+fig_nova.show()
+fig_neogrid.show()
 
 # COMMAND ----------
 
@@ -358,8 +440,160 @@ df_result_wsmape = df_wsmape.agg(
 )
 
 # # resultados
-# df_result_smape.display()
-# df_result_wsmape.display()
+df_result_smape.display()
+df_result_wsmape.display()
+
+# COMMAND ----------
+
+from pyspark.sql import functions as F
+
+# smape para cada linha
+df_smape = (
+    df_comparacao['TELEFONIA']
+    .filter(F.col("grupo_de_necessidade") != 'Chip')
+
+    .withColumn(
+        "SMAPE_MatrizNeogrid",
+        200 * F.abs(F.col("PercMatrizNeogrid") - F.col("Percentual_QtDemanda")) /
+        (F.abs(F.col("PercMatrizNeogrid")) + F.abs(F.col("Percentual_QtDemanda")))
+    )
+    .withColumn(
+        "SMAPE_MatrizNova",
+        200 * F.abs(F.col("PercMatrizNova") - F.col("Percentual_QtDemanda")) /
+        (F.abs(F.col("PercMatrizNova")) + F.abs(F.col("Percentual_QtDemanda")))
+    )
+)
+
+# média simples do SMAPE (não ponderado)
+df_result_smape = df_smape.agg(
+    F.mean("SMAPE_MatrizNeogrid").alias("SMAPE_MatrizNeogrid"),
+    F.mean("SMAPE_MatrizNova").alias("SMAPE_MatrizNova")
+)
+
+# weighted SMAPE usando QtDemanda
+df_wsmape = (
+    df_smape
+    .withColumn(
+        "WSMAPE_MatrizNeogrid",
+        (200 * F.abs(F.col("PercMatrizNeogrid") - F.col("Percentual_QtDemanda")) /
+        (F.abs(F.col("PercMatrizNeogrid")) + F.abs(F.col("Percentual_QtDemanda"))))
+        * F.col("QtDemanda")
+    )
+    .withColumn(
+        "WSMAPE_MatrizNova",
+        (200 * F.abs(F.col("PercMatrizNova") - F.col("Percentual_QtDemanda")) /
+        (F.abs(F.col("PercMatrizNova")) + F.abs(F.col("Percentual_QtDemanda"))))
+        * F.col("QtDemanda")
+    )
+)
+
+df_result_wsmape = df_wsmape.agg(
+    (F.sum("WSMAPE_MatrizNeogrid") / F.sum("QtDemanda")).alias("WSMAPE_MatrizNeogrid"),
+    (F.sum("WSMAPE_MatrizNova") / F.sum("QtDemanda")).alias("WSMAPE_MatrizNova")
+)
+
+# # resultados
+df_result_smape.display()
+df_result_wsmape.display()
+
+# COMMAND ----------
+
+# === Plotly scatters ===
+import plotly.express as px
+
+
+df_filial_mean = (
+    df_comparacao['TELEFONIA']
+    .filter(F.col("grupo_de_necessidade") != 'Chip')
+    .join(
+        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+        .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
+        on="CdFilial",
+        how="left"
+    )
+    .groupBy("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica")
+    .agg(
+        F.avg("Percentual_QtDemanda").alias("x_real"),
+        F.avg("PercMatrizNova").alias("y_nova"),
+        F.avg("PercMatrizNeogrid").alias("y_neogrid"),
+    )
+    # Extrai o número do porte
+    .withColumn("PorteNum_raw", F.regexp_replace(F.col("NmPorteLoja"), "[^0-9]", ""))
+    .withColumn("PorteNum", F.col("PorteNum_raw").cast("int"))
+    # Garante valores válidos 1–6
+    .withColumn("PorteNum", F.when(F.col("PorteNum").between(1,6), F.col("PorteNum")*1.5).otherwise(F.lit(1)))
+)
+
+pdf = df_filial_mean.toPandas()
+
+
+# Definição de paleta: tons de azul e vermelho
+# Ajuste a ordem ou adicione mais se tiver >2 regiões
+palette = ["#1f77b4", "#d62728", "#aec7e8", "#ff9896"]
+
+def make_scatter(df, y_col, y_label, title):
+    fig = px.scatter(
+        df,
+        x="x_real",
+        y=y_col,
+        size="PorteNum",                 
+        color="NmRegiaoGeografica",      
+        color_discrete_sequence=palette,
+        size_max=12,                     
+        opacity=0.75,
+        labels={
+            "x_real": "Percentual_QtDemanda médio por filial (real)",
+            y_col:   y_label,
+            "NmRegiaoGeografica": "Região Geográfica",
+            "PorteNum": "Porte"
+        },
+        hover_data={
+            "CdFilial": True,
+            "NmFilial": True,
+            "NmPorteLoja": True,
+            "NmRegiaoGeografica": True,
+            "x_real": ":.3f",
+            y_col: ":.3f",
+        }
+    )
+    fig.update_layout(
+        title=dict(text=title, x=0.5, xanchor="center"),
+        paper_bgcolor="#f2f2f2",
+        plot_bgcolor="#f2f2f2",
+        margin=dict(l=40, r=40, t=60, b=40),
+        xaxis=dict(
+            showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)",
+            zeroline=False, range=[0,0.6]
+        ),
+        yaxis=dict(
+            showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)",
+            zeroline=False, range=[0,2]
+        ),
+        legend=dict(
+            title="Região Geográfica",
+            orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5
+        ),
+        width=1200,   # largura 4
+        height=400,   # altura 3
+    )
+
+    fig.update_traces(marker=dict(line=dict(width=0.6, color="rgba(0,0,0,0.35)")))
+    # linha de referência y=x
+    fig.add_shape(
+        type="line", x0=0, y0=0, x1=1, y1=1,
+        line=dict(color="rgba(0,0,0,0.45)", width=0.2, dash="dash")
+    )
+    return fig
+
+fig_nova = make_scatter(pdf, "y_nova",
+                        "PercMatrizNova médio por filial (previsão)",
+                        "Real vs Matriz Nova – por filial")
+fig_neogrid = make_scatter(pdf, "y_neogrid",
+                           "PercMatrizNeogrid médio por filial (previsão)",
+                           "Real vs Matriz Neogrid – por filial")
+
+fig_nova.show()
+fig_neogrid.show()
 
 # COMMAND ----------
 
@@ -420,7 +654,7 @@ from pyspark.sql import functions as F
 # smape para cada linha
 df_smape = (
     df_comparacao['TELEFONIA']
-    .filter(F.col("grupo_de_necessidade") == 'Telef pp')
+    .filter(F.col("grupo_de_necessidade") == 'Telef Medio 128GB')
 
     .withColumn(
         "SMAPE_MatrizNeogrid",
@@ -474,7 +708,7 @@ import plotly.express as px
 
 df_filial_mean = (
     df_comparacao['TELEFONIA']
-    .filter(F.col("grupo_de_necessidade") == 'Telef pp')
+    #.filter(F.col("grupo_de_necessidade") == 'Telef Alto')
     .join(
         spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
         .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),

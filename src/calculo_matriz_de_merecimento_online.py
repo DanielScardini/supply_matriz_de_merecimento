@@ -188,7 +188,7 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-07-01") -> Data
 
 
     df_base = (
-        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3')
+        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3_online')
         .filter(F.col("NmAgrupamentoDiretoriaSetor") == categoria)
         .filter(F.col("DtAtual") >= data_inicio)
         .withColumn(
@@ -426,15 +426,7 @@ def calcular_medidas_centrais_com_medias_aparadas(df: DataFrame) -> DataFrame:
         df
         .withColumn("demanda_robusta",
                     F.col("QtMercadoria") + F.col("deltaRuptura"))
-        .withColumn("demanda_robusta",
-                    F.when(
-                        F.col("CdFilial").isin(2528, 3604), F.lit(0)
-                        )
-                    .otherwise(F.col("demanda_robusta"))
-                    )
     )
-
-
     
     janelas = {}
     for dias in JANELAS_MOVEIS:
@@ -495,9 +487,15 @@ def criar_de_para_filial_cd() -> DataFrame:
     print("🔄 Criando de-para filial → CD...")
     
     df_base = (
-        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3')
+        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3_online')
         .filter(F.col("DtAtual") == "2025-08-01")
         .filter(F.col("CdSku").isNotNull())
+        .withColumn("cd_primario",
+            F.when(
+                F.col("DsEstoqueLojaDeposito") == 'D', F.col("cdfilial")
+            )
+            .otherwise(F.col("cd_primario"))
+        )
     )
     
     de_para_filial_cd = (
@@ -740,8 +738,8 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
     # 1. Carregar todas as filiais ativas
     print("📊 Passo 1: Carregando todas as filiais ativas...")
     df_filiais = (
-        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
-        .select("CdFilial", "NmRegiaoGeografica", "NmPorteLoja")
+        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3_online')
+        .select("CdFilial")
         .distinct()
         .filter(F.col("CdFilial").isNotNull())
     )
@@ -754,7 +752,7 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
     # 2. Carregar todos os SKUs que existem na data especificada
     print(f"📊 Passo 2: Carregando SKUs existentes em {data_calculo}...")
     df_skus_data = (
-        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3')
+        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3_online')
         .filter(F.col("DtAtual") == data_calculo)
         .select("CdSku")
         .distinct()
@@ -782,8 +780,8 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
         "CdFilial",
         "CdSku", 
         "grupo_de_necessidade",
-        "NmRegiaoGeografica",
-        "NmPorteLoja"
+       # "NmRegiaoGeografica",
+        #"NmPorteLoja"
     )
 
 
@@ -821,12 +819,6 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         
         # 4. Definição do grupo_de_necessidade
         df_com_grupo = determinar_grupo_necessidade(categoria, df_com_mapeamentos)
-        df_com_grupo = (
-            df_com_grupo
-            .filter(
-                F.col("grupo_de_necessidade").isin('Telef pp', 'TV 50 ALTO P', 'TV 55 ALTO P')
-            )
-        )
         df_com_grupo.cache()
         
         # 5. Detecção de outliers
@@ -903,7 +895,7 @@ categorias = [
     "DIRETORIA DE TELAS",
     "DIRETORIA TELEFONIA CELULAR", 
     #"DIRETORIA DE LINHA BRANCA",
-    # "DIRETORIA LINHA LEVE",
+    #"DIRETORIA LINHA LEVE",
     # "DIRETORIA INFO/PERIFERICOS"
 ]
 
@@ -929,7 +921,7 @@ for categoria in categorias:
             .upper()
         )
         
-        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste0509"
+        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_online_teste0309"
         
         print(f"💾 Salvando matriz de merecimento para: {categoria}")
         print(f"📊 Tabela: {nome_tabela}")
@@ -977,6 +969,119 @@ print("\n" + "=" * 80)
 print("🎯 SCRIPT DE CÁLCULO CONCLUÍDO!")
 print("📋 Próximo passo: Executar script de análise de factual e comparações")
 print("=" * 80)
+
+# COMMAND ----------
+
+categoria = "DIRETORIA DE TELAS"
+data_inicio = "2024-07-01"
+data_calculo = "2025-08-30"
+
+# 1. Carregamento dos dados base
+df_base = carregar_dados_base(categoria, data_inicio)
+df_base.cache()
+df_base.filter(F.col("CdFilial") == 1200).display()
+
+# COMMAND ----------
+
+# 2. Carregamento dos mapeamentos
+de_para_modelos, de_para_gemeos = carregar_mapeamentos_produtos(categoria)  
+
+# 3. Aplicação dos mapeamentos
+df_com_mapeamentos = aplicar_mapeamentos_produtos(
+    df_base, categoria, de_para_modelos, de_para_gemeos
+)
+
+# 4. Definição do grupo_de_necessidade
+df_com_grupo = determinar_grupo_necessidade(categoria, df_com_mapeamentos)
+df_com_grupo.cache()
+df_com_grupo.display()
+
+# COMMAND ----------
+
+spark.table('data_engineering_prd.app_operacoesloja.roteirizacaocentrodistribuicao').display()
+
+
+# COMMAND ----------
+
+# 5. Detecção de outliers
+df_stats, df_meses_atipicos = detectar_outliers_meses_atipicos(df_com_grupo, categoria)
+
+# 6. Filtragem de meses atípicos
+df_filtrado = filtrar_meses_atipicos(df_com_grupo, df_meses_atipicos)
+
+# 7. Cálculo das medidas centrais
+df_com_medidas = calcular_medidas_centrais_com_medias_aparadas(df_filtrado)
+
+# 8. Consolidação final
+df_final = consolidar_medidas(df_com_medidas)
+
+df_final_sem_entreposto = (
+    df_final
+    .join(
+        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaocentrodistribuicao')
+        .select('CdFilial', 'NmTipoFilial')
+    )
+    .filter(~F.col("NmTipoFilial").isin("Entreposto", "TERMINAL"))
+)
+df_final_sem_entreposto.cache()
+
+
+df_final_sem_entreposto.display()
+
+# COMMAND ----------
+
+# 9. Cálculo de merecimento por CD e filial
+print("=" * 80)
+print("🔄 Iniciando cálculo de merecimento...")
+
+# 9.1 Merecimento a nível CD
+df_merecimento_cd = calcular_merecimento_cd(df_final, data_calculo, categoria)
+
+df_merecimento_cd.cache()
+df_merecimento_cd.display()
+
+# COMMAND ----------
+
+# 9.2 Merecimento interno ao CD
+df_merecimento_interno = calcular_merecimento_interno_cd(df_final, data_calculo, categoria)
+
+df_merecimento_interno.cache()
+df_merecimento_interno.display()
+
+# COMMAND ----------
+
+# 9.3 Merecimento final
+df_merecimento_final = calcular_merecimento_final(df_merecimento_cd, df_merecimento_interno)
+
+# Criar o esqueleto
+df_esqueleto = criar_esqueleto_matriz_completa(df_com_grupo, "2025-08-30")
+
+# Primeiro, identificar todas as colunas de merecimento final
+colunas_merecimento_final = [col for col in df_merecimento_final.columns 
+                        if col.startswith('Merecimento_Final_')]
+
+
+# Criar dicionário de fillna
+fillna_dict = {col: 0.0 for col in colunas_merecimento_final}
+
+df_merecimento_sku_filial = (
+    df_esqueleto
+    .join(
+        df_merecimento_final
+        .select('grupo_de_necessidade', 'CdFilial', *colunas_merecimento_final)
+        .dropDuplicates(subset=['grupo_de_necessidade', 'CdFilial']), 
+        on=['grupo_de_necessidade', 'CdFilial'], 
+        how='left'
+    )
+    .fillna(fillna_dict)
+)
+
+print("=" * 80)
+print(f"✅ Cálculo da matriz de merecimento concluído para: {categoria}")
+print(f"📊 Total de registros finais: {df_merecimento_sku_filial.count():,}")
+
+df_merecimento_sku_filial.cache()
+df_merecimento_sku_filial.filter(F.col("CdFilial") == 1401).display()
 
 # COMMAND ----------
 
