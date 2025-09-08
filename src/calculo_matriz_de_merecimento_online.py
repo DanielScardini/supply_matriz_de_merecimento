@@ -36,6 +36,8 @@ hoje = datetime.now() - timedelta(days=1)
 hoje_str = hoje.strftime("%Y-%m-%d")
 hoje_int = int(hoje.strftime("%Y%m%d"))
 
+FILIAIS_OUTLET = [2528, 3604]
+
 # COMMAND ----------
 
 def get_data_inicio(min_meses: int = 18, hoje: datetime | None = None) -> datetime:
@@ -156,6 +158,8 @@ def determinar_grupo_necessidade(categoria: str, df: DataFrame) -> DataFrame:
             "tipo_agrupamento",
             F.lit(regra["tipo_agrupamento"])
         ).drop("DsVoltagem_filled")
+
+        
         
         print(f"✅ Grupo de necessidade definido para '{categoria}' (com DsVoltagem):")
         print(f"  • Coluna origem: {coluna_origem} + DsVoltagem")
@@ -184,8 +188,6 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-07-01") -> Data
     Carrega os dados base para a categoria especificada.
     """
     print(f"🔄 Carregando dados para categoria: {categoria}")
-    
-
 
     df_base = (
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3_online')
@@ -426,8 +428,17 @@ def calcular_medidas_centrais_com_medias_aparadas(df: DataFrame) -> DataFrame:
         df
         .withColumn("demanda_robusta",
                     F.col("QtMercadoria") + F.col("deltaRuptura"))
-    )
+        .withColumn("demanda_robusta",
+                    F.when(
+                        F.col("CdFilial").isin(FILIAIS_OUTLET), F.lit(0)
+                        )
+                    .otherwise(F.col("demanda_robusta"))
+                    )
+    )       
     
+    lista = ", ".join(str(f) for f in FILIAIS_OUTLET)
+    print(f"🏬 Zerando a demanda das filiais [{lista}] ⚠️ pois não são abastecidas via CD normalmente.")
+
     janelas = {}
     for dias in JANELAS_MOVEIS:
         janelas[dias] = Window.partitionBy("CdSku", "CdFilial").orderBy("DtAtual").rowsBetween(-dias, 0)
@@ -490,23 +501,24 @@ def criar_de_para_filial_cd() -> DataFrame:
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3_online')
         .filter(F.col("DtAtual") == "2025-08-01")
         .filter(F.col("CdSku").isNotNull())
-        .withColumn("cd_primario",
+        .withColumn("cd_secundario",
             F.when(
                 F.col("DsEstoqueLojaDeposito") == 'D', F.col("cdfilial")
             )
-            .otherwise(F.col("cd_primario"))
+            .otherwise(F.col("cd_secundario"))
         )
     )
     
     de_para_filial_cd = (
         df_base
-        .select("cdfilial", "cd_primario")
+        .select("cdfilial", "cd_secundario")
         .distinct()
         .filter(F.col("cdfilial").isNotNull())
         .withColumn(
-            "cd_primario",
-            F.coalesce(F.col("cd_primario"), F.lit("SEM_CD"))
+            "cd_vinculo",
+            F.coalesce(F.col("cd_secundario"), F.lit("SEM_CD"))
         )
+        .drop("cd_secundario")
     )
     
     print(f"✅ De-para filial → CD criado: {de_para_filial_cd.count():,} filiais")
@@ -546,7 +558,7 @@ def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) ->
     
     df_merecimento_cd = (
         df_com_cd
-        .groupBy("cd_primario", "grupo_de_necessidade")
+        .groupBy("cd_vinculo", "grupo_de_necessidade")
         .agg(*aggs_cd)
     )
     
@@ -570,8 +582,8 @@ def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) ->
 
     df_merecimento_cd = (
         df_merecimento_cd
-        .orderBy('cd_primario', 'grupo_de_necessidade')
-        .dropDuplicates(subset=['cd_primario', 'grupo_de_necessidade'])
+        .orderBy('cd_vinculo', 'grupo_de_necessidade')
+        .dropDuplicates(subset=['cd_vinculo', 'grupo_de_necessidade'])
     )
     print(f"✅ Merecimento CD calculado: {df_merecimento_cd.count():,} registros")
     return df_merecimento_cd
@@ -605,12 +617,12 @@ def calcular_merecimento_interno_cd(df: DataFrame, data_calculo: str, categoria:
     aggs = [F.sum(F.coalesce(F.col(m), F.lit(0))).alias(m) for m in medidas]
     df_filial = (
         df_com_cd
-        .groupBy("CdFilial", "cd_primario", "grupo_de_necessidade")
+        .groupBy("CdFilial", "cd_vinculo", "grupo_de_necessidade")
         .agg(*aggs)
     )
     
     # Janela no nível cd_primario × grupo_de_necessidade
-    w_cd_grp = Window.partitionBy("cd_primario", "grupo_de_necessidade")
+    w_cd_grp = Window.partitionBy("cd_vinculo", "grupo_de_necessidade")
     df_out = df_filial
     for m in medidas:
         df_out = (
@@ -643,7 +655,7 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
     ]
     
     # 1. Preparar dados do merecimento CD (cd_primario x grupo_de_necessidade)
-    colunas_cd = ["cd_primario", "grupo_de_necessidade"]
+    colunas_cd = ["cd_vinculo", "grupo_de_necessidade"]
     for medida in medidas_disponiveis:
         if f"Merecimento_CD_{medida}" in df_merecimento_cd.columns:
             colunas_cd.append(f"Merecimento_CD_{medida}")
@@ -655,19 +667,19 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
     df_merecimento_interno_com_cd = (
         df_merecimento_interno
         .join(de_para_filial_cd, on="CdFilial", how="left")
-        .withColumn("cd_primario_final", F.coalesce(de_para_filial_cd["cd_primario"], F.lit("SEM_CD")))
-        .drop("cd_primario")  # Remove a coluna ambígua
-        .withColumnRenamed("cd_primario_final", "cd_primario")  # Renomeia para o nome final
+        .withColumn("cd_vinculo_final", F.coalesce(de_para_filial_cd["cd_vinculo"], F.lit("SEM_CD")))
+        .drop("cd_vinculo")  # Remove a coluna ambígua
+        .withColumnRenamed("cd_vinculo_final", "cd_vinculo")  # Renomeia para o nome final
     )
     
     # 3. Join entre merecimento CD e merecimento interno
     df_merecimento_final = (
         df_merecimento_interno_com_cd
-        .orderBy("CdFilial", "cd_primario", "grupo_de_necessidade")
-        .dropDuplicates(subset=["CdFilial", "cd_primario", "grupo_de_necessidade"])
+        .orderBy("CdFilial", "cd_vinculo", "grupo_de_necessidade")
+        .dropDuplicates(subset=["CdFilial", "cd_vinculo", "grupo_de_necessidade"])
         .join(
             df_merecimento_cd_limpo,
-            on=["cd_primario", "grupo_de_necessidade"],
+            on=["cd_vinculo", "grupo_de_necessidade"],
             how="left"
         )
     )
@@ -921,7 +933,7 @@ for categoria in categorias:
             .upper()
         )
         
-        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_online_teste0309"
+        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_online_teste0809"
         
         print(f"💾 Salvando matriz de merecimento para: {categoria}")
         print(f"📊 Tabela: {nome_tabela}")
@@ -931,7 +943,7 @@ for categoria in categorias:
             .write
             .format("delta")
             .mode("overwrite")
-            .option("mergeSchema", "true")
+            .option("overwriteSchema", "true")
             .saveAsTable(nome_tabela)
         )
         
@@ -969,119 +981,6 @@ print("\n" + "=" * 80)
 print("🎯 SCRIPT DE CÁLCULO CONCLUÍDO!")
 print("📋 Próximo passo: Executar script de análise de factual e comparações")
 print("=" * 80)
-
-# COMMAND ----------
-
-categoria = "DIRETORIA DE TELAS"
-data_inicio = "2024-07-01"
-data_calculo = "2025-08-30"
-
-# 1. Carregamento dos dados base
-df_base = carregar_dados_base(categoria, data_inicio)
-df_base.cache()
-df_base.filter(F.col("CdFilial") == 1200).display()
-
-# COMMAND ----------
-
-# 2. Carregamento dos mapeamentos
-de_para_modelos, de_para_gemeos = carregar_mapeamentos_produtos(categoria)  
-
-# 3. Aplicação dos mapeamentos
-df_com_mapeamentos = aplicar_mapeamentos_produtos(
-    df_base, categoria, de_para_modelos, de_para_gemeos
-)
-
-# 4. Definição do grupo_de_necessidade
-df_com_grupo = determinar_grupo_necessidade(categoria, df_com_mapeamentos)
-df_com_grupo.cache()
-df_com_grupo.display()
-
-# COMMAND ----------
-
-spark.table('data_engineering_prd.app_operacoesloja.roteirizacaocentrodistribuicao').display()
-
-
-# COMMAND ----------
-
-# 5. Detecção de outliers
-df_stats, df_meses_atipicos = detectar_outliers_meses_atipicos(df_com_grupo, categoria)
-
-# 6. Filtragem de meses atípicos
-df_filtrado = filtrar_meses_atipicos(df_com_grupo, df_meses_atipicos)
-
-# 7. Cálculo das medidas centrais
-df_com_medidas = calcular_medidas_centrais_com_medias_aparadas(df_filtrado)
-
-# 8. Consolidação final
-df_final = consolidar_medidas(df_com_medidas)
-
-df_final_sem_entreposto = (
-    df_final
-    .join(
-        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaocentrodistribuicao')
-        .select('CdFilial', 'NmTipoFilial')
-    )
-    .filter(~F.col("NmTipoFilial").isin("Entreposto", "TERMINAL"))
-)
-df_final_sem_entreposto.cache()
-
-
-df_final_sem_entreposto.display()
-
-# COMMAND ----------
-
-# 9. Cálculo de merecimento por CD e filial
-print("=" * 80)
-print("🔄 Iniciando cálculo de merecimento...")
-
-# 9.1 Merecimento a nível CD
-df_merecimento_cd = calcular_merecimento_cd(df_final, data_calculo, categoria)
-
-df_merecimento_cd.cache()
-df_merecimento_cd.display()
-
-# COMMAND ----------
-
-# 9.2 Merecimento interno ao CD
-df_merecimento_interno = calcular_merecimento_interno_cd(df_final, data_calculo, categoria)
-
-df_merecimento_interno.cache()
-df_merecimento_interno.display()
-
-# COMMAND ----------
-
-# 9.3 Merecimento final
-df_merecimento_final = calcular_merecimento_final(df_merecimento_cd, df_merecimento_interno)
-
-# Criar o esqueleto
-df_esqueleto = criar_esqueleto_matriz_completa(df_com_grupo, "2025-08-30")
-
-# Primeiro, identificar todas as colunas de merecimento final
-colunas_merecimento_final = [col for col in df_merecimento_final.columns 
-                        if col.startswith('Merecimento_Final_')]
-
-
-# Criar dicionário de fillna
-fillna_dict = {col: 0.0 for col in colunas_merecimento_final}
-
-df_merecimento_sku_filial = (
-    df_esqueleto
-    .join(
-        df_merecimento_final
-        .select('grupo_de_necessidade', 'CdFilial', *colunas_merecimento_final)
-        .dropDuplicates(subset=['grupo_de_necessidade', 'CdFilial']), 
-        on=['grupo_de_necessidade', 'CdFilial'], 
-        how='left'
-    )
-    .fillna(fillna_dict)
-)
-
-print("=" * 80)
-print(f"✅ Cálculo da matriz de merecimento concluído para: {categoria}")
-print(f"📊 Total de registros finais: {df_merecimento_sku_filial.count():,}")
-
-df_merecimento_sku_filial.cache()
-df_merecimento_sku_filial.filter(F.col("CdFilial") == 1401).display()
 
 # COMMAND ----------
 

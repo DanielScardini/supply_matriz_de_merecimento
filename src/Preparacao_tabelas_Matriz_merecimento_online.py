@@ -29,6 +29,15 @@ hoje_int = int(hoje.strftime("%Y%m%d"))
 
 print(hoje, hoje_str, hoje_int)
 
+DE_PARA_CONSOLIDACAO_CDS = {
+  14  : 1401,
+  1635: 1200,
+  1500: 1200,
+  1640: 1401,
+  1088: 1200,
+  4400: None
+}
+
 # COMMAND ----------
 
 def get_data_inicio(hoje: datetime | date | None = None) -> datetime:
@@ -42,7 +51,7 @@ def get_data_inicio(hoje: datetime | date | None = None) -> datetime:
     else:
         hoje_d = hoje
 
-    total_meses = hoje_d.year * 12 + hoje_d.month - 4
+    total_meses = hoje_d.year * 12 + hoje_d.month - 3
     ano = total_meses // 12
     mes = total_meses % 12
     if mes == 0:
@@ -103,81 +112,88 @@ def load_estoque_loja_data(spark: SparkSession) -> DataFrame:
         )
         .dropDuplicates(["DtAtual", "CdSku", "CdFilial"])
 
-        #### Embutindo CD 14 no 1401
-        .withColumn("CdFilial",
-                    F.when
-                    (
-                        F.col("CdFilial") == 14, F.lit(1401)
-                    )
-                    .otherwise(F.col("CdFilial"))
-        )
-
     )
 
-def consolidar_filial_14_para_1401(df: DataFrame) -> DataFrame:
+def consolidar_CD_dentro_de_outro(df: DataFrame, dict_CDs: dict) -> DataFrame:
     """
-    Consolida 14 -> 1401.
+    Consolida cd_anterior -> cd_posterior com base em dict_CDs.
     - Chave: DtAtual, CdSku, CdFilial(target)
     - Numéricos: soma
-    - Categorias: pegar do 1401; se não houver, usar qualquer disponível
-    - DDE recalculado = sum(VrTotalVv) / sum(VrVndCmv)
+    - DDE: média (mantendo sua lógica original)
+    - Categorias: preferir dado do cd_posterior; se não houver, usar qualquer disponível
     """
-    # manter original para seleção de categorias
+    # substituir None por 0 no dicionário
+    dict_norm = {int(k): (int(v) if v is not None else 0) for k, v in dict_CDs.items()}
+
+    # criar mapping dataframe
+    map_df = df.sparkSession.createDataFrame(
+        [(k, v) for k, v in dict_norm.items()],
+        ["cd_anterior", "cd_posterior"]
+    )
+
+
+    # marcar original e definir alvo (se não estiver no mapa, mantém a própria filial)
     df_aug = (
         df
         .withColumn("CdFilialOriginal", F.col("CdFilial"))
-        .withColumn("CdFilial", F.when(F.col("CdFilial") == 14, F.lit(1401)).otherwise(F.col("CdFilial")))
+        .join(map_df, df.CdFilial == map_df.cd_anterior, "left")
+        .withColumn("CdFilial", F.coalesce(F.col("cd_posterior"), F.col("CdFilial")))
+        .drop("cd_anterior", "cd_posterior")
     )
 
-    chave = ["DtAtual", "CdSku", "CdFilial", "DsSku",
-        "DsSetor",
-        "DsCurva",
-        "DsCurvaAbcLoja",
-        "StLinha",
-        "DsObrigatorio",
-        "DsVoltagem",
-        "DsEstoqueLojaDeposito",
-        "TipoEntrega",
-        "ClassificacaoDDE",]
+    # chave de agregação (mantida enxuta para permitir a consolidação)
+    chave = ["DtAtual", "CdSku", "CdFilial"]
 
-    # colunas numéricas a somar
+    # numéricos conforme sua lógica
     num_cols = {
         "QtdEstoqueCDVinculado": "sum",
         "EstoqueLoja": "sum",
-        "DDE": "mean"
+        "DDE": "mean",
     }
 
-    # colunas categóricas: preferir 1401
-    cat_cols = [
-        "ClassificacaoDDE",
-    ]
+    # categorias com preferência do cd_posterior
+    cat_cols = ["ClassificacaoDDE"]
 
     agg_exprs = []
-
-    # numéricos
     for c, fn in num_cols.items():
         agg_exprs.append(getattr(F, fn)(F.col(c)).alias(c))
 
-    # categorias: coalesce(max(IF(orig=1401, col)), max(col))
     for c in cat_cols:
         agg_exprs.append(
             F.coalesce(
-                F.max(F.when(F.col("CdFilialOriginal") == 1401, F.col(c))),
+                F.max(F.when(F.col("CdFilialOriginal") == F.col("CdFilial"), F.col(c))),
                 F.max(F.col(c))
             ).alias(c)
         )
 
-    # data_ingestao mais recente
     agg_exprs.append(F.max("data_ingestao").alias("data_ingestao"))
 
     df_agg = df_aug.groupBy(chave).agg(*agg_exprs)
 
-    return df_agg
+    return df_agg.filter(~F.col("CdFilial").isin(0))
 
-# Exemplo de uso com seu dataframe já carregado:
+# Exemplo de uso:
+dict_CDs = DE_PARA_CONSOLIDACAO_CDS
+
+
+# inverter agrupando
+agrupado = {}
+for cd_ant, cd_pos in dict_CDs.items():
+    agrupado.setdefault(cd_pos, []).append(cd_ant)
+
+# imprimir
+for cd_pos, cds_ant in agrupado.items():
+    lista = ", ".join(str(c) for c in sorted(cds_ant))
+    if cd_pos is None:
+        print(f"📦 Toda a demanda dos CDs [{lista}] ❌ será ignorada.")
+    else:
+        print(f"📦 Toda a demanda dos CDs [{lista}] ➡️ será agregada no CD {cd_pos} 🔗 "
+              f"e o merecimento ficará consolidado no CD {cd_pos} 🤝")
+        
+
 df_estoque_loja = load_estoque_loja_data(spark)
 
-df_consolidado = consolidar_filial_14_para_1401(df_estoque_loja)
+df_consolidado = consolidar_CD_dentro_de_outro(df_estoque_loja, dict_CDs)
 df_consolidado.cache()
 df_consolidado#.display()
 
@@ -258,8 +274,25 @@ def build_sales_view(
         - merchandising attributes from mercadoria table
     """
     # load tables
-    df_rateada = spark.table("app_venda.vendafaturadarateada")
-    df_nao_rateada = spark.table("app_venda.vendafaturadanaorateada")
+    df_rateada = spark.table("app_venda.vendafaturadarateada").filter(
+            F.col("DtAprovacao").between(start_date, end_date)
+            & (F.col("VrOperacao") >= 0)
+            & (F.col("VrCustoContabilFilialSku") >= 0)
+        )    
+        
+    df_nao_rateada = (
+        spark.table("app_venda.vendafaturadanaorateada")
+        .select("ChaveFatos","QtMercadoria")
+        .filter(F.col("QtMercadoria") > 0)
+    )
+
+    # normalizar None → 0 se quiser descartar depois
+    dict_norm = {int(k): (int(v) if v is not None else 0) for k, v in dict_CDs.items()}
+
+    # construir mapa literal
+    mapping_expr = F.create_map(
+        [F.lit(x) for kv in dict_norm.items() for x in kv]
+    )
 
     # unify and filter
     df = (
@@ -278,16 +311,15 @@ def build_sales_view(
             F.date_format(F.to_date(F.col("DtAprovacao").cast("string"), "yyyyMMdd"), "yyyyMM").cast("int")
         )
         .withColumnRenamed("CdFilialEmissao", "CdFilial")
-
-        #### Agregação do CD 14 embaixo do 1401
         .withColumn("CdFilial",
-                    F.when(F.col("CdFilial") == 14,
-                           F.lit(1401))
-                    .otherwise(F.col("CdFilial"))
-                    )
-
+            F.coalesce(
+                mapping_expr.getItem(F.col("CdFilial")),  # substitui se estiver no dict
+                F.col("CdFilial")                        # mantém caso contrário
+                )
+            ) 
         .withColumn("DtAtual",
             F.date_format(F.to_date(F.col("DtAprovacao").cast("string"), "yyyyMMdd"), "yyyy-MM-dd"))
+        .filter(F.col("CdFilial") != 0)
     )
 
     # aggregate
@@ -770,10 +802,6 @@ df_merecimento_base_cd_loja.cache()
 
 # COMMAND ----------
 
-df_merecimento_base_cd_loja#.display()
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC ## Salvamento da Tabela Final
 
@@ -1225,9 +1253,3 @@ def monitor_memory_usage(spark: SparkSession) -> None:
 # Executar processamento incremental
 # Descomente a linha abaixo para executar
 process_incremental_from_start_date(spark, data_inicio, hoje, batch_size_months=4)
-
-# COMMAND ----------
-
-# MAGIC %sql SELECT * FROM databox.bcg_comum.supply_base_merecimento_diario_v3_online
-# MAGIC
-# MAGIC WHERE DtAtual > 2025-09-01

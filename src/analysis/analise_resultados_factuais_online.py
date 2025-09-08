@@ -90,12 +90,12 @@ de_para_modelos_gemeos = (
 df_matriz_nova = {}
 
 df_matriz_nova['TELAS'] = (
-  spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_online')
+  spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste0809')
   .select('grupo_de_necessidade','CdFilial', 'CdSku', 'Merecimento_Final_Media90_Qt_venda_sem_ruptura')
 )
 
 df_matriz_nova['TELEFONIA'] = (
-  spark.table('databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online')
+  spark.table('databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste0809')
   .select('grupo_de_necessidade','CdFilial', 'CdSku', 'Merecimento_Final_Media90_Qt_venda_sem_ruptura')
 
 )

@@ -90,12 +90,12 @@ de_para_modelos_gemeos = (
 df_matriz_nova = {}
 
 df_matriz_nova['TELAS'] = (
-  spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas')
+  spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_teste0809')
   .select('grupo_de_necessidade','CdFilial', 'CdSku', 'Merecimento_Final_Media90_Qt_venda_sem_ruptura')
 )
 
 df_matriz_nova['TELEFONIA'] = (
-  spark.table('databox.bcg_comum.supply_matriz_merecimento_telefonia_celular')
+  spark.table('databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste0809')
   .select('grupo_de_necessidade','CdFilial', 'CdSku', 'Merecimento_Final_Media90_Qt_venda_sem_ruptura')
 
 )
@@ -164,7 +164,7 @@ df_proporcao_factual_pct = (
 
 df_proporcao_factual_pct.cache()
 
-df_proporcao_factual_pct.filter(F.col("grupo_de_necessidade") == 'Telef Medio 128GB').display()
+df_proporcao_factual_pct.filter(F.col("grupo_de_necessidade") == 'Telef pp').display()
 
 # COMMAND ----------
 
@@ -358,8 +358,8 @@ df_result_wsmape = df_wsmape.agg(
 )
 
 # # resultados
-# df_result_smape.display()
-# df_result_wsmape.display()
+df_result_smape.display()
+df_result_wsmape.display()
 
 # COMMAND ----------
 

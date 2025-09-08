@@ -36,6 +36,9 @@ hoje = datetime.now() - timedelta(days=1)
 hoje_str = hoje.strftime("%Y-%m-%d")
 hoje_int = int(hoje.strftime("%Y%m%d"))
 
+FILIAIS_OUTLET = [2528, 3604]
+
+
 # COMMAND ----------
 
 def get_data_inicio(min_meses: int = 18, hoje: datetime | None = None) -> datetime:
@@ -185,8 +188,6 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-07-01") -> Data
     """
     print(f"🔄 Carregando dados para categoria: {categoria}")
     
-
-
     df_base = (
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3')
         .filter(F.col("NmAgrupamentoDiretoriaSetor") == categoria)
@@ -428,13 +429,14 @@ def calcular_medidas_centrais_com_medias_aparadas(df: DataFrame) -> DataFrame:
                     F.col("QtMercadoria") + F.col("deltaRuptura"))
         .withColumn("demanda_robusta",
                     F.when(
-                        F.col("CdFilial").isin(2528, 3604), F.lit(0)
+                        F.col("CdFilial").isin(FILIAIS_OUTLET), F.lit(0)
                         )
                     .otherwise(F.col("demanda_robusta"))
                     )
     )
 
-
+    lista = ", ".join(str(f) for f in FILIAIS_OUTLET)
+    print(f"🏬 Zerando a demanda das filiais [{lista}] ⚠️ pois não são abastecidas via CD normalmente.")
     
     janelas = {}
     for dias in JANELAS_MOVEIS:
@@ -502,13 +504,14 @@ def criar_de_para_filial_cd() -> DataFrame:
     
     de_para_filial_cd = (
         df_base
-        .select("cdfilial", "cd_primario")
+        .select("cdfilial", "cd_secundario")
         .distinct()
         .filter(F.col("cdfilial").isNotNull())
         .withColumn(
-            "cd_primario",
-            F.coalesce(F.col("cd_primario"), F.lit("SEM_CD"))
+            "cd_vinculo",
+            F.coalesce(F.col("cd_secundario"), F.lit("SEM_CD"))
         )
+        .drop("cd_secundario")
     )
     
     print(f"✅ De-para filial → CD criado: {de_para_filial_cd.count():,} filiais")
@@ -548,7 +551,7 @@ def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) ->
     
     df_merecimento_cd = (
         df_com_cd
-        .groupBy("cd_primario", "grupo_de_necessidade")
+        .groupBy("cd_vinculo", "grupo_de_necessidade")
         .agg(*aggs_cd)
     )
     
@@ -572,8 +575,8 @@ def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) ->
 
     df_merecimento_cd = (
         df_merecimento_cd
-        .orderBy('cd_primario', 'grupo_de_necessidade')
-        .dropDuplicates(subset=['cd_primario', 'grupo_de_necessidade'])
+        .orderBy('cd_vinculo', 'grupo_de_necessidade')
+        .dropDuplicates(subset=['cd_vinculo', 'grupo_de_necessidade'])
     )
     print(f"✅ Merecimento CD calculado: {df_merecimento_cd.count():,} registros")
     return df_merecimento_cd
@@ -607,12 +610,12 @@ def calcular_merecimento_interno_cd(df: DataFrame, data_calculo: str, categoria:
     aggs = [F.sum(F.coalesce(F.col(m), F.lit(0))).alias(m) for m in medidas]
     df_filial = (
         df_com_cd
-        .groupBy("CdFilial", "cd_primario", "grupo_de_necessidade")
+        .groupBy("CdFilial", "cd_vinculo", "grupo_de_necessidade")
         .agg(*aggs)
     )
     
-    # Janela no nível cd_primario × grupo_de_necessidade
-    w_cd_grp = Window.partitionBy("cd_primario", "grupo_de_necessidade")
+    # Janela no nível cd_vinculo × grupo_de_necessidade
+    w_cd_grp = Window.partitionBy("cd_vinculo", "grupo_de_necessidade")
     df_out = df_filial
     for m in medidas:
         df_out = (
@@ -644,32 +647,32 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
         "MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada360_Qt_venda_sem_ruptura"
     ]
     
-    # 1. Preparar dados do merecimento CD (cd_primario x grupo_de_necessidade)
-    colunas_cd = ["cd_primario", "grupo_de_necessidade"]
+    # 1. Preparar dados do merecimento CD (cd_vinculo x grupo_de_necessidade)
+    colunas_cd = ["cd_vinculo", "grupo_de_necessidade"]
     for medida in medidas_disponiveis:
         if f"Merecimento_CD_{medida}" in df_merecimento_cd.columns:
             colunas_cd.append(f"Merecimento_CD_{medida}")
     
     df_merecimento_cd_limpo = df_merecimento_cd.select(*colunas_cd)
     
-    # 2. Adicionar cd_primario ao merecimento interno (especificando qual coluna usar)
+    # 2. Adicionar cd_vinculo ao merecimento interno (especificando qual coluna usar)
     de_para_filial_cd = criar_de_para_filial_cd()
     df_merecimento_interno_com_cd = (
         df_merecimento_interno
         .join(de_para_filial_cd, on="CdFilial", how="left")
-        .withColumn("cd_primario_final", F.coalesce(de_para_filial_cd["cd_primario"], F.lit("SEM_CD")))
-        .drop("cd_primario")  # Remove a coluna ambígua
-        .withColumnRenamed("cd_primario_final", "cd_primario")  # Renomeia para o nome final
+        .withColumn("cd_vinculo_final", F.coalesce(de_para_filial_cd["cd_vinculo"], F.lit("SEM_CD")))
+        .drop("cd_vinculo")  # Remove a coluna ambígua
+        .withColumnRenamed("cd_vinculo_final", "cd_vinculo")  # Renomeia para o nome final
     )
     
     # 3. Join entre merecimento CD e merecimento interno
     df_merecimento_final = (
         df_merecimento_interno_com_cd
-        .orderBy("CdFilial", "cd_primario", "grupo_de_necessidade")
-        .dropDuplicates(subset=["CdFilial", "cd_primario", "grupo_de_necessidade"])
+        .orderBy("CdFilial", "cd_vinculo", "grupo_de_necessidade")
+        .dropDuplicates(subset=["CdFilial", "cd_vinculo", "grupo_de_necessidade"])
         .join(
             df_merecimento_cd_limpo,
-            on=["cd_primario", "grupo_de_necessidade"],
+            on=["cd_vinculo", "grupo_de_necessidade"],
             how="left"
         )
     )
@@ -929,7 +932,7 @@ for categoria in categorias:
             .upper()
         )
         
-        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste0509"
+        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste0809"
         
         print(f"💾 Salvando matriz de merecimento para: {categoria}")
         print(f"📊 Tabela: {nome_tabela}")
