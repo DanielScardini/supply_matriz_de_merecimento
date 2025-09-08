@@ -48,7 +48,7 @@ categorias_list = [
 # COMMAND ----------
 
 (
-    spark.table('databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste0509')
+    spark.table('databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste0309')
     .select(
             "CdFilial", "NmPorteLoja", "NmRegiaoGeografica", "CdSku", "grupo_de_necessidade", 
             F.round(100*F.col("Merecimento_Final_Media90_Qt_venda_sem_ruptura"), 3).alias("Merecimento_Percentual_offline"),
@@ -56,7 +56,7 @@ categorias_list = [
             )
     #.filter(F.col("CdFilial").isin(2528, 3604))
 
-    .filter(F.col("grupo_de_necessidade").isin('Telef pp'))
+    #.filter(F.col("grupo_de_necessidade").isin('Telef pp'))
    # .groupBy("CdSku").agg(F.sum("Merecimento_Percentual_offline"))
 ).display()
     
@@ -75,13 +75,13 @@ categorias_list = [
 # COMMAND ----------
 
 (
-    spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_teste0509')
+    spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_teste0309')
     .select(
             "CdFilial", "NmPorteLoja", "NmRegiaoGeografica", "CdSku", "grupo_de_necessidade", 
             F.round(100*F.col("Merecimento_Final_Media90_Qt_venda_sem_ruptura"), 3).alias("Merecimento_Percentual_offline"),
             #F.round(100*F.col("Merecimento_Final_Media180_Qt_venda_sem_ruptura"), 2).alias("Merecimento_MedMovel180")
             )
-    .filter(F.col("grupo_de_necessidade").isin('TV 50 ALTO P', 'TV 55 ALTO P'))
+    #.filter(F.col("grupo_de_necessidade").isin('TV 50 ALTO P', 'TV 55 ALTO P'))
     #.filter(F.col("CdFilial").isin(2528, 3604))
 
     #.groupBy("CdSku").agg(F.sum("Merecimento_Percentual_offline"))
