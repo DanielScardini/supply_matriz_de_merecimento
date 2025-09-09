@@ -37,6 +37,11 @@ categorias_teste = ['TELAS', 'TELEFONIA']
 
 # COMMAND ----------
 
+spark.table('databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste0509').display()
+
+
+# COMMAND ----------
+
 df_merecimento_offline = {}
 df_merecimento_online = {}
 
@@ -45,7 +50,7 @@ df_merecimento_offline['TELAS'] = (
     spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_teste0509')
     .select('CdFilial', 'grupo_de_necessidade', 'CdSku',
             F.round(100*F.col('Merecimento_Final_Media90_Qt_venda_sem_ruptura'), 2).alias('merecimento_percentual')
-    ).dropDuplicates(subset=['CdFilial', 'grupo_de_necessidade'])
+    ).dropDuplicates(subset=['CdFilial', 'grupo_de_necessidade','CdSku',])
     .join(spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
           .select("CdFilial", "NmFilial", "NmRegiaoGeografica", "NmPorteLoja").distinct(),
           how="left",
@@ -57,7 +62,7 @@ df_merecimento_online['TELAS'] = (
     spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste0809')
     .select('CdFilial', 'grupo_de_necessidade', 'CdSku',
             F.round(100*F.col('Merecimento_Final_Media90_Qt_venda_sem_ruptura'), 2).alias('merecimento_percentual')
-    ).dropDuplicates(subset=['CdFilial', 'grupo_de_necessidade'])
+    ).dropDuplicates(subset=['CdFilial', 'grupo_de_necessidade', 'CdSku',])
     .join(spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
           .select("CdFilial", "NmFilial", "NmRegiaoGeografica", "NmPorteLoja").distinct(),
           how="left",
@@ -70,7 +75,7 @@ df_merecimento_offline['TELEFONIA'] = (
     spark.table('databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste0509')
     .select('CdFilial', 'grupo_de_necessidade', 'CdSku',
             F.round(100*F.col('Merecimento_Final_Media90_Qt_venda_sem_ruptura'), 2).alias('merecimento_percentual')
-    ).dropDuplicates(subset=['CdFilial', 'grupo_de_necessidade'])
+    ).dropDuplicates(subset=['CdFilial', 'grupo_de_necessidade', 'CdSku',])
     .join(spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
           .select("CdFilial", "NmFilial", "NmRegiaoGeografica", "NmPorteLoja").distinct(),
           how="left",
@@ -82,7 +87,7 @@ df_merecimento_online['TELEFONIA'] = (
     spark.table('databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste0809')
     .select('CdFilial', 'grupo_de_necessidade', 'CdSku',
             F.round(100*F.col('Merecimento_Final_Media90_Qt_venda_sem_ruptura'), 2).alias('merecimento_percentual')
-    ).dropDuplicates(subset=['CdFilial', 'grupo_de_necessidade'])
+    ).dropDuplicates(subset=['CdFilial', 'grupo_de_necessidade', 'CdSku',])
     .join(spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
           .select("CdFilial", "NmFilial", "NmRegiaoGeografica", "NmPorteLoja").distinct(),
           how="left",
@@ -99,6 +104,10 @@ df_merecimento_online['TELEFONIA']#.display()
 produtos_do_teste = {}
 produtos_do_teste['TELAS'] = df_merecimento_offline['TELAS'].select("CdSku", "grupo_de_necessidade").distinct()
 produtos_do_teste['TELEFONIA'] = df_merecimento_offline['TELEFONIA'].select("CdSku", "grupo_de_necessidade").distinct()
+
+# COMMAND ----------
+
+produtos_do_teste['TELEFONIA'].display()
 
 # COMMAND ----------
 
@@ -147,14 +156,23 @@ def load_estoque_loja_data(spark: SparkSession, categoria: str) -> DataFrame:
         .join(
             F.broadcast(produtos_do_teste[categoria]),
             on="CdSku",
-            how="inner" 
+            how="left" 
+        )
+        .withColumn(
+            "grupo",
+            F.when(
+                F.col("grupo_de_necessidade").isNotNull(), F.lit("teste")
+            )
+            .otherwise(F.lit("controle"))
+        
+            
         )
         .dropDuplicates(["DtAtual", "CdSku", "CdFilial"])
         .withColumn("periodo_analise",
                     F.when(
                         F.col("DtAtual") <= inicio_teste, F.lit('baseline')
                     )
-                    .otherwise(F.lit('teste'))
+                    .otherwise(F.lit('piloto'))
                     )
         .withColumn("DtAtual", F.to_date(F.col("DtAtual")))
     )
@@ -176,18 +194,22 @@ df_estoque_loja['TELEFONIA'].limit(1).display()
 
 # COMMAND ----------
 
+df_estoque_loja['TELEFONIA'].display()
+
+# COMMAND ----------
+
 df_analise = {}
 
 for categoria in categorias_teste:
     
     df_analise[categoria]  =  (
             df_estoque_loja[categoria]
-            .groupBy("grupo_de_necessidade", "periodo_analise")
+            .groupBy("grupo_de_necessidade", "periodo_analise", "grupo")
             .agg(
-                F.mean("DDE").alias("DDE_medio"),
-                F.count("ClassificacaoDDE").alias("TotalCount"),
-                F.round((100*F.sum(F.when(F.col("ClassificacaoDDE") == "RUPTURA"))/F.count("ClassificacaoDDE")), 1).alias("PctRuptura")
+                F.round(F.median("DDE"), 1).alias("DDE_medio"),
+                F.round((100*F.sum(F.when(F.col("ClassificacaoDDE") == "RUPTURA", 1)))/F.count("ClassificacaoDDE"), 1).alias("PctRuptura")
             )
+            .orderBy(F.desc("grupo_de_necessidade"))
     )
 
     df_analise[categoria].display()
