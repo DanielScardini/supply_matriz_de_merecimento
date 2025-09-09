@@ -52,94 +52,28 @@ DE_PARA_CONSOLIDACAO_CDS = {
 
 # COMMAND ----------
 
-start_date = 20250701
-end_date = 20250902
+tabela_old = "databox.bcg_comum.supply_base_merecimento_diario_v3_online"
+tabela_new = "databox.bcg_comum.supply_base_merecimento_diario_v4_online"
 
-# COMMAND ----------
-
-# load tables
-df_rateada = spark.table("app_venda.vendafaturadarateada").filter(
-        F.col("DtAprovacao").between(start_date, end_date)
-        & (F.col("VrOperacao") >= 0)
-        & (F.col("VrCustoContabilFilialSku") >= 0)
-        & (F.col("NmEstadoMercadoria") != '1 - SALDO')
-)
+# 1. Checar se a new já existe
+if spark._jsparkSession.catalog().tableExists(tabela_new):
+    print(f"⚠️ A tabela {tabela_new} já existe. Pode seguir com processo de append.")
+else:
+    # 2. Pegar schema da old
+    schema_old = spark.table(tabela_old).schema
     
-df_nao_rateada = (
-    spark.table("app_venda.vendafaturadanaorateada")
-    .select("ChaveFatos","QtMercadoria")
-    .filter(F.col("QtMercadoria") > 0)
-)
-
-dict_CDs = DE_PARA_CONSOLIDACAO_CDS
-
-# normalizar None → 0 se quiser descartar depois
-dict_norm = {int(k): (int(v) if v is not None else 0) for k, v in dict_CDs.items()}
-
-# construir mapa literal
-mapping_expr = F.create_map(
-    [F.lit(x) for kv in dict_norm.items() for x in kv]
-)
-
-# unify and filter
-df = (
-    df_rateada
-
-    .filter(F.col("NmTipoNegocio") != 'LOJA FISICA')
-    .join(df_nao_rateada.select("ChaveFatos","QtMercadoria"), on="ChaveFatos")
-    .filter(
-        F.col("DtAprovacao").between(start_date, end_date)
-        & (F.col("VrOperacao") >= 0)
-        & (F.col("VrCustoContabilFilialSku") >= 0)
-        & (F.col("QtMercadoria") >= 0)
-    )        
-    .withColumn(
-        "year_month",
-        F.date_format(F.to_date(F.col("DtAprovacao").cast("string"), "yyyyMMdd"), "yyyyMM").cast("int")
-    )
-    .withColumnRenamed("CdFilialEmissao", "CdFilial")
-    .withColumn("CdFilial",
-        F.coalesce(
-            mapping_expr.getItem(F.col("CdFilial")),  # substitui se estiver no dict
-            F.col("CdFilial")                        # mantém caso contrário
-            )
-        ) 
-    .withColumn("DtAtual",
-        F.date_format(F.to_date(F.col("DtAprovacao").cast("string"), "yyyyMMdd"), "yyyy-MM-dd"))
-    .filter(F.col("CdFilial") != 0)
-)
-df.cache()
-df.display()
-
-# COMMAND ----------
-
-df.filter(F.col('UfFilialOrigem') == 'PA').display()
-
-# COMMAND ----------
-
-(
-    df
-    .filter(F.col('UfFilialOrigem') == 'PA')
-    .groupBy("CdFilial")
-    .agg(F.count("QtMercadoria").alias("QtMercadoria"))
-    .join(
-        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
-        .select("CdFilial",
-                "NmFilial",
-                "NmPorteLoja",
-                "NmUF"),
-        how="left",
-        on="CdFilial"
-        
-    )
-).display()
-
+    # 3. Criar DataFrame vazio com esse schema
+    df_empty = spark.createDataFrame([], schema_old)
+    
+    # 4. Criar tabela new
+    df_empty.write.saveAsTable(tabela_new)
+    print(f"✅ Tabela {tabela_new} criada vazia com schema de {tabela_old}.")
 
 # COMMAND ----------
 
 def get_data_inicio(hoje: datetime | date | None = None) -> datetime:
     """
-    Retorna datetime no dia 1 do mês que está 14 meses antes de 'hoje'.
+    Retorna datetime no dia 1 do mês que está 3 meses antes de 'hoje'.
     """
     if hoje is None:
         hoje_d = date.today()
@@ -186,7 +120,18 @@ def load_estoque_loja_data(spark: SparkSession) -> DataFrame:
     return (
         spark.read.table("data_engineering_prd.app_logistica.gi_boss_qualidade_estoque")
         .filter(F.col("DtAtual") >= data_inicio)
-        #.filter(F.col("StLoja") == "ATIVA")
+        .filter(
+            (
+                (F.col("StLoja") == "ATIVA") 
+                & (F.col("DsEstoqueLojaDeposito") == "L")
+            )
+            |
+            (
+                (F.col("DsEstoqueLojaDeposito") == "D")
+            )
+
+            
+        )
         #.filter(F.col("DsEstoqueLojaDeposito") == "L")
         .select(
             "CdFilial", 
@@ -375,6 +320,8 @@ def build_sales_view(
             F.col("DtAprovacao").between(start_date, end_date)
             & (F.col("VrOperacao") >= 0)
             & (F.col("VrCustoContabilFilialSku") >= 0)
+            & (F.col("NmEstadoMercadoria") != '1 - SALDO')                
+            & (F.col("NmTipoNegocio") != 'LOJA FISICA')
         )    
         
     df_nao_rateada = (
@@ -394,15 +341,7 @@ def build_sales_view(
     # unify and filter
     df = (
         df_rateada
-
-        .filter(F.col("NmTipoNegocio") != 'LOJA FISICA')
-        .join(df_nao_rateada.select("ChaveFatos","QtMercadoria"), on="ChaveFatos")
-        .filter(
-            F.col("DtAprovacao").between(start_date, end_date)
-            & (F.col("VrOperacao") >= 0)
-            & (F.col("VrCustoContabilFilialSku") >= 0)
-            & (F.col("QtMercadoria") >= 0)
-        )        
+        .join(df_nao_rateada.select("ChaveFatos","QtMercadoria"), on="ChaveFatos")    
         .withColumn(
             "year_month",
             F.date_format(F.to_date(F.col("DtAprovacao").cast("string"), "yyyyMMdd"), "yyyyMM").cast("int")
@@ -900,36 +839,6 @@ df_merecimento_base_cd_loja.cache()
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Salvamento da Tabela Final
-
-# COMMAND ----------
-
-def save_merecimento_table(df: DataFrame, table_name: str) -> None:
-    """
-    Salva DataFrame de merecimento como tabela Delta.
-    
-    Args:
-        df: DataFrame a ser salvo
-        table_name: Nome da tabela de destino
-    """
-    (
-        df.write
-        .mode("overwrite")
-        .option("overwriteSchema", "true")
-        
-        .format("delta")
-        .saveAsTable(table_name)
-    )
-
-# # Salvar tabela final
-# save_merecimento_table(
-#     df_merecimento_base_cd_loja, 
-#     "databox.bcg_comum.supply_base_merecimento_diario_v3_online"
-# )
-
-# COMMAND ----------
-
-# MAGIC %md
 # MAGIC ## 🔄 Processamento Incremental em Lotes de Meses
 
 # COMMAND ----------
@@ -1047,7 +956,7 @@ def process_monthly_batch(
     spark: SparkSession,
     start_date: datetime,
     end_date: datetime,
-    table_name: str = "databox.bcg_comum.supply_base_merecimento_diario_v3_online"
+    table_name: str = "databox.bcg_comum.supply_base_merecimento_diario_v4_online"
 ) -> DataFrame:
     """
     Processa um lote de meses específico com gestão inteligente de memória.
@@ -1142,7 +1051,7 @@ def process_monthly_batch(
         df_merecimento_lote_final.unpersist()
         print("🧹 Memória liberada: dados finais do lote")
         
-        return df_merecimento_lote_cd_loja
+        return df_merecimento_lote_cd_loja.fillna(0, subset=["Receita", "QtMercadoria", "TeveVenda", "deltaRuptura"])
         
     except Exception as e:
         # Em caso de erro, limpar cache para liberar memória
@@ -1202,7 +1111,7 @@ def process_incremental_from_start_date(
     start_date: datetime,
     end_date: datetime,
     batch_size_months: int = 3,
-    table_name: str = "databox.bcg_comum.supply_base_merecimento_diario_v3_online"
+    table_name: str = "databox.bcg_comum.supply_base_merecimento_diario_v4_online"
 ) -> None:
     """
     Processa dados incrementalmente desde a data de início até hoje com gestão de memória.

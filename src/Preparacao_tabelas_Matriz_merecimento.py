@@ -23,11 +23,30 @@ from typing import List, Optional
 
 # Inicialização do Spark
 spark = SparkSession.builder.appName("impacto_apostas").getOrCreate()
-hoje = datetime.now() - timedelta(days=1)
+hoje = datetime.now() - timedelta(days=101)
 hoje_str = hoje.strftime("%Y-%m-%d")
 hoje_int = int(hoje.strftime("%Y%m%d"))
 
 print(hoje, hoje_str, hoje_int)
+
+# COMMAND ----------
+
+tabela_old = "databox.bcg_comum.supply_base_merecimento_diario_v3"
+tabela_new = "databox.bcg_comum.supply_base_merecimento_diario_v4"
+
+# 1. Checar se a new já existe
+if spark._jsparkSession.catalog().tableExists(tabela_new):
+    print(f"⚠️ A tabela {tabela_new} já existe. Pode seguir com processo de append.")
+else:
+    # 2. Pegar schema da old
+    schema_old = spark.table(tabela_old).schema
+    
+    # 3. Criar DataFrame vazio com esse schema
+    df_empty = spark.createDataFrame([], schema_old)
+    
+    # 4. Criar tabela new
+    df_empty.write.saveAsTable(tabela_new)
+    print(f"✅ Tabela {tabela_new} criada vazia com schema de {tabela_old}.")
 
 # COMMAND ----------
 
@@ -42,7 +61,7 @@ def get_data_inicio(hoje: datetime | date | None = None) -> datetime:
     else:
         hoje_d = hoje
 
-    total_meses = hoje_d.year * 12 + hoje_d.month - 1
+    total_meses = hoje_d.year * 12 + hoje_d.month - 15
     ano = total_meses // 12
     mes = total_meses % 12
     if mes == 0:
@@ -183,21 +202,26 @@ def build_sales_view(
         - merchandising attributes from mercadoria table
     """
     # load tables
-    df_rateada = spark.table("app_venda.vendafaturadarateada")
-    df_nao_rateada = spark.table("app_venda.vendafaturadanaorateada")
-
-    # unify and filter
-    df = (
-        df_rateada
+    df_rateada =(
+        spark.table("app_venda.vendafaturadarateada")
         .filter(F.col("NmEstadoMercadoria") != '1 - SALDO')
         .filter(F.col("NmTipoNegocio") == 'LOJA FISICA')
-        .join(df_nao_rateada.select("ChaveFatos","QtMercadoria"), on="ChaveFatos")
         .filter(
             F.col("DtAprovacao").between(start_date, end_date)
             & (F.col("VrOperacao") >= 0)
             & (F.col("VrCustoContabilFilialSku") >= 0)
-            & (F.col("QtMercadoria") >= 0)
-        )        
+        )
+    )   
+        
+    df_nao_rateada = (
+        spark.table("app_venda.vendafaturadanaorateada")
+        .filter(F.col("QtMercadoria") >= 0)
+        )
+
+    # unify and filter
+    df = (
+        df_rateada
+        .join(df_nao_rateada.select("ChaveFatos","QtMercadoria"), on="ChaveFatos")     
         .withColumn(
             "year_month",
             F.date_format(F.to_date(F.col("DtAprovacao").cast("string"), "yyyyMMdd"), "yyyyMM").cast("int")
@@ -653,35 +677,6 @@ df_merecimento_base_cd_loja = create_final_merecimento_base(df_merecimento_base_
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Salvamento da Tabela Final
-
-# COMMAND ----------
-
-def save_merecimento_table(df: DataFrame, table_name: str) -> None:
-    """
-    Salva DataFrame de merecimento como tabela Delta.
-    
-    Args:
-        df: DataFrame a ser salvo
-        table_name: Nome da tabela de destino
-    """
-    (
-        df.write
-        .mode("overwrite")
-        .option("overwriteSchema", "true")
-        .format("delta")
-        .saveAsTable(table_name)
-    )
-
-# # Salvar tabela final
-# save_merecimento_table(
-#     df_merecimento_base_cd_loja, 
-#     "databox.bcg_comum.supply_base_merecimento_diario_v3"
-# )
-
-# COMMAND ----------
-
-# MAGIC %md
 # MAGIC ## 🔄 Processamento Incremental em Lotes de Meses
 
 # COMMAND ----------
@@ -799,7 +794,7 @@ def process_monthly_batch(
     spark: SparkSession,
     start_date: datetime,
     end_date: datetime,
-    table_name: str = "databox.bcg_comum.supply_base_merecimento_diario_v3"
+    table_name: str = "databox.bcg_comum.supply_base_merecimento_diario_v4"
 ) -> DataFrame:
     """
     Processa um lote de meses específico com gestão inteligente de memória.
@@ -893,7 +888,8 @@ def process_monthly_batch(
         df_merecimento_lote_final.unpersist()
         print("🧹 Memória liberada: dados finais do lote")
         
-        return df_merecimento_lote_cd_loja
+        return df_merecimento_lote_cd_loja.fillna(0, subset=["Receita", "QtMercadoria", "TeveVenda", "deltaRuptura"])
+
         
     except Exception as e:
         # Em caso de erro, limpar cache para liberar memória
@@ -952,7 +948,7 @@ def process_incremental_from_start_date(
     start_date: datetime,
     end_date: datetime,
     batch_size_months: int = 3,
-    table_name: str = "databox.bcg_comum.supply_base_merecimento_diario_v3"
+    table_name: str = "databox.bcg_comum.supply_base_merecimento_diario_v4"
 ) -> None:
     """
     Processa dados incrementalmente desde a data de início até hoje com gestão de memória.
@@ -1002,7 +998,7 @@ def process_incremental_from_start_date(
                 print(f"✅ Lote {i} processado e salvo com sucesso!")
                 
                 # Forçar garbage collection entre lotes
-                if i % 3 == 0:  # A cada 3 lotes
+                if i % 1 == 0:  # A cada 1 lotes
                     print("🔄 Forçando limpeza de memória entre lotes...")
                     spark.catalog.clearCache()
                 
