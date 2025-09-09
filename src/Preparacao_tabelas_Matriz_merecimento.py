@@ -101,8 +101,6 @@ def load_estoque_loja_data(spark: SparkSession) -> DataFrame:
         .filter(F.col("DtAtual") >= data_inicio)
         .filter(F.col("StLoja") == "ATIVA")
         .filter(F.col("DsEstoqueLojaDeposito") == "L")
-
-
         .select(
             "CdFilial", 
             "CdSku",
