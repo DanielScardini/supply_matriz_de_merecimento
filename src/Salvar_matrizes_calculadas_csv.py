@@ -123,13 +123,37 @@ spark.table('data_engineering_prd.app_operacoesloja.roteirizacaoinauguracao').di
             "grupo_de_necessidade", 
             F.round(100*F.col("Merecimento_Final_Media90_Qt_venda_sem_ruptura"), 3).alias("Merecimento_Percentual_online"),
             )
-      #.filter(F.col("grupo_de_necessidade").isin('Telef pp'))
+      .filter(F.col("grupo_de_necessidade").isin('TV 55 ALTO P', 'TV 50 ALTO P'))
       #.filter(F.col("CdSku").isin(52))
-      .join(
-              spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
-              .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
-              on="CdFilial", how="left"
-      )
+#       .join(
+#               spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+#               .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
+#               on="CdFilial", how="left"
+#       )
+
+     #.groupBy("CdSku").agg(F.sum("Merecimento_Percentual_online"))
+).display()
+
+# COMMAND ----------
+
+
+(
+    spark.table('databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste0809')
+    .select(
+            "CdFilial", 
+#             #"NmPorteLoja", 
+#             #"NmRegiaoGeografica", 
+            "CdSku", 
+            "grupo_de_necessidade", 
+            F.round(100*F.col("Merecimento_Final_Media90_Qt_venda_sem_ruptura"), 3).alias("Merecimento_Percentual_online"),
+            )
+      .filter(F.col("grupo_de_necessidade").isin('Telef pp'))
+      #.filter(F.col("CdSku").isin(52))
+#       .join(
+#               spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+#               .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
+#               on="CdFilial", how="left"
+#       )
 
      #.groupBy("CdSku").agg(F.sum("Merecimento_Percentual_online"))
 ).display()

@@ -202,7 +202,7 @@ df_proporcao_factual_pct = (
 
 df_proporcao_factual_pct.cache()
 
-df_proporcao_factual_pct.filter(F.col("grupo_de_necessidade") == 'Telef pp').display()
+#df_proporcao_factual_pct.filter(F.col("grupo_de_necessidade") == 'Telef pp').display()
 
 # COMMAND ----------
 
@@ -243,8 +243,8 @@ df_comparacao = {}
 
 df_comparacao['TELAS'] = (
   df_matriz_nova_agg['TELAS']
-  .join(df_matriz_neogrid_agg, on=['CdFilial', 'grupo_de_necessidade'], how='outer')
-  .join(df_proporcao_factual_pct, on=['grupo_de_necessidade', 'CdFilial'], how='outer')
+  .join(df_matriz_neogrid_agg, on=['CdFilial', 'grupo_de_necessidade'], how='left')
+  .join(df_proporcao_factual_pct, on=['grupo_de_necessidade', 'CdFilial'], how='left')
 )
 
 #df_comparacao.display()
@@ -254,8 +254,8 @@ df_comparacao['TELAS'].count()
 
 df_comparacao['TELEFONIA'] = (
   df_matriz_nova_agg['TELEFONIA']
-  .join(df_matriz_neogrid_agg, on=['CdFilial', 'grupo_de_necessidade'], how='inner')
-  .join(df_proporcao_factual_pct, on=['grupo_de_necessidade', 'CdFilial'], how='inner')
+  .join(df_matriz_neogrid_agg, on=['CdFilial', 'grupo_de_necessidade'], how='left')
+  .join(df_proporcao_factual_pct, on=['grupo_de_necessidade', 'CdFilial'], how='left')
 )
 
 #df_comparacao.display()
@@ -268,11 +268,20 @@ df_comparacao['TELEFONIA'].count()
 
 # COMMAND ----------
 
+df_comparacao['TELEFONIA'].display()
+
+# COMMAND ----------
+
+df_comparacao['TELAS'].display()
+
+# COMMAND ----------
+
 from pyspark.sql import functions as F
 
 # smape para cada linha
 df_smape = (
     df_comparacao['TELAS']
+    .fillna(0, subset=['PercMatrizNeogrid', 'Percentual_QtDemanda', 'PercMatrizNova'])
     .withColumn(
         "SMAPE_MatrizNeogrid",
         200 * F.abs(F.col("PercMatrizNeogrid") - F.col("Percentual_QtDemanda")) /
@@ -319,16 +328,14 @@ df_result_wsmape.display()
 
 # COMMAND ----------
 
-df_comparacao['TELAS'].display()
-
-# COMMAND ----------
-
 # === Plotly scatters ===
 import plotly.express as px
 
 
 df_filial_mean = (
     df_comparacao['TELAS']
+    .fillna(0, subset=['PercMatrizNeogrid', 'Percentual_QtDemanda', 'PercMatrizNova'])
+
     .join(
         spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
         .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
@@ -426,6 +433,8 @@ from pyspark.sql import functions as F
 # smape para cada linha
 df_smape = (
     df_comparacao['TELEFONIA']
+    .fillna(0, subset=['PercMatrizNeogrid', 'Percentual_QtDemanda', 'PercMatrizNova'])
+
     .filter(F.col("grupo_de_necessidade") != 'Chip')
     .withColumn(
         "SMAPE_MatrizNeogrid",
@@ -478,7 +487,9 @@ from pyspark.sql import functions as F
 # smape para cada linha
 df_smape = (
     df_comparacao['TELEFONIA']
-    .filter(F.col("grupo_de_necessidade") != 'Chip')
+    .filter(F.col("grupo_de_necessidade") != 'Chip')\
+    .fillna(0, subset=['PercMatrizNeogrid', 'Percentual_QtDemanda', 'PercMatrizNova'])
+
 
     .withColumn(
         "SMAPE_MatrizNeogrid",
@@ -533,6 +544,8 @@ import plotly.express as px
 df_filial_mean = (
     df_comparacao['TELEFONIA']
     .filter(F.col("grupo_de_necessidade") != 'Chip')
+    .fillna(0, subset=['PercMatrizNeogrid', 'Percentual_QtDemanda', 'PercMatrizNova'])
+
     .join(
         spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
         .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),

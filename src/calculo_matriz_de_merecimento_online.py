@@ -869,12 +869,12 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         
         # 4. Definição do grupo_de_necessidade
         df_com_grupo = determinar_grupo_necessidade(categoria, df_com_mapeamentos)
-        df_com_grupo = (
-            df_com_grupo
-            .filter(
-                F.col("grupo_de_necessidade").isin('Telef pp', 'TV 50 ALTO P', 'TV 55 ALTO P')
-            )
-        )
+        # df_com_grupo = (
+        #     df_com_grupo
+        #     .filter(
+        #         F.col("grupo_de_necessidade").isin('Telef pp', 'TV 50 ALTO P', 'TV 55 ALTO P')
+        #     )
+        # )
         df_com_grupo.cache()
         
         # 5. Detecção de outliers
