@@ -204,7 +204,7 @@ for categoria in categorias_teste:
     
     df_analise[categoria]  =  (
             df_estoque_loja[categoria]
-            .groupBy("grupo_de_necessidade", "periodo_analise", "grupo")
+            .groupBy("periodo_analise", "grupo")
             .agg(
                 F.round(F.median("DDE"), 1).alias("DDE_medio"),
                 F.round((100*F.sum(F.when(F.col("ClassificacaoDDE") == "RUPTURA", 1)))/F.count("ClassificacaoDDE"), 1).alias("PctRuptura")
