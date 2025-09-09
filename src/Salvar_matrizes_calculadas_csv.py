@@ -47,57 +47,92 @@ categorias_list = [
 
 # COMMAND ----------
 
-(
-    spark.table('databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste0309')
-    .select(
-            "CdFilial", "NmPorteLoja", "NmRegiaoGeografica", "CdSku", "grupo_de_necessidade", 
-            F.round(100*F.col("Merecimento_Final_Media90_Qt_venda_sem_ruptura"), 3).alias("Merecimento_Percentual_offline"),
-            #F.round(100*F.col("Merecimento_Final_Media180_Qt_venda_sem_ruptura"), 2).alias("Merecimento_MedMovel180")
-            )
-    #.filter(F.col("CdFilial").isin(2528, 3604))
-
-    #.filter(F.col("grupo_de_necessidade").isin('Telef pp'))
-   # .groupBy("CdSku").agg(F.sum("Merecimento_Percentual_offline"))
-).display()
-    
-
 # (
-#     spark.table('databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste0309')
+#     spark.table('databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste0809')
 #     .select(
 #             "CdFilial", "NmPorteLoja", "NmRegiaoGeografica", "CdSku", "grupo_de_necessidade", 
-#             F.round(100*F.col("Merecimento_Final_Media90_Qt_venda_sem_ruptura"), 3).alias("Merecimento_Percentual_online"),
+#             F.round(100*F.col("Merecimento_Final_Media90_Qt_venda_sem_ruptura"), 3).alias("Merecimento_Percentual_offline"),
 #             #F.round(100*F.col("Merecimento_Final_Media180_Qt_venda_sem_ruptura"), 2).alias("Merecimento_MedMovel180")
 #             )
-#     .filter(F.col("grupo_de_necessidade").isin('Telef pp'))
-#      #.groupBy("CdSku").agg(F.sum("Merecimento_Percentual_online"))
-# )#.display()
+#     #.filter(F.col("CdFilial").isin(2528, 3604))
+
+#     #.filter(F.col("grupo_de_necessidade").isin('Telef pp'))
+#    # .groupBy("CdSku").agg(F.sum("Merecimento_Percentual_offline"))
+# ).display()
+    
+
+(
+    spark.table('databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste0809')
+    .select(
+            "CdFilial", 
+#             #"NmPorteLoja", 
+#             #"NmRegiaoGeografica", 
+            "CdSku", 
+            "grupo_de_necessidade", 
+            F.round(100*F.col("Merecimento_Final_Media90_Qt_venda_sem_ruptura"), 3).alias("Merecimento_Percentual_online"),
+            )
+      .filter(F.col("grupo_de_necessidade").isin('Telef pp'))
+      .filter(F.col("CdSku").isin(5286301))
+      .join(
+              spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+              .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
+              on="CdFilial", how="left"
+      )
+
+     #.groupBy("CdSku").agg(F.sum("Merecimento_Percentual_online"))
+).display()
 
 # COMMAND ----------
 
-(
-    spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_teste0309')
-    .select(
-            "CdFilial", "NmPorteLoja", "NmRegiaoGeografica", "CdSku", "grupo_de_necessidade", 
-            F.round(100*F.col("Merecimento_Final_Media90_Qt_venda_sem_ruptura"), 3).alias("Merecimento_Percentual_offline"),
-            #F.round(100*F.col("Merecimento_Final_Media180_Qt_venda_sem_ruptura"), 2).alias("Merecimento_MedMovel180")
-            )
-    #.filter(F.col("grupo_de_necessidade").isin('TV 50 ALTO P', 'TV 55 ALTO P'))
-    #.filter(F.col("CdFilial").isin(2528, 3604))
+spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa').display()
 
-    #.groupBy("CdSku").agg(F.sum("Merecimento_Percentual_offline"))
-).display()
-    
+
+# COMMAND ----------
+
+spark.table('data_engineering_prd.app_operacoesloja.roteirizacaofilialencerrada').display()
+
+
+# COMMAND ----------
+
+spark.table('data_engineering_prd.app_operacoesloja.roteirizacaoinauguracao').display()
+
+
+# COMMAND ----------
 
 # (
-#     spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste0509')
+#     spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_teste0309')
 #     .select(
 #             "CdFilial", "NmPorteLoja", "NmRegiaoGeografica", "CdSku", "grupo_de_necessidade", 
-#             F.round(100*F.col("Merecimento_Final_Media90_Qt_venda_sem_ruptura"), 4).alias("Merecimento_Percentual_online"),
+#             F.round(100*F.col("Merecimento_Final_Media90_Qt_venda_sem_ruptura"), 3).alias("Merecimento_Percentual_offline"),
 #             #F.round(100*F.col("Merecimento_Final_Media180_Qt_venda_sem_ruptura"), 2).alias("Merecimento_MedMovel180")
 #             )
-#     .filter(F.col("grupo_de_necessidade").isin('TV 50 ALTO P', 'TV 55 ALTO P'))
-#     #.groupBy("CdSku").agg(F.sum("Merecimento_Percentual_online"))
-# )#.display()
+#     #.filter(F.col("grupo_de_necessidade").isin('TV 50 ALTO P', 'TV 55 ALTO P'))
+#     #.filter(F.col("CdFilial").isin(2528, 3604))
+
+#     #.groupBy("CdSku").agg(F.sum("Merecimento_Percentual_offline"))
+# ).display()
+    
+
+(
+    spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste0809')
+    .select(
+            "CdFilial", 
+#             #"NmPorteLoja", 
+#             #"NmRegiaoGeografica", 
+            "CdSku", 
+            "grupo_de_necessidade", 
+            F.round(100*F.col("Merecimento_Final_Media90_Qt_venda_sem_ruptura"), 3).alias("Merecimento_Percentual_online"),
+            )
+      #.filter(F.col("grupo_de_necessidade").isin('Telef pp'))
+      #.filter(F.col("CdSku").isin(52))
+      .join(
+              spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+              .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
+              on="CdFilial", how="left"
+      )
+
+     #.groupBy("CdSku").agg(F.sum("Merecimento_Percentual_online"))
+).display()
 
 # COMMAND ----------
 

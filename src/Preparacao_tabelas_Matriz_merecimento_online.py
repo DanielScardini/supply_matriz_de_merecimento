@@ -30,13 +30,110 @@ hoje_int = int(hoje.strftime("%Y%m%d"))
 print(hoje, hoje_str, hoje_int)
 
 DE_PARA_CONSOLIDACAO_CDS = {
-  14  : 1401,
-  1635: 1200,
-  1500: 1200,
-  1640: 1401,
-  1088: 1200,
-  4400: None
+  "14"  : "1401",
+  "1635": "1200",
+  "1500": "1200",
+  "1640": "1401",
+  "1088": "1200",
+  "4760": "1760",
+  "4400": "1400",
+  "4887": "1887",
+  "4475": "1475",
+  "4445": "1445",
+  "2200": "1200",
+  "1736": "1887",
+  "1792": "1887",
+  "1875": "1887",
+  "1999": "1887",
+  "22"  : "1895",
+  "1673": "1400",
+  "1454": "1778",
 }
+
+# COMMAND ----------
+
+start_date = 20250701
+end_date = 20250902
+
+# COMMAND ----------
+
+# load tables
+df_rateada = spark.table("app_venda.vendafaturadarateada").filter(
+        F.col("DtAprovacao").between(start_date, end_date)
+        & (F.col("VrOperacao") >= 0)
+        & (F.col("VrCustoContabilFilialSku") >= 0)
+        & (F.col("NmEstadoMercadoria") != '1 - SALDO')
+)
+    
+df_nao_rateada = (
+    spark.table("app_venda.vendafaturadanaorateada")
+    .select("ChaveFatos","QtMercadoria")
+    .filter(F.col("QtMercadoria") > 0)
+)
+
+dict_CDs = DE_PARA_CONSOLIDACAO_CDS
+
+# normalizar None → 0 se quiser descartar depois
+dict_norm = {int(k): (int(v) if v is not None else 0) for k, v in dict_CDs.items()}
+
+# construir mapa literal
+mapping_expr = F.create_map(
+    [F.lit(x) for kv in dict_norm.items() for x in kv]
+)
+
+# unify and filter
+df = (
+    df_rateada
+
+    .filter(F.col("NmTipoNegocio") != 'LOJA FISICA')
+    .join(df_nao_rateada.select("ChaveFatos","QtMercadoria"), on="ChaveFatos")
+    .filter(
+        F.col("DtAprovacao").between(start_date, end_date)
+        & (F.col("VrOperacao") >= 0)
+        & (F.col("VrCustoContabilFilialSku") >= 0)
+        & (F.col("QtMercadoria") >= 0)
+    )        
+    .withColumn(
+        "year_month",
+        F.date_format(F.to_date(F.col("DtAprovacao").cast("string"), "yyyyMMdd"), "yyyyMM").cast("int")
+    )
+    .withColumnRenamed("CdFilialEmissao", "CdFilial")
+    .withColumn("CdFilial",
+        F.coalesce(
+            mapping_expr.getItem(F.col("CdFilial")),  # substitui se estiver no dict
+            F.col("CdFilial")                        # mantém caso contrário
+            )
+        ) 
+    .withColumn("DtAtual",
+        F.date_format(F.to_date(F.col("DtAprovacao").cast("string"), "yyyyMMdd"), "yyyy-MM-dd"))
+    .filter(F.col("CdFilial") != 0)
+)
+df.cache()
+df.display()
+
+# COMMAND ----------
+
+df.filter(F.col('UfFilialOrigem') == 'PA').display()
+
+# COMMAND ----------
+
+(
+    df
+    .filter(F.col('UfFilialOrigem') == 'PA')
+    .groupBy("CdFilial")
+    .agg(F.count("QtMercadoria").alias("QtMercadoria"))
+    .join(
+        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+        .select("CdFilial",
+                "NmFilial",
+                "NmPorteLoja",
+                "NmUF"),
+        how="left",
+        on="CdFilial"
+        
+    )
+).display()
+
 
 # COMMAND ----------
 
@@ -105,7 +202,7 @@ def load_estoque_loja_data(spark: SparkSession) -> DataFrame:
             F.col("DsTipoEntrega").alias("TipoEntrega"),
             F.col("CdEstoqueFilialAbastecimento").alias("QtdEstoqueCDVinculado"),
             (F.col("VrTotalVv")/F.col("VrVndCmv")).alias("DDE"),
-            F.col("QtEstoqueBoaOn").alias("EstoqueLoja"),
+            (F.col("QtEstoqueBoaOff") + F.col("QtEstoqueBoaOn")).alias("EstoqueLoja"),
             F.col("DsFaixaDde").alias("ClassificacaoDDE"),
             F.col("data_ingestao"),
             F.date_format(F.col("data_ingestao"), "yyyy-MM-dd").alias("DtAtual")    
@@ -983,7 +1080,7 @@ def process_monthly_batch(
                 "StLinha", "DsObrigatorio", "DsVoltagem", F.col("DsTipoEntrega").alias("TipoEntrega"),
                 F.col("CdEstoqueFilialAbastecimento").alias("QtdEstoqueCDVinculado"),
                 (F.col("VrTotalVv")/F.col("VrVndCmv")).alias("DDE"),
-                F.col("QtEstoqueBoaOff").alias("EstoqueLoja"),
+                (F.col("QtEstoqueBoaOff") + F.col("QtEstoqueBoaOn")).alias("EstoqueLoja"),
                 "DsEstoqueLojaDeposito",
                 F.col("DsFaixaDde").alias("ClassificacaoDDE"),
                 F.col("data_ingestao"),

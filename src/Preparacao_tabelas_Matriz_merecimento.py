@@ -189,7 +189,7 @@ def build_sales_view(
     # unify and filter
     df = (
         df_rateada
-
+        .filter(F.col("NmEstadoMercadoria") != '1 - SALDO')
         .filter(F.col("NmTipoNegocio") == 'LOJA FISICA')
         .join(df_nao_rateada.select("ChaveFatos","QtMercadoria"), on="ChaveFatos")
         .filter(

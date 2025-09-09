@@ -133,6 +133,38 @@ df_base_calculo_factual.cache()
 
 # COMMAND ----------
 
+DE_PARA_CONSOLIDACAO_CDS = {
+  "14"  : "1401",
+  "1635": "1200",
+  "1500": "1200",
+  "1640": "1401",
+  "1088": "1200",
+  "4760": "1760",
+  "4400": "1400",
+  "4887": "1887",
+  "4475": "1475",
+  "4445": "1445",
+  "2200": "1200",
+  "1736": "1887",
+  "1792": "1887",
+  "1875": "1887",
+  "1999": "1887",
+  "22"  : "1895",
+  "1673": "1400",
+  "1454": "1778",
+}
+
+
+dict_CDs = DE_PARA_CONSOLIDACAO_CDS
+# normalizar None → 0 se quiser descartar depois
+dict_norm = {int(k): (int(v) if v is not None else 0) for k, v in dict_CDs.items()}
+
+# construir mapa literal
+mapping_expr = F.create_map(
+    [F.lit(x) for kv in dict_norm.items() for x in kv]
+)
+
+
 df_proporcao_factual = (
     df_base_calculo_factual
     .filter(F.col("NmAgrupamentoDiretoriaSetor").isin('DIRETORIA TELEFONIA CELULAR', 'DIRETORIA DE TELAS'))
@@ -142,6 +174,12 @@ df_proporcao_factual = (
           how='left',
           on='CdSku')
     .withColumn('grupo_de_necessidade', F.col("gemeos"))
+    .withColumn("CdFilial",
+            F.coalesce(
+                mapping_expr.getItem(F.col("CdFilial")),  # substitui se estiver no dict
+                F.col("CdFilial")                        # mantém caso contrário
+                )
+            ) 
     .groupBy('CdFilial', 'grupo_de_necessidade')
     .agg(
         F.round(F.sum('QtDemanda'), 0).alias('QtDemanda'),
@@ -164,11 +202,7 @@ df_proporcao_factual_pct = (
 
 df_proporcao_factual_pct.cache()
 
-df_proporcao_factual_pct.filter(F.col("grupo_de_necessidade") == 'Telef Medio 128GB').display()
-
-# COMMAND ----------
-
-df_proporcao_factual_pct.filter(F.col("grupo_de_necessidade") == 'Telef Medio 128GB').agg(F.sum("QtDemanda")).display()
+df_proporcao_factual_pct.filter(F.col("grupo_de_necessidade") == 'Telef pp').display()
 
 # COMMAND ----------
 
@@ -200,16 +234,6 @@ df_matriz_nova_agg['TELEFONIA'] = (
 
 # COMMAND ----------
 
-(
-    df_matriz_neogrid_agg
-    #.filter(F.col("CdFilial"))
-    .filter(F.col("grupo_de_necessidade") == 'Telef pp')
-    .groupBy('grupo_de_necessidade')
-    .agg(F.sum('PercMatrizNeogrid'))
-).display()
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC ## Join Geral
 
@@ -219,8 +243,8 @@ df_comparacao = {}
 
 df_comparacao['TELAS'] = (
   df_matriz_nova_agg['TELAS']
-  .join(df_matriz_neogrid_agg, on=['CdFilial', 'grupo_de_necessidade'], how='inner')
-  .join(df_proporcao_factual_pct, on=['grupo_de_necessidade', 'CdFilial'], how='inner')
+  .join(df_matriz_neogrid_agg, on=['CdFilial', 'grupo_de_necessidade'], how='outer')
+  .join(df_proporcao_factual_pct, on=['grupo_de_necessidade', 'CdFilial'], how='outer')
 )
 
 #df_comparacao.display()
@@ -292,6 +316,10 @@ df_result_wsmape = df_wsmape.agg(
 # # resultados
 df_result_smape.display()
 df_result_wsmape.display()
+
+# COMMAND ----------
+
+df_comparacao['TELAS'].display()
 
 # COMMAND ----------
 
@@ -654,7 +682,7 @@ from pyspark.sql import functions as F
 # smape para cada linha
 df_smape = (
     df_comparacao['TELEFONIA']
-    .filter(F.col("grupo_de_necessidade") == 'Telef Medio 128GB')
+    .filter(F.col("grupo_de_necessidade") == 'Telef pp')
 
     .withColumn(
         "SMAPE_MatrizNeogrid",

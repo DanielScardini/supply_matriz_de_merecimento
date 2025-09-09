@@ -247,7 +247,7 @@ df_merecimento_lojas_agg_regiao = {}
 
 # base
 base_regiao = (
-    df_merecimento_lojas_agg['TELEFONIA']
+    df_merecimento_lojas_agg['TELAS']
     .select(
         'grupo_de_necessidade',
         'NmRegiaoGeografica',
@@ -261,7 +261,7 @@ base_regiao = (
 
 w = Window.partitionBy("grupo_de_necessidade")
 
-df_merecimento_lojas_agg_regiao['TELEFONIA'] = (
+df_merecimento_lojas_agg_regiao['TELAS'] = (
     base_regiao
     .withColumn("total_nova",  F.sum("Merecimento_Regiao_Nova").over(w))
     .withColumn("total_atual", F.sum("Merecimento_Regiao_Atual").over(w))
@@ -296,7 +296,7 @@ df_merecimento_lojas_agg_regiao['TELEFONIA'] = (
     .orderBy('grupo_de_necessidade', 'NmRegiaoGeografica')
 )
 
-df_merecimento_lojas_agg_regiao['TELEFONIA'].display()
+df_merecimento_lojas_agg_regiao['TELAS'].display()
 
 # COMMAND ----------
 

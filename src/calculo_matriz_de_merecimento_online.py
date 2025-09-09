@@ -38,6 +38,27 @@ hoje_int = int(hoje.strftime("%Y%m%d"))
 
 FILIAIS_OUTLET = [2528, 3604]
 
+DE_PARA_CONSOLIDACAO_CDS = {
+  "14"  : "1401",
+  "1635": "1200",
+  "1500": "1200",
+  "1640": "1401",
+  "1088": "1200",
+  "4760": "1760",
+  "4400": "1400",
+  "4887": "1887",
+  "4475": "1475",
+  "4445": "1445",
+  "2200": "1200",
+  "1736": "1887",
+  "1792": "1887",
+  "1875": "1887",
+  "1999": "1887",
+  "22"  : "1895",
+  "1673": "1400",
+  "1454": "1778",
+}
+
 # COMMAND ----------
 
 def get_data_inicio(min_meses: int = 18, hoje: datetime | None = None) -> datetime:
@@ -509,6 +530,13 @@ def criar_de_para_filial_cd() -> DataFrame:
         )
     )
     
+
+    # normaliza None → 0 para depois filtrar
+    dict_norm = {int(k): (int(v) if v is not None else 0) for k, v in DE_PARA_CONSOLIDACAO_CDS.items()}
+
+    # constrói expressão de mapeamento
+    mapping_expr = F.create_map([F.lit(x) for kv in dict_norm.items() for x in kv])
+
     de_para_filial_cd = (
         df_base
         .select("cdfilial", "cd_secundario")
@@ -519,8 +547,16 @@ def criar_de_para_filial_cd() -> DataFrame:
             F.coalesce(F.col("cd_secundario"), F.lit("SEM_CD"))
         )
         .drop("cd_secundario")
+        # aplica substituição
+        .withColumn(
+            "cd_vinculo",
+            F.coalesce(mapping_expr.getItem(F.col("cd_vinculo").cast("int")), F.col("cd_vinculo"))
+        )
+        # se quiser descartar os que viraram 0 (None no dict)
+        .filter(F.col("cd_vinculo") != F.lit(0))
+        .fillna("SEM_CD", subset="cd_vinculo")
     )
-    
+        
     print(f"✅ De-para filial → CD criado: {de_para_filial_cd.count():,} filiais")
     return de_para_filial_cd
 
@@ -661,9 +697,11 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
             colunas_cd.append(f"Merecimento_CD_{medida}")
     
     df_merecimento_cd_limpo = df_merecimento_cd.select(*colunas_cd)
+
     
     # 2. Adicionar cd_primario ao merecimento interno (especificando qual coluna usar)
     de_para_filial_cd = criar_de_para_filial_cd()
+
     df_merecimento_interno_com_cd = (
         df_merecimento_interno
         .join(de_para_filial_cd, on="CdFilial", how="left")
@@ -831,6 +869,12 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         
         # 4. Definição do grupo_de_necessidade
         df_com_grupo = determinar_grupo_necessidade(categoria, df_com_mapeamentos)
+        df_com_grupo = (
+            df_com_grupo
+            .filter(
+                F.col("grupo_de_necessidade").isin('Telef pp', 'TV 50 ALTO P', 'TV 55 ALTO P')
+            )
+        )
         df_com_grupo.cache()
         
         # 5. Detecção de outliers
@@ -1007,3 +1051,99 @@ print("=" * 80)
 # MAGIC - Identificação de distorções
 # MAGIC
 # MAGIC **Este script está completo e finalizado!** 🎉
+
+# COMMAND ----------
+
+categoria = "DIRETORIA TELEFONIA CELULAR"
+data_calculo = "2025-08-30"
+
+# 1. Carregamento dos dados base
+df_base = carregar_dados_base(categoria, data_inicio)
+df_base.cache()
+
+# 2. Carregamento dos mapeamentos
+de_para_modelos, de_para_gemeos = carregar_mapeamentos_produtos(categoria)  
+
+# 3. Aplicação dos mapeamentos
+df_com_mapeamentos = aplicar_mapeamentos_produtos(
+    df_base, categoria, de_para_modelos, de_para_gemeos
+)
+
+# 4. Definição do grupo_de_necessidade
+df_com_grupo = determinar_grupo_necessidade(categoria, df_com_mapeamentos)
+df_com_grupo = (
+    df_com_grupo
+    .filter(
+        F.col("grupo_de_necessidade").isin('Telef pp', 'TV 50 ALTO P', 'TV 55 ALTO P')
+    )
+)
+df_com_grupo.cache()
+
+# 5. Detecção de outliers
+df_stats, df_meses_atipicos = detectar_outliers_meses_atipicos(df_com_grupo, categoria)
+
+# 6. Filtragem de meses atípicos
+df_filtrado = filtrar_meses_atipicos(df_com_grupo, df_meses_atipicos)
+
+# 7. Cálculo das medidas centrais
+df_com_medidas = calcular_medidas_centrais_com_medias_aparadas(df_filtrado)
+
+# 8. Consolidação final
+df_final = consolidar_medidas(df_com_medidas)
+
+# 9. Cálculo de merecimento por CD e filial
+print("=" * 80)
+print("🔄 Iniciando cálculo de merecimento...")
+
+# 9.1 Merecimento a nível CD
+df_merecimento_cd = calcular_merecimento_cd(df_final, data_calculo, categoria)
+
+# 9.2 Merecimento interno ao CD
+df_merecimento_interno = calcular_merecimento_interno_cd(df_final, data_calculo, categoria)
+
+# 9.3 Merecimento final
+df_merecimento_final = calcular_merecimento_final(df_merecimento_cd, df_merecimento_interno)
+
+
+df_merecimento_final.cache()
+df_merecimento_final.display()
+
+# COMMAND ----------
+
+df_merecimento_cd.cache()
+df_merecimento_cd.display()
+
+# COMMAND ----------
+
+# Criar o esqueleto
+df_esqueleto = criar_esqueleto_matriz_completa(df_com_grupo, "2025-08-30")
+
+# Primeiro, identificar todas as colunas de merecimento final
+colunas_merecimento_final = [col for col in df_merecimento_final.columns 
+                        if col.startswith('Merecimento_Final_')]
+
+
+# Criar dicionário de fillna
+fillna_dict = {col: 0.0 for col in colunas_merecimento_final}
+
+df_merecimento_sku_filial = (
+    df_esqueleto
+    .join(
+        df_merecimento_final
+        .select('grupo_de_necessidade', 'CdFilial', *colunas_merecimento_final)
+        .dropDuplicates(subset=['grupo_de_necessidade', 'CdFilial']), 
+        on=['grupo_de_necessidade', 'CdFilial'], 
+        how='left'
+    )
+    .fillna(fillna_dict)
+)
+
+print("=" * 80)
+print(f"✅ Cálculo da matriz de merecimento concluído para: {categoria}")
+print(f"📊 Total de registros finais: {df_merecimento_sku_filial.count():,}")
+
+return df_merecimento_sku_filial
+
+except Exception as e:
+print(f"❌ Erro durante o cálculo: {str(e)}")
+raise
