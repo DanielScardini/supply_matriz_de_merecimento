@@ -189,7 +189,7 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-07-01") -> Data
     print(f"🔄 Carregando dados para categoria: {categoria}")
     
     df_base = (
-        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3')
+        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
         .filter(F.col("NmAgrupamentoDiretoriaSetor") == categoria)
         .filter(F.col("DtAtual") >= data_inicio)
         .withColumn(
@@ -497,7 +497,7 @@ def criar_de_para_filial_cd() -> DataFrame:
     print("🔄 Criando de-para filial → CD...")
     
     df_base = (
-        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3')
+        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
         .filter(F.col("DtAtual") == "2025-08-01")
         .filter(F.col("CdSku").isNotNull())
     )
@@ -757,7 +757,7 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
     # 2. Carregar todos os SKUs que existem na data especificada
     print(f"📊 Passo 2: Carregando SKUs existentes em {data_calculo}...")
     df_skus_data = (
-        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3')
+        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
         .filter(F.col("DtAtual") == data_calculo)
         .select("CdSku")
         .distinct()
@@ -824,12 +824,12 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         
         # 4. Definição do grupo_de_necessidade
         df_com_grupo = determinar_grupo_necessidade(categoria, df_com_mapeamentos)
-        df_com_grupo = (
-            df_com_grupo
-            .filter(
-                F.col("grupo_de_necessidade").isin('Telef pp', 'TV 50 ALTO P', 'TV 55 ALTO P')
-            )
-        )
+        # df_com_grupo = (
+        #     df_com_grupo
+        #     .filter(
+        #         F.col("grupo_de_necessidade").isin('Telef pp', 'TV 50 ALTO P', 'TV 55 ALTO P')
+        #     )
+        # )
         df_com_grupo.cache()
         
         # 5. Detecção de outliers
@@ -932,7 +932,7 @@ for categoria in categorias:
             .upper()
         )
         
-        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste0809"
+        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste1009"
         
         print(f"💾 Salvando matriz de merecimento para: {categoria}")
         print(f"📊 Tabela: {nome_tabela}")

@@ -22,6 +22,70 @@ spark = SparkSession.builder.appName("analise_resultados_factuais").getOrCreate(
 
 # COMMAND ----------
 
+color_map = {
+    "Sudeste": "#0d3b66",       # azul mais escuro
+    "Sul": "#5dade2",           # azul mais claro
+    "Centro-Oeste": "#ff9896",  # vermelho claro
+    "Nordeste": "#1f77b4",      # azul intermediário
+    "Norte": "#d62728",         # vermelho
+}
+
+def make_scatter(df, y_col, y_label, title):
+    fig = px.scatter(
+        df,
+        x="x_real",
+        y=y_col,
+        size="PorteNum",                 
+        color="NmRegiaoGeografica",      
+        color_discrete_map=color_map,    # fixa as cores
+        size_max=12,                     
+        opacity=0.75,
+        labels={
+            "x_real": "Percentual_QtDemanda médio por filial (real)",
+            y_col:   y_label,
+            "NmRegiaoGeografica": "Região Geográfica",
+            "PorteNum": "Porte"
+        },
+        hover_data={
+            "CdFilial": True,
+            "NmFilial": True,
+            "NmPorteLoja": True,
+            "NmRegiaoGeografica": True,
+            "x_real": ":.3f",
+            y_col: ":.3f",
+        }
+    )
+    fig.update_layout(
+        title=dict(text=title, x=0.5, xanchor="center"),
+        paper_bgcolor="#f2f2f2",
+        plot_bgcolor="#f2f2f2",
+        margin=dict(l=40, r=40, t=60, b=40),
+        xaxis=dict(
+            showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)",
+            zeroline=False, range=[0,0.6]
+        ),
+        yaxis=dict(
+            showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)",
+            zeroline=False, range=[0,2]
+        ),
+        legend=dict(
+            title="Região Geográfica",
+            orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5
+        ),
+        width=1200,
+        height=400,
+    )
+
+    fig.update_traces(marker=dict(line=dict(width=0.6, color="rgba(0,0,0,0.35)")))
+    fig.add_shape(
+        type="line", x0=0, y0=0, x1=1, y1=1,
+        line=dict(color="rgba(0,0,0,0.45)", width=0.2, dash="dash")
+    )
+    return fig
+
+
+# COMMAND ----------
+
 def carregar_mapeamentos_produtos(categoria: str) -> tuple:
     """
     Carrega os arquivos de mapeamento de produtos para a categoria específica.
@@ -122,7 +186,7 @@ df_matriz_neogrid = (
 )
 
 df_base_calculo_factual = (
-  spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3_online')
+  spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4_online')
   .filter(F.col('DtAtual') >= '2025-08-01')
 )
 
@@ -243,6 +307,8 @@ df_comparacao = {}
 
 df_comparacao['TELAS'] = (
   df_matriz_nova_agg['TELAS']
+  .drop('CdSku')
+  .dropDuplicates()
   .join(df_matriz_neogrid_agg, on=['CdFilial', 'grupo_de_necessidade'], how='left')
   .join(df_proporcao_factual_pct, on=['grupo_de_necessidade', 'CdFilial'], how='left')
 )
@@ -254,8 +320,10 @@ df_comparacao['TELAS'].count()
 
 df_comparacao['TELEFONIA'] = (
   df_matriz_nova_agg['TELEFONIA']
-  .join(df_matriz_neogrid_agg, on=['CdFilial', 'grupo_de_necessidade'], how='left')
-  .join(df_proporcao_factual_pct, on=['grupo_de_necessidade', 'CdFilial'], how='left')
+  .drop('CdSku')
+  .dropDuplicates()
+  .join(df_matriz_neogrid_agg, on=['CdFilial', 'grupo_de_necessidade'], how='inner')
+  .join(df_proporcao_factual_pct, on=['grupo_de_necessidade', 'CdFilial'], how='inner')
 )
 
 #df_comparacao.display()
@@ -268,11 +336,121 @@ df_comparacao['TELEFONIA'].count()
 
 # COMMAND ----------
 
-df_comparacao['TELEFONIA'].display()
+from pyspark.sql import functions as F
+
+# selecione a aba desejada do dict df_comparacao
+aba = "TELEFONIA"  # ex.: "TELEFONIA", "TELAS", etc.
+df_base = df_comparacao[aba]
+
+# helpers
+def smape_cols(pred_col: str, tgt_col: str):
+    a = F.abs(F.col(pred_col))
+    b = F.abs(F.col(tgt_col))
+    denom = a + b
+    # evita divisão por zero: se ambos zero, sMAPE = 0
+    return F.when(denom == 0, F.lit(0.0)) \
+            .otherwise(200.0 * F.abs(F.col(pred_col) - F.col(tgt_col)) / denom)
+
+# sMAPE por linha para cada modelo
+df_smape = (
+    df_base
+    .withColumn("SMAPE_MatrizNeogrid", smape_cols("PercMatrizNeogrid", "Percentual_QtDemanda"))
+    .withColumn("SMAPE_MatrizNova",    smape_cols("PercMatrizNova",    "Percentual_QtDemanda"))
+)
+
+# condições: abaixo da demanda real e complementar (>=)
+cond_neo_below  = F.col("PercMatrizNeogrid") < F.col("Percentual_QtDemanda")
+cond_nova_below = F.col("PercMatrizNova")    < F.col("Percentual_QtDemanda")
+
+# pesos
+w = F.col("QtDemanda")
+
+# agregações utilitárias
+def mean_if(col, cond):
+    return F.mean(F.when(cond, col))
+
+def wmean_if(col, weight, cond):
+    num = F.sum(F.when(cond, col * weight))
+    den = F.sum(F.when(cond, weight))
+    return (num / den)
+
+# agregação final em uma linha
+result = df_smape.agg(
+    # Neogrid - sMAPE simples
+    mean_if(F.col("SMAPE_MatrizNeogrid"), cond_neo_below).alias("SMAPE_Neogrid_below"),
+    #mean_if(F.col("SMAPE_MatrizNeogrid"), ~cond_neo_below).alias("SMAPE_Neogrid_not_below"),
+    # Matriz Nova - sMAPE simples
+    mean_if(F.col("SMAPE_MatrizNova"), cond_nova_below).alias("SMAPE_Nova_below"),
+    #mean_if(F.col("SMAPE_MatrizNova"), ~cond_nova_below).alias("SMAPE_Nova_not_below"),
+    # Neogrid - wSMAPE
+    wmean_if(F.col("SMAPE_MatrizNeogrid"), w, cond_neo_below).alias("WSMAPE_Neogrid_below"),
+    #wmean_if(F.col("SMAPE_MatrizNeogrid"), w, ~cond_neo_below).alias("WSMAPE_Neogrid_not_below"),
+    # Matriz Nova - wSMAPE
+    wmean_if(F.col("SMAPE_MatrizNova"), w, cond_nova_below).alias("WSMAPE_Nova_below"),
+    #wmean_if(F.col("SMAPE_MatrizNova"), w, ~cond_nova_below).alias("WSMAPE_Nova_not_below"),
+)
+
+# visualize se quiser
+result.display()
 
 # COMMAND ----------
 
-df_comparacao['TELAS'].display()
+from pyspark.sql import functions as F
+
+# selecione a aba desejada do dict df_comparacao
+aba = "TELAS"  # ex.: "TELEFONIA", "TELAS", etc.
+df_base = df_comparacao[aba]
+
+# helpers
+def smape_cols(pred_col: str, tgt_col: str):
+    a = F.abs(F.col(pred_col))
+    b = F.abs(F.col(tgt_col))
+    denom = a + b
+    # evita divisão por zero: se ambos zero, sMAPE = 0
+    return F.when(denom == 0, F.lit(0.0)) \
+            .otherwise(200.0 * F.abs(F.col(pred_col) - F.col(tgt_col)) / denom)
+
+# sMAPE por linha para cada modelo
+df_smape = (
+    df_base
+    .withColumn("SMAPE_MatrizNeogrid", smape_cols("PercMatrizNeogrid", "Percentual_QtDemanda"))
+    .withColumn("SMAPE_MatrizNova",    smape_cols("PercMatrizNova",    "Percentual_QtDemanda"))
+)
+
+# condições: abaixo da demanda real e complementar (>=)
+cond_neo_below  = F.col("PercMatrizNeogrid") < F.col("Percentual_QtDemanda")
+cond_nova_below = F.col("PercMatrizNova")    < F.col("Percentual_QtDemanda")
+
+# pesos
+w = F.col("QtDemanda")
+
+# agregações utilitárias
+def mean_if(col, cond):
+    return F.mean(F.when(cond, col))
+
+def wmean_if(col, weight, cond):
+    num = F.sum(F.when(cond, col * weight))
+    den = F.sum(F.when(cond, weight))
+    return (num / den)
+
+# agregação final em uma linha
+result = df_smape.agg(
+    # Neogrid - sMAPE simples
+    mean_if(F.col("SMAPE_MatrizNeogrid"), cond_neo_below).alias("SMAPE_Neogrid_below"),
+    #mean_if(F.col("SMAPE_MatrizNeogrid"), ~cond_neo_below).alias("SMAPE_Neogrid_not_below"),
+    # Matriz Nova - sMAPE simples
+    mean_if(F.col("SMAPE_MatrizNova"), cond_nova_below).alias("SMAPE_Nova_below"),
+    #mean_if(F.col("SMAPE_MatrizNova"), ~cond_nova_below).alias("SMAPE_Nova_not_below"),
+    # Neogrid - wSMAPE
+    wmean_if(F.col("SMAPE_MatrizNeogrid"), w, cond_neo_below).alias("WSMAPE_Neogrid_below"),
+    #wmean_if(F.col("SMAPE_MatrizNeogrid"), w, ~cond_neo_below).alias("WSMAPE_Neogrid_not_below"),
+    # Matriz Nova - wSMAPE
+    wmean_if(F.col("SMAPE_MatrizNova"), w, cond_nova_below).alias("WSMAPE_Nova_below"),
+    #wmean_if(F.col("SMAPE_MatrizNova"), w, ~cond_nova_below).alias("WSMAPE_Nova_not_below"),
+)
+
+# visualize se quiser
+result.display()
 
 # COMMAND ----------
 
@@ -281,6 +459,9 @@ from pyspark.sql import functions as F
 # smape para cada linha
 df_smape = (
     df_comparacao['TELAS']
+    .filter(F.col("grupo_de_necessidade").isin('TV 50 ALTO P', 'TV 55 ALTO P'))
+    #.filter(F.col("CdFilial") != "1401")
+
     .fillna(0, subset=['PercMatrizNeogrid', 'Percentual_QtDemanda', 'PercMatrizNova'])
     .withColumn(
         "SMAPE_MatrizNeogrid",
@@ -323,7 +504,7 @@ df_result_wsmape = df_wsmape.agg(
 )
 
 # # resultados
-df_result_smape.display()
+#df_result_smape.display()
 df_result_wsmape.display()
 
 # COMMAND ----------
@@ -334,7 +515,8 @@ import plotly.express as px
 
 df_filial_mean = (
     df_comparacao['TELAS']
-    .fillna(0, subset=['PercMatrizNeogrid', 'Percentual_QtDemanda', 'PercMatrizNova'])
+    .filter(F.col("grupo_de_necessidade").isin('TV 50 ALTO P', 'TV 55 ALTO P'))
+   # .fillna(0, subset=['PercMatrizNeogrid', 'Percentual_QtDemanda', 'PercMatrizNova'])
 
     .join(
         spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
@@ -358,64 +540,6 @@ df_filial_mean = (
 pdf = df_filial_mean.toPandas()
 
 
-# Definição de paleta: tons de azul e vermelho
-# Ajuste a ordem ou adicione mais se tiver >2 regiões
-palette = ["#1f77b4", "#d62728", "#aec7e8", "#ff9896"]
-
-def make_scatter(df, y_col, y_label, title):
-    fig = px.scatter(
-        df,
-        x="x_real",
-        y=y_col,
-        size="PorteNum",                 
-        color="NmRegiaoGeografica",      
-        color_discrete_sequence=palette,
-        size_max=12,                     
-        opacity=0.75,
-        labels={
-            "x_real": "Percentual_QtDemanda médio por filial (real)",
-            y_col:   y_label,
-            "NmRegiaoGeografica": "Região Geográfica",
-            "PorteNum": "Porte"
-        },
-        hover_data={
-            "CdFilial": True,
-            "NmFilial": True,
-            "NmPorteLoja": True,
-            "NmRegiaoGeografica": True,
-            "x_real": ":.3f",
-            y_col: ":.3f",
-        }
-    )
-    fig.update_layout(
-        title=dict(text=title, x=0.5, xanchor="center"),
-        paper_bgcolor="#f2f2f2",
-        plot_bgcolor="#f2f2f2",
-        margin=dict(l=40, r=40, t=60, b=40),
-        xaxis=dict(
-            showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)",
-            zeroline=False, range=[0,0.6]
-        ),
-        yaxis=dict(
-            showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)",
-            zeroline=False, range=[0,2]
-        ),
-        legend=dict(
-            title="Região Geográfica",
-            orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5
-        ),
-        width=1200,   # largura 4
-        height=400,   # altura 3
-    )
-
-    fig.update_traces(marker=dict(line=dict(width=0.6, color="rgba(0,0,0,0.35)")))
-    # linha de referência y=x
-    fig.add_shape(
-        type="line", x0=0, y0=0, x1=1, y1=1,
-        line=dict(color="rgba(0,0,0,0.45)", width=0.2, dash="dash")
-    )
-    return fig
-
 fig_nova = make_scatter(pdf, "y_nova",
                         "PercMatrizNova médio por filial (previsão)",
                         "Real vs Matriz Nova – por filial")
@@ -433,7 +557,7 @@ from pyspark.sql import functions as F
 # smape para cada linha
 df_smape = (
     df_comparacao['TELEFONIA']
-    .fillna(0, subset=['PercMatrizNeogrid', 'Percentual_QtDemanda', 'PercMatrizNova'])
+    #.fillna(0, subset=['PercMatrizNeogrid', 'Percentual_QtDemanda', 'PercMatrizNova'])
 
     .filter(F.col("grupo_de_necessidade") != 'Chip')
     .withColumn(
@@ -544,7 +668,7 @@ import plotly.express as px
 df_filial_mean = (
     df_comparacao['TELEFONIA']
     .filter(F.col("grupo_de_necessidade") != 'Chip')
-    .fillna(0, subset=['PercMatrizNeogrid', 'Percentual_QtDemanda', 'PercMatrizNova'])
+    #.fillna(0, subset=['PercMatrizNeogrid', 'Percentual_QtDemanda', 'PercMatrizNova'])
 
     .join(
         spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
@@ -566,65 +690,6 @@ df_filial_mean = (
 )
 
 pdf = df_filial_mean.toPandas()
-
-
-# Definição de paleta: tons de azul e vermelho
-# Ajuste a ordem ou adicione mais se tiver >2 regiões
-palette = ["#1f77b4", "#d62728", "#aec7e8", "#ff9896"]
-
-def make_scatter(df, y_col, y_label, title):
-    fig = px.scatter(
-        df,
-        x="x_real",
-        y=y_col,
-        size="PorteNum",                 
-        color="NmRegiaoGeografica",      
-        color_discrete_sequence=palette,
-        size_max=12,                     
-        opacity=0.75,
-        labels={
-            "x_real": "Percentual_QtDemanda médio por filial (real)",
-            y_col:   y_label,
-            "NmRegiaoGeografica": "Região Geográfica",
-            "PorteNum": "Porte"
-        },
-        hover_data={
-            "CdFilial": True,
-            "NmFilial": True,
-            "NmPorteLoja": True,
-            "NmRegiaoGeografica": True,
-            "x_real": ":.3f",
-            y_col: ":.3f",
-        }
-    )
-    fig.update_layout(
-        title=dict(text=title, x=0.5, xanchor="center"),
-        paper_bgcolor="#f2f2f2",
-        plot_bgcolor="#f2f2f2",
-        margin=dict(l=40, r=40, t=60, b=40),
-        xaxis=dict(
-            showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)",
-            zeroline=False, range=[0,0.6]
-        ),
-        yaxis=dict(
-            showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)",
-            zeroline=False, range=[0,2]
-        ),
-        legend=dict(
-            title="Região Geográfica",
-            orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5
-        ),
-        width=1200,   # largura 4
-        height=400,   # altura 3
-    )
-
-    fig.update_traces(marker=dict(line=dict(width=0.6, color="rgba(0,0,0,0.35)")))
-    # linha de referência y=x
-    fig.add_shape(
-        type="line", x0=0, y0=0, x1=1, y1=1,
-        line=dict(color="rgba(0,0,0,0.45)", width=0.2, dash="dash")
-    )
-    return fig
 
 fig_nova = make_scatter(pdf, "y_nova",
                         "PercMatrizNova médio por filial (previsão)",
@@ -771,65 +836,6 @@ df_filial_mean = (
 
 pdf = df_filial_mean.toPandas()
 
-
-# Definição de paleta: tons de azul e vermelho
-# Ajuste a ordem ou adicione mais se tiver >2 regiões
-palette = ["#1f77b4", "#d62728", "#aec7e8", "#ff9896"]
-
-def make_scatter(df, y_col, y_label, title):
-    fig = px.scatter(
-        df,
-        x="x_real",
-        y=y_col,
-        size="PorteNum",                 
-        color="NmRegiaoGeografica",      
-        color_discrete_sequence=palette,
-        size_max=12,                     
-        opacity=0.75,
-        labels={
-            "x_real": "Percentual_QtDemanda médio por filial (real)",
-            y_col:   y_label,
-            "NmRegiaoGeografica": "Região Geográfica",
-            "PorteNum": "Porte"
-        },
-        hover_data={
-            "CdFilial": True,
-            "NmFilial": True,
-            "NmPorteLoja": True,
-            "NmRegiaoGeografica": True,
-            "x_real": ":.3f",
-            y_col: ":.3f",
-        }
-    )
-    fig.update_layout(
-        title=dict(text=title, x=0.5, xanchor="center"),
-        paper_bgcolor="#f2f2f2",
-        plot_bgcolor="#f2f2f2",
-        margin=dict(l=40, r=40, t=60, b=40),
-        xaxis=dict(
-            showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)",
-            zeroline=False, range=[0,0.6]
-        ),
-        yaxis=dict(
-            showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)",
-            zeroline=False, range=[0,2]
-        ),
-        legend=dict(
-            title="Região Geográfica",
-            orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5
-        ),
-        width=1200,   # largura 4
-        height=400,   # altura 3
-    )
-
-    fig.update_traces(marker=dict(line=dict(width=0.6, color="rgba(0,0,0,0.35)")))
-    # linha de referência y=x
-    fig.add_shape(
-        type="line", x0=0, y0=0, x1=1, y1=1,
-        line=dict(color="rgba(0,0,0,0.45)", width=0.2, dash="dash")
-    )
-    return fig
-
 fig_nova = make_scatter(pdf, "y_nova",
                         "PercMatrizNova médio por filial (previsão)",
                         "Real vs Matriz Nova – por filial")
@@ -874,65 +880,6 @@ df_filial_mean = (
 
 pdf = df_filial_mean.toPandas()
 
-
-# Definição de paleta: tons de azul e vermelho
-# Ajuste a ordem ou adicione mais se tiver >2 regiões
-palette = ["#1f77b4", "#d62728", "#aec7e8", "#ff9896"]
-
-def make_scatter(df, y_col, y_label, title):
-    fig = px.scatter(
-        df,
-        x="x_real",
-        y=y_col,
-        size="PorteNum",                 
-        color="NmRegiaoGeografica",      
-        color_discrete_sequence=palette,
-        size_max=12,                     
-        opacity=0.75,
-        labels={
-            "x_real": "Percentual_QtDemanda médio por filial (real)",
-            y_col:   y_label,
-            "NmRegiaoGeografica": "Região Geográfica",
-            "PorteNum": "Porte"
-        },
-        hover_data={
-            "CdFilial": True,
-            "NmFilial": True,
-            "NmPorteLoja": True,
-            "NmRegiaoGeografica": True,
-            "x_real": ":.3f",
-            y_col: ":.3f",
-        }
-    )
-    fig.update_layout(
-        title=dict(text=title, x=0.5, xanchor="center"),
-        paper_bgcolor="#f2f2f2",
-        plot_bgcolor="#f2f2f2",
-        margin=dict(l=40, r=40, t=60, b=40),
-        xaxis=dict(
-            showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)",
-            zeroline=False, range=[0,0.6]
-        ),
-        yaxis=dict(
-            showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)",
-            zeroline=False, range=[0,2]
-        ),
-        legend=dict(
-            title="Região Geográfica",
-            orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5
-        ),
-        width=1200,   # largura 4
-        height=400,   # altura 3
-    )
-
-    fig.update_traces(marker=dict(line=dict(width=0.6, color="rgba(0,0,0,0.35)")))
-    # linha de referência y=x
-    fig.add_shape(
-        type="line", x0=0, y0=0, x1=1, y1=1,
-        line=dict(color="rgba(0,0,0,0.45)", width=0.2, dash="dash")
-    )
-    return fig
-
 fig_nova = make_scatter(pdf, "y_nova",
                         "PercMatrizNova médio por filial (previsão)",
                         "Real vs Matriz Nova – por filial")
@@ -973,65 +920,6 @@ df_filial_mean = (
 
 pdf = df_filial_mean.toPandas()
 
-
-# Definição de paleta: tons de azul e vermelho
-# Ajuste a ordem ou adicione mais se tiver >2 regiões
-palette = ["#1f77b4", "#d62728", "#aec7e8", "#ff9896"]
-
-def make_scatter(df, y_col, y_label, title):
-    fig = px.scatter(
-        df,
-        x="x_real",
-        y=y_col,
-        size="PorteNum",                 
-        color="NmRegiaoGeografica",      
-        color_discrete_sequence=palette,
-        size_max=12,                     
-        opacity=0.75,
-        labels={
-            "x_real": "Percentual_QtDemanda médio por filial (real)",
-            y_col:   y_label,
-            "NmRegiaoGeografica": "Região Geográfica",
-            "PorteNum": "Porte"
-        },
-        hover_data={
-            "CdFilial": True,
-            "NmFilial": True,
-            "NmPorteLoja": True,
-            "NmRegiaoGeografica": True,
-            "x_real": ":.3f",
-            y_col: ":.3f",
-        }
-    )
-    fig.update_layout(
-        title=dict(text=title, x=0.5, xanchor="center"),
-        paper_bgcolor="#f2f2f2",
-        plot_bgcolor="#f2f2f2",
-        margin=dict(l=40, r=40, t=60, b=40),
-        xaxis=dict(
-            showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)",
-            zeroline=False, range=[0,0.6]
-        ),
-        yaxis=dict(
-            showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)",
-            zeroline=False, range=[0,2]
-        ),
-        legend=dict(
-            title="Região Geográfica",
-            orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5
-        ),
-        width=1200,   # largura 4
-        height=400,   # altura 3
-    )
-
-    fig.update_traces(marker=dict(line=dict(width=0.6, color="rgba(0,0,0,0.35)")))
-    # linha de referência y=x
-    fig.add_shape(
-        type="line", x0=0, y0=0, x1=1, y1=1,
-        line=dict(color="rgba(0,0,0,0.45)", width=0.2, dash="dash")
-    )
-    return fig
-
 fig_nova = make_scatter(pdf, "y_nova",
                         "PercMatrizNova médio por filial (previsão)",
                         "Real vs Matriz Nova – por filial")
@@ -1071,65 +959,6 @@ df_filial_mean = (
 )
 
 pdf = df_filial_mean.toPandas()
-
-
-# Definição de paleta: tons de azul e vermelho
-# Ajuste a ordem ou adicione mais se tiver >2 regiões
-palette = ["#1f77b4", "#d62728", "#aec7e8", "#ff9896"]
-
-def make_scatter(df, y_col, y_label, title):
-    fig = px.scatter(
-        df,
-        x="x_real",
-        y=y_col,
-        size="PorteNum",                 
-        color="NmRegiaoGeografica",      
-        color_discrete_sequence=palette,
-        size_max=12,                     
-        opacity=0.75,
-        labels={
-            "x_real": "Percentual_QtDemanda médio por filial (real)",
-            y_col:   y_label,
-            "NmRegiaoGeografica": "Região Geográfica",
-            "PorteNum": "Porte"
-        },
-        hover_data={
-            "CdFilial": True,
-            "NmFilial": True,
-            "NmPorteLoja": True,
-            "NmRegiaoGeografica": True,
-            "x_real": ":.3f",
-            y_col: ":.3f",
-        }
-    )
-    fig.update_layout(
-        title=dict(text=title, x=0.5, xanchor="center"),
-        paper_bgcolor="#f2f2f2",
-        plot_bgcolor="#f2f2f2",
-        margin=dict(l=40, r=40, t=60, b=40),
-        xaxis=dict(
-            showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)",
-            zeroline=False, range=[0,0.6]
-        ),
-        yaxis=dict(
-            showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)",
-            zeroline=False, range=[0,2]
-        ),
-        legend=dict(
-            title="Região Geográfica",
-            orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5
-        ),
-        width=1200,   # largura 4
-        height=400,   # altura 3
-    )
-
-    fig.update_traces(marker=dict(line=dict(width=0.6, color="rgba(0,0,0,0.35)")))
-    # linha de referência y=x
-    fig.add_shape(
-        type="line", x0=0, y0=0, x1=1, y1=1,
-        line=dict(color="rgba(0,0,0,0.45)", width=0.2, dash="dash")
-    )
-    return fig
 
 fig_nova = make_scatter(pdf, "y_nova",
                         "PercMatrizNova médio por filial (previsão)",
@@ -1172,64 +1001,6 @@ df_filial_mean = (
 pdf = df_filial_mean.toPandas()
 
 
-# Definição de paleta: tons de azul e vermelho
-# Ajuste a ordem ou adicione mais se tiver >2 regiões
-palette = ["#1f77b4", "#d62728", "#aec7e8", "#ff9896"]
-
-def make_scatter(df, y_col, y_label, title):
-    fig = px.scatter(
-        df,
-        x="x_real",
-        y=y_col,
-        size="PorteNum",                 
-        color="NmRegiaoGeografica",      
-        color_discrete_sequence=palette,
-        size_max=12,                     
-        opacity=0.75,
-        labels={
-            "x_real": "Percentual_QtDemanda médio por filial (real)",
-            y_col:   y_label,
-            "NmRegiaoGeografica": "Região Geográfica",
-            "PorteNum": "Porte"
-        },
-        hover_data={
-            "CdFilial": True,
-            "NmFilial": True,
-            "NmPorteLoja": True,
-            "NmRegiaoGeografica": True,
-            "x_real": ":.3f",
-            y_col: ":.3f",
-        }
-    )
-    fig.update_layout(
-        title=dict(text=title, x=0.5, xanchor="center"),
-        paper_bgcolor="#f2f2f2",
-        plot_bgcolor="#f2f2f2",
-        margin=dict(l=40, r=40, t=60, b=40),
-        xaxis=dict(
-            showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)",
-            zeroline=False, range=[0,0.6]
-        ),
-        yaxis=dict(
-            showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)",
-            zeroline=False, range=[0,2]
-        ),
-        legend=dict(
-            title="Região Geográfica",
-            orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5
-        ),
-        width=1200,   # largura 4
-        height=400,   # altura 3
-    )
-
-    fig.update_traces(marker=dict(line=dict(width=0.6, color="rgba(0,0,0,0.35)")))
-    # linha de referência y=x
-    fig.add_shape(
-        type="line", x0=0, y0=0, x1=1, y1=1,
-        line=dict(color="rgba(0,0,0,0.45)", width=0.2, dash="dash")
-    )
-    return fig
-
 fig_nova = make_scatter(pdf, "y_nova",
                         "PercMatrizNova médio por filial (previsão)",
                         "Real vs Matriz Nova – por filial")
@@ -1248,60 +1019,6 @@ import plotly.express as px
 # Definição de paleta: tons de azul e vermelho
 # Ajuste a ordem ou adicione mais se tiver >2 regiões
 palette = ["#1f77b4", "#d62728", "#aec7e8", "#ff9896"]
-
-def make_scatter(df, y_col, y_label, title):
-    fig = px.scatter(
-        df,
-        x="x_real",
-        y=y_col,
-        size="PorteNum",                 
-        color="NmRegiaoGeografica",      
-        color_discrete_sequence=palette,
-        size_max=12,                     
-        opacity=0.75,
-        labels={
-            "x_real": "Percentual_QtDemanda médio por filial (real)",
-            y_col:   y_label,
-            "NmRegiaoGeografica": "Região Geográfica",
-            "PorteNum": "Porte"
-        },
-        hover_data={
-            "CdFilial": True,
-            "NmFilial": True,
-            "NmPorteLoja": True,
-            "NmRegiaoGeografica": True,
-            "x_real": ":.3f",
-            y_col: ":.3f",
-        }
-    )
-    fig.update_layout(
-        title=dict(text=title, x=0.5, xanchor="center"),
-        paper_bgcolor="#f2f2f2",
-        plot_bgcolor="#f2f2f2",
-        margin=dict(l=40, r=40, t=60, b=40),
-        xaxis=dict(
-            showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)",
-            zeroline=False, range=[0,0.6]
-        ),
-        yaxis=dict(
-            showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)",
-            zeroline=False, range=[0,2]
-        ),
-        legend=dict(
-            title="Região Geográfica",
-            orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5
-        ),
-        width=1200,   # largura 4
-        height=400,   # altura 3
-    )
-
-    fig.update_traces(marker=dict(line=dict(width=0.6, color="rgba(0,0,0,0.35)")))
-    # linha de referência y=x
-    fig.add_shape(
-        type="line", x0=0, y0=0, x1=1, y1=1,
-        line=dict(color="rgba(0,0,0,0.45)", width=1.0, dash="dash")
-    )
-    return fig
 
 fig_nova = make_scatter(pdf, "y_nova",
                         "PercMatrizNova médio por filial (previsão)",

@@ -20,118 +20,168 @@ categorias_list = [
 
 # COMMAND ----------
 
-(
-    spark.table('databox.bcg_comum.supply_matriz_merecimento_linha_leve')
-    .join(
-        spark.table('data_engineering_prd.app_venda.mercadoria')
-        .select('CdSkuLoja', 'NmSetorGerencial')
-        .distinct()
-        .filter(F.col("NmSetorGerencial") == 'PORTATEIS')
-        .filter(F.col("StUltimaVersaoMercadoria") == 'Y')
-        , on=F.col('CdSku') == F.col('CdSkuLoja'),
-        how='inner'
-        )
-    .select(
-            "CdFilial", "NmPorteLoja", "NmRegiaoGeografica", "CdSku", "grupo_de_necessidade", "NmSetorGerencial",
-            F.round(100*F.col("Merecimento_Final_Media90_Qt_venda_sem_ruptura"), 4).alias("Merecimento_Percentual_offline"),
-            #F.round(100*F.col("Merecimento_Final_Media180_Qt_venda_sem_ruptura"), 2).alias("Merecimento_MedMovel180")
-            )
-    # .groupBy("CdSku").agg(
-    #     F.sum("Merecimento_Percentual_offline"),
-    #     F.count("CdFilial"))
-    .filter(~F.col("grupo_de_necessidade").isin("FRITADEIRA ELETRICA (CAPSULA)_220 VOLTS                               "))
-    .filter(~F.col("grupo_de_necessidade").isin("FRITADEIRA ELETRICA (CAPSULA)_110 VOLTS                               "))
-    .groupBy("CdSku").agg(F.sum("Merecimento_Percentual_offline"))
+from pyspark.sql import functions as F, Window as W
 
+# ---------- OFFLINE ----------
+df_offline = (
+    spark.table('databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste1009')
+    .select(
+        "CdFilial","NmPorteLoja","NmRegiaoGeografica","CdSku","grupo_de_necessidade",
+        (100*F.col("Merecimento_Final_Media90_Qt_venda_sem_ruptura")).alias("Merecimento_Percentual_offline_raw")
+    )
+    .filter(F.col("CdSku")==5286301)
+    .filter(F.col("grupo_de_necessidade")=="Telef pp")
+    .join(
+        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+        .select("CdFilial","NmFilial"),
+        on="CdFilial", how="left"
+    )
+)
+
+win_off = W.partitionBy("CdSku")
+tot_off = F.sum("Merecimento_Percentual_offline_raw").over(win_off)
+
+df_offline_norm = (
+    df_offline
+    .withColumn(
+        "Merecimento_Percentual_offline",
+        F.round(F.when(tot_off>0, F.col("Merecimento_Percentual_offline_raw")*(100.0/tot_off)).otherwise(0.0), 3)
+    )
+)
+
+# linhas normalizadas
+df_offline_norm.drop("Merecimento_Percentual_offline_raw").display()
+
+# conferência raw vs normalizada
+(
+    df_offline_norm.groupBy("CdSku")
+    .agg(
+        F.round(F.sum("Merecimento_Percentual_offline_raw"),2).alias("Soma_Raw"),
+        F.round(F.sum("Merecimento_Percentual_offline"),2).alias("Soma_Normalizada")
+    )
 ).display()
 
-# COMMAND ----------
 
-# (
-#     spark.table('databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste0809')
-#     .select(
-#             "CdFilial", "NmPorteLoja", "NmRegiaoGeografica", "CdSku", "grupo_de_necessidade", 
-#             F.round(100*F.col("Merecimento_Final_Media90_Qt_venda_sem_ruptura"), 3).alias("Merecimento_Percentual_offline"),
-#             #F.round(100*F.col("Merecimento_Final_Media180_Qt_venda_sem_ruptura"), 2).alias("Merecimento_MedMovel180")
-#             )
-#     #.filter(F.col("CdFilial").isin(2528, 3604))
-
-#     #.filter(F.col("grupo_de_necessidade").isin('Telef pp'))
-#    # .groupBy("CdSku").agg(F.sum("Merecimento_Percentual_offline"))
-# ).display()
-    
-
-(
+# ---------- ONLINE ----------
+df_online = (
     spark.table('databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste0809')
     .select(
-            "CdFilial", 
-#             #"NmPorteLoja", 
-#             #"NmRegiaoGeografica", 
-            "CdSku", 
-            "grupo_de_necessidade", 
-            F.round(100*F.col("Merecimento_Final_Media90_Qt_venda_sem_ruptura"), 3).alias("Merecimento_Percentual_online"),
-            )
-      .filter(F.col("grupo_de_necessidade").isin('Telef pp'))
-      .filter(F.col("CdSku").isin(5286301))
-      .join(
-              spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
-              .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
-              on="CdFilial", how="left"
-      )
+        "CdFilial","CdSku","grupo_de_necessidade",
+        (100*F.col("Merecimento_Final_Media90_Qt_venda_sem_ruptura")).alias("Merecimento_Percentual_online_raw")
+    )
+    .filter(F.col("grupo_de_necessidade")=="Telef pp")
+    .filter(F.col("CdSku")==5286301)
+    .join(
+        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+        .select("CdFilial","NmFilial","NmPorteLoja","NmRegiaoGeografica"),
+        on="CdFilial", how="left"
+    )
+)
 
-     #.groupBy("CdSku").agg(F.sum("Merecimento_Percentual_online"))
+win_on = W.partitionBy("CdSku")
+tot_on = F.sum("Merecimento_Percentual_online_raw").over(win_on)
+
+df_online_norm = (
+    df_online
+    .withColumn(
+        "Merecimento_Percentual_online",
+        F.round(F.when(tot_on>0, F.col("Merecimento_Percentual_online_raw")*(100.0/tot_on)).otherwise(0.0), 3)
+    )
+)
+
+# linhas normalizadas
+df_online_norm.drop("Merecimento_Percentual_online_raw").display()
+
+# conferência raw vs normalizada
+(
+    df_online_norm.groupBy("CdSku")
+    .agg(
+        F.round(F.sum("Merecimento_Percentual_online_raw"),2).alias("Soma_Raw"),
+        F.round(F.sum("Merecimento_Percentual_online"),2).alias("Soma_Normalizada")
+    )
 ).display()
 
 # COMMAND ----------
 
-spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa').display()
+from pyspark.sql import functions as F, Window as W
 
+# ---------- OFFLINE ----------
+df_offline = (
+    spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_teste1009')
+    .select(
+        "CdFilial","NmPorteLoja","NmRegiaoGeografica","CdSku","grupo_de_necessidade",
+        (100*F.col("Merecimento_Final_Media90_Qt_venda_sem_ruptura")).alias("Merecimento_Percentual_offline_raw")
+    )
+    .filter(F.col("CdSku")==5338182)
+    .filter(F.col("grupo_de_necessidade").isin("TV 50 ALTO P", "TV 55 ALTO P"))
+    .join(
+        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+        .select("CdFilial","NmFilial"),
+        on="CdFilial", how="left"
+    )
+)
 
-# COMMAND ----------
+win_off = W.partitionBy("CdSku")
+tot_off = F.sum("Merecimento_Percentual_offline_raw").over(win_off)
 
-spark.table('data_engineering_prd.app_operacoesloja.roteirizacaofilialencerrada').display()
+df_offline_norm = (
+    df_offline
+    .withColumn(
+        "Merecimento_Percentual_offline",
+        F.round(F.when(tot_off>0, F.col("Merecimento_Percentual_offline_raw")*(100.0/tot_off)).otherwise(0.0), 3)
+    )
+)
 
+# linhas normalizadas
+df_offline_norm.drop("Merecimento_Percentual_offline_raw").display()
 
-# COMMAND ----------
-
-spark.table('data_engineering_prd.app_operacoesloja.roteirizacaoinauguracao').display()
-
-
-# COMMAND ----------
-
-# (
-#     spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_teste0309')
-#     .select(
-#             "CdFilial", "NmPorteLoja", "NmRegiaoGeografica", "CdSku", "grupo_de_necessidade", 
-#             F.round(100*F.col("Merecimento_Final_Media90_Qt_venda_sem_ruptura"), 3).alias("Merecimento_Percentual_offline"),
-#             #F.round(100*F.col("Merecimento_Final_Media180_Qt_venda_sem_ruptura"), 2).alias("Merecimento_MedMovel180")
-#             )
-#     #.filter(F.col("grupo_de_necessidade").isin('TV 50 ALTO P', 'TV 55 ALTO P'))
-#     #.filter(F.col("CdFilial").isin(2528, 3604))
-
-#     #.groupBy("CdSku").agg(F.sum("Merecimento_Percentual_offline"))
-# ).display()
-    
-
+# conferência raw vs normalizada
 (
+    df_offline_norm.groupBy("CdSku")
+    .agg(
+        F.round(F.sum("Merecimento_Percentual_offline_raw"),3).alias("Soma_Raw"),
+        F.round(F.sum("Merecimento_Percentual_offline"),3).alias("Soma_Normalizada")
+    )
+).display()
+
+
+# ---------- ONLINE ----------
+df_online = (
     spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste0809')
     .select(
-            "CdFilial", 
-#             #"NmPorteLoja", 
-#             #"NmRegiaoGeografica", 
-            "CdSku", 
-            "grupo_de_necessidade", 
-            F.round(100*F.col("Merecimento_Final_Media90_Qt_venda_sem_ruptura"), 3).alias("Merecimento_Percentual_online"),
-            )
-      .filter(F.col("grupo_de_necessidade").isin('TV 55 ALTO P', 'TV 50 ALTO P'))
-      #.filter(F.col("CdSku").isin(52))
-#       .join(
-#               spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
-#               .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
-#               on="CdFilial", how="left"
-#       )
+        "CdFilial","CdSku","grupo_de_necessidade",
+        (100*F.col("Merecimento_Final_Media90_Qt_venda_sem_ruptura")).alias("Merecimento_Percentual_online_raw")
+    )
+    .filter(F.col("grupo_de_necessidade").isin("TV 50 ALTO P", "TV 55 ALTO P"))
+    .filter(F.col("CdSku")==5338182)
+    .join(
+        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+        .select("CdFilial","NmFilial","NmPorteLoja","NmRegiaoGeografica"),
+        on="CdFilial", how="left"
+    )
+)
 
-     #.groupBy("CdSku").agg(F.sum("Merecimento_Percentual_online"))
+win_on = W.partitionBy("CdSku")
+tot_on = F.sum("Merecimento_Percentual_online_raw").over(win_on)
+
+df_online_norm = (
+    df_online
+    .withColumn(
+        "Merecimento_Percentual_online",
+        F.round(F.when(tot_on>0, F.col("Merecimento_Percentual_online_raw")*(100.0/tot_on)).otherwise(0.0), 3)
+    )
+)
+
+# linhas normalizadas
+df_online_norm.drop("Merecimento_Percentual_online_raw").display()
+
+# conferência raw vs normalizada
+(
+    df_online_norm.groupBy("CdSku")
+    .agg(
+        F.round(F.sum("Merecimento_Percentual_online_raw"),3).alias("Soma_Raw"),
+        F.round(F.sum("Merecimento_Percentual_online"),3).alias("Soma_Normalizada")
+    )
 ).display()
 
 # COMMAND ----------
@@ -157,53 +207,6 @@ spark.table('data_engineering_prd.app_operacoesloja.roteirizacaoinauguracao').di
 
      #.groupBy("CdSku").agg(F.sum("Merecimento_Percentual_online"))
 ).display()
-
-# COMMAND ----------
-
-(
-    spark.table('databox.bcg_comum.supply_matriz_merecimento_linha_leve')
-    .groupBy('CdSku').agg(
-        F.sum('Merecimento_Final_Media360_Qt_venda_sem_ruptura')
-        )
-).display()
-
-# COMMAND ----------
-
-(
-    spark.table('databox.bcg_comum.supply_matriz_merecimento_telefonia_celular')
-    .filter(F.col("CdSKu").isin(
-        5316979, 5316987, 5316995,
-        5327580, 5327571, 5327598,
-        5327563))
-    .select(
-        'CdFilial', 
-        'grupo_de_necessidade', 
-        'CdSku', 
-        F.round(100*F.col('Merecimento_Final_Media90_Qt_venda_sem_ruptura'), 3).alias('merecimento_percentual_nova_matriz')
-    ).orderBy('CdSku', 'CdFilial')
-).display()
-
-# COMMAND ----------
-
-(
-    spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas')
-    .filter(F.col("CdSKu").isin(
-        5307708, 5284546, 5313619,))
-    .select(
-        'CdFilial', 
-        'grupo_de_necessidade', 
-        'CdSku', 
-        F.round(100*F.col('Merecimento_Final_Media90_Qt_venda_sem_ruptura'), 3).alias('merecimento_percentual_nova_matriz')
-    ).orderBy('CdSku', 'CdFilial')
-).display()
-
-# .groupBy('CdSku').agg(F.sum('merecimento_percentual_nova_matriz'))
-
-# COMMAND ----------
-
-for categoria in categorias_list:
-    ## TODO SALVAR TABELAS EM ARQUIVOS CSV COM DATA DE HOJE
-  print(categoria)
 
 # COMMAND ----------
 
