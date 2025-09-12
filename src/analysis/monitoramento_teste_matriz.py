@@ -963,6 +963,478 @@ if dfs_all:
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## Comparação Visual - DDE Médio por Cortes
+
+# COMMAND ----------
+
+def create_dde_comparison_visualizations(df_estoque_loja_porte_regiao, df_comparacao, categorias_teste):
+    """
+    Cria visualizações comparativas de DDE Médio para os 4 cortes
+    """
+    for categoria in categorias_teste:
+        print(f"\n=== COMPARAÇÃO VISUAL DDE MÉDIO - {categoria} ===")
+        
+        # 1. CORTE "TUDO" - Agregado geral
+        create_tudo_cut_visualization(df_estoque_loja_porte_regiao[categoria], categoria)
+        
+        # 2. CORTE "PORTE" - Por porte de loja
+        create_porte_cut_visualization(df_estoque_loja_porte_regiao[categoria], categoria)
+        
+        # 3. CORTE "REGIÃO" - Por região geográfica
+        create_regiao_cut_visualization(df_estoque_loja_porte_regiao[categoria], categoria)
+        
+        # 4. CORTE "DELTA MERECIMENTO" - Por delta merecimento
+        create_delta_merecimento_cut_visualization(
+            df_estoque_loja_porte_regiao[categoria], 
+            df_comparacao[categoria], 
+            categoria
+        )
+
+def create_tudo_cut_visualization(df_estoque, categoria):
+    """
+    Cria visualização para corte "Tudo" - agregado geral
+    """
+    # Agregar por grupo e período
+    df_base = (
+        df_estoque
+        .groupBy("grupo", "periodo_analise")
+        .agg(
+            F.round(F.median("DDE"), 1).alias("DDE_medio")
+        )
+    )
+    
+    # Pivotar para ter baseline e piloto em colunas
+    df_pivot = (
+        df_base
+        .groupBy("grupo")
+        .pivot("periodo_analise")
+        .agg(F.first("DDE_medio"))
+        .fillna(0.0)
+    )
+    
+    # Converter para pandas
+    df_pandas = df_pivot.toPandas()
+    
+    # Criar gráfico
+    fig = go.Figure()
+    
+    # Cores harmoniosas
+    colors = {
+        'teste': ['#1f77b4', '#4a90e2'],  # Azul - baseline mais claro, piloto mais escuro
+        'controle': ['#ff7f0e', '#ffa500']  # Laranja - baseline mais claro, piloto mais escuro
+    }
+    
+    # Adicionar barras para Teste
+    fig.add_trace(go.Bar(
+        name='Teste - Baseline',
+        x=['Teste'],
+        y=[df_pandas[df_pandas['grupo'] == 'teste']['baseline'].iloc[0] if 'baseline' in df_pandas.columns else 0],
+        marker_color=colors['teste'][0],
+        opacity=0.6,
+        text=[f"{df_pandas[df_pandas['grupo'] == 'teste']['baseline'].iloc[0]:.1f}" if 'baseline' in df_pandas.columns else "0.0"],
+        textposition='outside'
+    ))
+    
+    fig.add_trace(go.Bar(
+        name='Teste - Piloto',
+        x=['Teste'],
+        y=[df_pandas[df_pandas['grupo'] == 'teste']['piloto'].iloc[0] if 'piloto' in df_pandas.columns else 0],
+        marker_color=colors['teste'][1],
+        opacity=1.0,
+        text=[f"{df_pandas[df_pandas['grupo'] == 'teste']['piloto'].iloc[0]:.1f}" if 'piloto' in df_pandas.columns else "0.0"],
+        textposition='outside'
+    ))
+    
+    # Adicionar barras para Controle
+    fig.add_trace(go.Bar(
+        name='Controle - Baseline',
+        x=['Controle'],
+        y=[df_pandas[df_pandas['grupo'] == 'controle']['baseline'].iloc[0] if 'baseline' in df_pandas.columns else 0],
+        marker_color=colors['controle'][0],
+        opacity=0.6,
+        text=[f"{df_pandas[df_pandas['grupo'] == 'controle']['baseline'].iloc[0]:.1f}" if 'baseline' in df_pandas.columns else "0.0"],
+        textposition='outside'
+    ))
+    
+    fig.add_trace(go.Bar(
+        name='Controle - Piloto',
+        x=['Controle'],
+        y=[df_pandas[df_pandas['grupo'] == 'controle']['piloto'].iloc[0] if 'piloto' in df_pandas.columns else 0],
+        marker_color=colors['controle'][1],
+        opacity=1.0,
+        text=[f"{df_pandas[df_pandas['grupo'] == 'controle']['piloto'].iloc[0]:.1f}" if 'piloto' in df_pandas.columns else "0.0"],
+        textposition='outside'
+    ))
+    
+    # Calcular e mostrar diffs
+    teste_baseline = df_pandas[df_pandas['grupo'] == 'teste']['baseline'].iloc[0] if 'baseline' in df_pandas.columns else 0
+    teste_piloto = df_pandas[df_pandas['grupo'] == 'teste']['piloto'].iloc[0] if 'piloto' in df_pandas.columns else 0
+    controle_baseline = df_pandas[df_pandas['grupo'] == 'controle']['baseline'].iloc[0] if 'baseline' in df_pandas.columns else 0
+    controle_piloto = df_pandas[df_pandas['grupo'] == 'controle']['piloto'].iloc[0] if 'piloto' in df_pandas.columns else 0
+    
+    delta_teste = teste_piloto - teste_baseline
+    delta_controle = controle_piloto - controle_baseline
+    diff_in_diff = delta_teste - delta_controle
+    
+    # Configurar layout
+    fig.update_layout(
+        title=f"DDE Médio - Corte Tudo - {categoria}<br><sub>Delta Teste: {delta_teste:+.1f} | Delta Controle: {delta_controle:+.1f} | Diff-in-Diff: {diff_in_diff:+.1f}</sub>",
+        xaxis_title="Grupo",
+        yaxis_title="DDE Médio (dias)",
+        barmode='group',
+        paper_bgcolor="#F2F2F2",
+        plot_bgcolor="white",
+        height=500,
+        font=dict(size=12)
+    )
+    
+    fig.show()
+
+def create_porte_cut_visualization(df_estoque, categoria):
+    """
+    Cria visualização para corte "Porte" - por porte de loja
+    """
+    # Agregar por grupo, período e porte
+    df_base = (
+        df_estoque
+        .groupBy("grupo", "periodo_analise", "NmPorteLoja")
+        .agg(
+            F.round(F.median("DDE"), 1).alias("DDE_medio")
+        )
+        .dropna(subset=["NmPorteLoja"])
+    )
+    
+    # Pivotar para ter baseline e piloto em colunas
+    df_pivot = (
+        df_base
+        .groupBy("grupo", "NmPorteLoja")
+        .pivot("periodo_analise")
+        .agg(F.first("DDE_medio"))
+        .fillna(0.0)
+    )
+    
+    # Converter para pandas
+    df_pandas = df_pivot.toPandas()
+    
+    # Criar gráfico
+    fig = go.Figure()
+    
+    # Cores harmoniosas
+    colors = {
+        'teste': ['#1f77b4', '#4a90e2'],  # Azul
+        'controle': ['#ff7f0e', '#ffa500']  # Laranja
+    }
+    
+    # Obter portes únicos
+    portes = sorted(df_pandas['NmPorteLoja'].unique())
+    
+    for porte in portes:
+        porte_data = df_pandas[df_pandas['NmPorteLoja'] == porte]
+        
+        # Teste
+        teste_baseline = porte_data[porte_data['grupo'] == 'teste']['baseline'].iloc[0] if 'baseline' in porte_data.columns else 0
+        teste_piloto = porte_data[porte_data['grupo'] == 'teste']['piloto'].iloc[0] if 'piloto' in porte_data.columns else 0
+        
+        # Controle
+        controle_baseline = porte_data[porte_data['grupo'] == 'controle']['baseline'].iloc[0] if 'baseline' in porte_data.columns else 0
+        controle_piloto = porte_data[porte_data['grupo'] == 'controle']['piloto'].iloc[0] if 'piloto' in porte_data.columns else 0
+        
+        # Adicionar barras
+        fig.add_trace(go.Bar(
+            name=f'{porte} - Teste B',
+            x=[f'{porte} - Teste'],
+            y=[teste_baseline],
+            marker_color=colors['teste'][0],
+            opacity=0.6,
+            text=[f"{teste_baseline:.1f}"],
+            textposition='outside',
+            showlegend=False
+        ))
+        
+        fig.add_trace(go.Bar(
+            name=f'{porte} - Teste P',
+            x=[f'{porte} - Teste'],
+            y=[teste_piloto],
+            marker_color=colors['teste'][1],
+            opacity=1.0,
+            text=[f"{teste_piloto:.1f}"],
+            textposition='outside',
+            showlegend=False
+        ))
+        
+        fig.add_trace(go.Bar(
+            name=f'{porte} - Controle B',
+            x=[f'{porte} - Controle'],
+            y=[controle_baseline],
+            marker_color=colors['controle'][0],
+            opacity=0.6,
+            text=[f"{controle_baseline:.1f}"],
+            textposition='outside',
+            showlegend=False
+        ))
+        
+        fig.add_trace(go.Bar(
+            name=f'{porte} - Controle P',
+            x=[f'{porte} - Controle'],
+            y=[controle_piloto],
+            marker_color=colors['controle'][1],
+            opacity=1.0,
+            text=[f"{controle_piloto:.1f}"],
+            textposition='outside',
+            showlegend=False
+        ))
+    
+    # Configurar layout
+    fig.update_layout(
+        title=f"DDE Médio - Corte Porte - {categoria}",
+        xaxis_title="Porte da Loja",
+        yaxis_title="DDE Médio (dias)",
+        barmode='group',
+        paper_bgcolor="#F2F2F2",
+        plot_bgcolor="white",
+        height=500,
+        font=dict(size=12),
+        xaxis_tickangle=-45
+    )
+    
+    fig.show()
+
+def create_regiao_cut_visualization(df_estoque, categoria):
+    """
+    Cria visualização para corte "Região" - por região geográfica
+    """
+    # Agregar por grupo, período e região
+    df_base = (
+        df_estoque
+        .groupBy("grupo", "periodo_analise", "NmRegiaoGeografica")
+        .agg(
+            F.round(F.median("DDE"), 1).alias("DDE_medio")
+        )
+        .dropna(subset=["NmRegiaoGeografica"])
+    )
+    
+    # Pivotar para ter baseline e piloto em colunas
+    df_pivot = (
+        df_base
+        .groupBy("grupo", "NmRegiaoGeografica")
+        .pivot("periodo_analise")
+        .agg(F.first("DDE_medio"))
+        .fillna(0.0)
+    )
+    
+    # Converter para pandas
+    df_pandas = df_pivot.toPandas()
+    
+    # Criar gráfico
+    fig = go.Figure()
+    
+    # Cores harmoniosas
+    colors = {
+        'teste': ['#1f77b4', '#4a90e2'],  # Azul
+        'controle': ['#ff7f0e', '#ffa500']  # Laranja
+    }
+    
+    # Obter regiões únicas
+    regioes = sorted(df_pandas['NmRegiaoGeografica'].unique())
+    
+    for regiao in regioes:
+        regiao_data = df_pandas[df_pandas['NmRegiaoGeografica'] == regiao]
+        
+        # Teste
+        teste_baseline = regiao_data[regiao_data['grupo'] == 'teste']['baseline'].iloc[0] if 'baseline' in regiao_data.columns else 0
+        teste_piloto = regiao_data[regiao_data['grupo'] == 'teste']['piloto'].iloc[0] if 'piloto' in regiao_data.columns else 0
+        
+        # Controle
+        controle_baseline = regiao_data[regiao_data['grupo'] == 'controle']['baseline'].iloc[0] if 'baseline' in regiao_data.columns else 0
+        controle_piloto = regiao_data[regiao_data['grupo'] == 'controle']['piloto'].iloc[0] if 'piloto' in regiao_data.columns else 0
+        
+        # Adicionar barras
+        fig.add_trace(go.Bar(
+            name=f'{regiao} - Teste B',
+            x=[f'{regiao} - Teste'],
+            y=[teste_baseline],
+            marker_color=colors['teste'][0],
+            opacity=0.6,
+            text=[f"{teste_baseline:.1f}"],
+            textposition='outside',
+            showlegend=False
+        ))
+        
+        fig.add_trace(go.Bar(
+            name=f'{regiao} - Teste P',
+            x=[f'{regiao} - Teste'],
+            y=[teste_piloto],
+            marker_color=colors['teste'][1],
+            opacity=1.0,
+            text=[f"{teste_piloto:.1f}"],
+            textposition='outside',
+            showlegend=False
+        ))
+        
+        fig.add_trace(go.Bar(
+            name=f'{regiao} - Controle B',
+            x=[f'{regiao} - Controle'],
+            y=[controle_baseline],
+            marker_color=colors['controle'][0],
+            opacity=0.6,
+            text=[f"{controle_baseline:.1f}"],
+            textposition='outside',
+            showlegend=False
+        ))
+        
+        fig.add_trace(go.Bar(
+            name=f'{regiao} - Controle P',
+            x=[f'{regiao} - Controle'],
+            y=[controle_piloto],
+            marker_color=colors['controle'][1],
+            opacity=1.0,
+            text=[f"{controle_piloto:.1f}"],
+            textposition='outside',
+            showlegend=False
+        ))
+    
+    # Configurar layout
+    fig.update_layout(
+        title=f"DDE Médio - Corte Região - {categoria}",
+        xaxis_title="Região",
+        yaxis_title="DDE Médio (dias)",
+        barmode='group',
+        paper_bgcolor="#F2F2F2",
+        plot_bgcolor="white",
+        height=500,
+        font=dict(size=12),
+        xaxis_tickangle=-45
+    )
+    
+    fig.show()
+
+def create_delta_merecimento_cut_visualization(df_estoque, df_comparacao, categoria):
+    """
+    Cria visualização para corte "Delta Merecimento" - por delta merecimento
+    """
+    # Join com dados de comparação para obter bucket_delta
+    df_joined = (
+        df_estoque
+        .join(
+            df_comparacao
+            .select("CdFilial", "grupo_de_necessidade", "bucket_delta")
+            .distinct(),
+            on=["CdFilial", "grupo_de_necessidade"],
+            how="inner"
+        )
+    )
+    
+    # Agregar por grupo, período e bucket_delta
+    df_base = (
+        df_joined
+        .groupBy("grupo", "periodo_analise", "bucket_delta")
+        .agg(
+            F.round(F.median("DDE"), 1).alias("DDE_medio")
+        )
+        .dropna(subset=["bucket_delta"])
+    )
+    
+    # Pivotar para ter baseline e piloto em colunas
+    df_pivot = (
+        df_base
+        .groupBy("grupo", "bucket_delta")
+        .pivot("periodo_analise")
+        .agg(F.first("DDE_medio"))
+        .fillna(0.0)
+    )
+    
+    # Converter para pandas
+    df_pandas = df_pivot.toPandas()
+    
+    # Criar gráfico
+    fig = go.Figure()
+    
+    # Cores harmoniosas
+    colors = {
+        'teste': ['#1f77b4', '#4a90e2'],  # Azul
+        'controle': ['#ff7f0e', '#ffa500']  # Laranja
+    }
+    
+    # Obter buckets únicos
+    buckets = sorted(df_pandas['bucket_delta'].unique())
+    
+    for bucket in buckets:
+        bucket_data = df_pandas[df_pandas['bucket_delta'] == bucket]
+        
+        # Teste
+        teste_baseline = bucket_data[bucket_data['grupo'] == 'teste']['baseline'].iloc[0] if 'baseline' in bucket_data.columns else 0
+        teste_piloto = bucket_data[bucket_data['grupo'] == 'teste']['piloto'].iloc[0] if 'piloto' in bucket_data.columns else 0
+        
+        # Controle
+        controle_baseline = bucket_data[bucket_data['grupo'] == 'controle']['baseline'].iloc[0] if 'baseline' in bucket_data.columns else 0
+        controle_piloto = bucket_data[bucket_data['grupo'] == 'controle']['piloto'].iloc[0] if 'piloto' in bucket_data.columns else 0
+        
+        # Adicionar barras
+        fig.add_trace(go.Bar(
+            name=f'{bucket} - Teste B',
+            x=[f'{bucket} - Teste'],
+            y=[teste_baseline],
+            marker_color=colors['teste'][0],
+            opacity=0.6,
+            text=[f"{teste_baseline:.1f}"],
+            textposition='outside',
+            showlegend=False
+        ))
+        
+        fig.add_trace(go.Bar(
+            name=f'{bucket} - Teste P',
+            x=[f'{bucket} - Teste'],
+            y=[teste_piloto],
+            marker_color=colors['teste'][1],
+            opacity=1.0,
+            text=[f"{teste_piloto:.1f}"],
+            textposition='outside',
+            showlegend=False
+        ))
+        
+        fig.add_trace(go.Bar(
+            name=f'{bucket} - Controle B',
+            x=[f'{bucket} - Controle'],
+            y=[controle_baseline],
+            marker_color=colors['controle'][0],
+            opacity=0.6,
+            text=[f"{controle_baseline:.1f}"],
+            textposition='outside',
+            showlegend=False
+        ))
+        
+        fig.add_trace(go.Bar(
+            name=f'{bucket} - Controle P',
+            x=[f'{bucket} - Controle'],
+            y=[controle_piloto],
+            marker_color=colors['controle'][1],
+            opacity=1.0,
+            text=[f"{controle_piloto:.1f}"],
+            textposition='outside',
+            showlegend=False
+        ))
+    
+    # Configurar layout
+    fig.update_layout(
+        title=f"DDE Médio - Corte Delta Merecimento - {categoria}",
+        xaxis_title="Delta Merecimento",
+        yaxis_title="DDE Médio (dias)",
+        barmode='group',
+        paper_bgcolor="#F2F2F2",
+        plot_bgcolor="white",
+        height=500,
+        font=dict(size=12),
+        xaxis_tickangle=-45
+    )
+    
+    fig.show()
+
+# Executar visualizações comparativas
+create_dde_comparison_visualizations(df_estoque_loja_porte_regiao, df_comparacao, categorias_teste)
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## TODO: análises de acompanhamento
 
 # COMMAND ----------
