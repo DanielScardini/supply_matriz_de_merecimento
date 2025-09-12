@@ -933,6 +933,346 @@ create_consolidated_dashboard(df_analise_regiao, categorias_teste)
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## Análise Detalhada por Categoria e Ângulos
+
+# COMMAND ----------
+
+def analyze_by_angles(df_estoque_loja_porte_regiao, df_comparacao, categorias_teste):
+    """
+    Analisa diff-in-diff por categoria e 3 ângulos: Porte, Região e Delta Merecimento
+    """
+    resultados = {}
+    
+    for categoria in categorias_teste:
+        print(f"\n=== ANÁLISE DETALHADA - {categoria} ===")
+        
+        # 1. ANÁLISE POR PORTE DE LOJA
+        print("\n--- 1. ANÁLISE POR PORTE DE LOJA ---")
+        df_porte = analyze_by_porte(df_estoque_loja_porte_regiao[categoria], categoria)
+        resultados[f"{categoria}_porte"] = df_porte
+        
+        # 2. ANÁLISE POR REGIÃO
+        print("\n--- 2. ANÁLISE POR REGIÃO ---")
+        df_regiao = analyze_by_regiao(df_estoque_loja_porte_regiao[categoria], categoria)
+        resultados[f"{categoria}_regiao"] = df_regiao
+        
+        # 3. ANÁLISE POR DELTA MERECIMENTO
+        print("\n--- 3. ANÁLISE POR DELTA MERECIMENTO ---")
+        df_delta_merecimento = analyze_by_delta_merecimento(
+            df_estoque_loja_porte_regiao[categoria], 
+            df_comparacao[categoria], 
+            categoria
+        )
+        resultados[f"{categoria}_delta_merecimento"] = df_delta_merecimento
+    
+    return resultados
+
+def analyze_by_porte(df_estoque, categoria):
+    """
+    Analisa diff-in-diff por porte de loja
+    """
+    # Agregar por grupo, período e porte
+    df_base = (
+        df_estoque
+        .groupBy("grupo", "periodo_analise", "NmPorteLoja")
+        .agg(
+            F.round(F.median("DDE"), 1).alias("DDE_medio"),
+            F.round(100 * F.avg(F.when(F.col("FlagRuptura") == 1, 1).otherwise(0)), 1).alias("PctRupturaBinario"),
+            F.sum("ReceitaPerdidaRuptura").alias("sum_perda"),
+            F.sum("Receita").alias("sum_receita"),
+        )
+        .withColumn(
+            "PctRupturaReceita",
+            F.round(100 * F.when(F.col("sum_receita") > 0, F.col("sum_perda")/F.col("sum_receita")).otherwise(0.0), 1)
+        )
+        .select("grupo","periodo_analise","NmPorteLoja","DDE_medio","PctRupturaBinario","PctRupturaReceita")
+        .dropna(subset=["NmPorteLoja"])
+    )
+    
+    # Calcular diff-in-diff
+    df_diff = calculate_diff_in_diff(df_base, "NmPorteLoja")
+    
+    print(f"Diff-in-Diff por Porte - {categoria}:")
+    df_diff.orderBy("NmPorteLoja").display()
+    
+    return df_diff
+
+def analyze_by_regiao(df_estoque, categoria):
+    """
+    Analisa diff-in-diff por região
+    """
+    # Agregar por grupo, período e região
+    df_base = (
+        df_estoque
+        .groupBy("grupo", "periodo_analise", "NmRegiaoGeografica")
+        .agg(
+            F.round(F.median("DDE"), 1).alias("DDE_medio"),
+            F.round(100 * F.avg(F.when(F.col("FlagRuptura") == 1, 1).otherwise(0)), 1).alias("PctRupturaBinario"),
+            F.sum("ReceitaPerdidaRuptura").alias("sum_perda"),
+            F.sum("Receita").alias("sum_receita"),
+        )
+        .withColumn(
+            "PctRupturaReceita",
+            F.round(100 * F.when(F.col("sum_receita") > 0, F.col("sum_perda")/F.col("sum_receita")).otherwise(0.0), 1)
+        )
+        .select("grupo","periodo_analise","NmRegiaoGeografica","DDE_medio","PctRupturaBinario","PctRupturaReceita")
+        .dropna(subset=["NmRegiaoGeografica"])
+    )
+    
+    # Calcular diff-in-diff
+    df_diff = calculate_diff_in_diff(df_base, "NmRegiaoGeografica")
+    
+    print(f"Diff-in-Diff por Região - {categoria}:")
+    df_diff.orderBy("NmRegiaoGeografica").display()
+    
+    return df_diff
+
+def analyze_by_delta_merecimento(df_estoque, df_comparacao, categoria):
+    """
+    Analisa diff-in-diff por delta de merecimento (acima, abaixo, manteve)
+    """
+    # Join com dados de comparação para obter bucket_delta
+    df_joined = (
+        df_estoque
+        .join(
+            df_comparacao
+            .select("CdFilial", "grupo_de_necessidade", "bucket_delta")
+            .distinct(),
+            on=["CdFilial", "grupo_de_necessidade"],
+            how="inner"
+        )
+    )
+    
+    # Agregar por grupo, período e bucket_delta
+    df_base = (
+        df_joined
+        .groupBy("grupo", "periodo_analise", "bucket_delta")
+        .agg(
+            F.round(F.median("DDE"), 1).alias("DDE_medio"),
+            F.round(100 * F.avg(F.when(F.col("FlagRuptura") == 1, 1).otherwise(0)), 1).alias("PctRupturaBinario"),
+            F.sum("ReceitaPerdidaRuptura").alias("sum_perda"),
+            F.sum("Receita").alias("sum_receita"),
+        )
+        .withColumn(
+            "PctRupturaReceita",
+            F.round(100 * F.when(F.col("sum_receita") > 0, F.col("sum_perda")/F.col("sum_receita")).otherwise(0.0), 1)
+        )
+        .select("grupo","periodo_analise","bucket_delta","DDE_medio","PctRupturaBinario","PctRupturaReceita")
+        .dropna(subset=["bucket_delta"])
+    )
+    
+    # Calcular diff-in-diff
+    df_diff = calculate_diff_in_diff(df_base, "bucket_delta")
+    
+    print(f"Diff-in-Diff por Delta Merecimento - {categoria}:")
+    df_diff.orderBy("bucket_delta").display()
+    
+    return df_diff
+
+def calculate_diff_in_diff(df_base, group_column):
+    """
+    Calcula diff-in-diff para qualquer agrupamento
+    """
+    # Baseline e piloto via WHEN
+    df_wide = (
+        df_base.groupBy(group_column, "grupo")
+        .agg(
+            F.max(F.when(F.col("periodo_analise")=="baseline", F.col("DDE_medio"))).alias("baseline_DDE_medio"),
+            F.max(F.when(F.col("periodo_analise")=="piloto",   F.col("DDE_medio"))).alias("piloto_DDE_medio"),
+            F.max(F.when(F.col("periodo_analise")=="baseline", F.col("PctRupturaBinario"))).alias("baseline_PctRupturaBinario"),
+            F.max(F.when(F.col("periodo_analise")=="piloto",   F.col("PctRupturaBinario"))).alias("piloto_PctRupturaBinario"),
+            F.max(F.when(F.col("periodo_analise")=="baseline", F.col("PctRupturaReceita"))).alias("baseline_PctRupturaReceita"),
+            F.max(F.when(F.col("periodo_analise")=="piloto",   F.col("PctRupturaReceita"))).alias("piloto_PctRupturaReceita"),
+        )
+        .fillna(0.0)
+    )
+    
+    # Deltas piloto - baseline
+    df_delta = (
+        df_wide
+        .withColumn("DDE_delta", F.round(F.col("piloto_DDE_medio") - F.col("baseline_DDE_medio"), 1))
+        .withColumn("PctRupturaBinario_delta", F.round(F.col("piloto_PctRupturaBinario") - F.col("baseline_PctRupturaBinario"), 1))
+        .withColumn("PctRupturaReceita_delta", F.round(F.col("piloto_PctRupturaReceita") - F.col("baseline_PctRupturaReceita"), 1))
+    )
+    
+    # Separar teste e controle
+    df_teste = (
+        df_delta.filter(F.col("grupo") == "teste")
+        .select(
+            F.col(group_column).alias(f"{group_column}_key"),
+            F.col("DDE_delta").alias("DDE_delta_teste"),
+            F.col("PctRupturaBinario_delta").alias("PctRupturaBinario_delta_teste"),
+            F.col("PctRupturaReceita_delta").alias("PctRupturaReceita_delta_teste"),
+        )
+    )
+    
+    df_controle = (
+        df_delta.filter(F.col("grupo") == "controle")
+        .select(
+            F.col(group_column).alias(f"{group_column}_key"),
+            F.col("DDE_delta").alias("DDE_delta_controle"),
+            F.col("PctRupturaBinario_delta").alias("PctRupturaBinario_delta_controle"),
+            F.col("PctRupturaReceita_delta").alias("PctRupturaReceita_delta_controle"),
+        )
+    )
+    
+    # Diff-in-Diff = delta_teste - delta_controle
+    df_diff = (
+        df_teste.join(df_controle, on=f"{group_column}_key", how="inner")
+        .withColumnRenamed(f"{group_column}_key", group_column)
+        .withColumn("DDE_diff_in_diff", F.round(F.col("DDE_delta_teste") - F.col("DDE_delta_controle"), 1))
+        .withColumn("PctRupturaBinario_diff_in_diff", F.round(F.col("PctRupturaBinario_delta_teste") - F.col("PctRupturaBinario_delta_controle"), 1))
+        .withColumn("PctRupturaReceita_diff_in_diff", F.round(F.col("PctRupturaReceita_delta_teste") - F.col("PctRupturaReceita_delta_controle"), 1))
+    )
+    
+    return df_diff
+
+# Executar análises detalhadas
+resultados_detalhados = analyze_by_angles(df_estoque_loja_porte_regiao, df_comparacao, categorias_teste)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Visualizações por Ângulos de Análise
+
+# COMMAND ----------
+
+def create_angle_visualizations(resultados_detalhados, categorias_teste):
+    """
+    Cria visualizações específicas para cada ângulo de análise
+    """
+    for categoria in categorias_teste:
+        print(f"\n=== VISUALIZAÇÕES - {categoria} ===")
+        
+        # 1. Visualização por Porte
+        create_porte_visualization(resultados_detalhados[f"{categoria}_porte"], categoria)
+        
+        # 2. Visualização por Região
+        create_regiao_visualization(resultados_detalhados[f"{categoria}_regiao"], categoria)
+        
+        # 3. Visualização por Delta Merecimento
+        create_delta_merecimento_visualization(resultados_detalhados[f"{categoria}_delta_merecimento"], categoria)
+
+def create_porte_visualization(df_porte, categoria):
+    """
+    Cria visualização para análise por porte
+    """
+    df_pandas = df_porte.toPandas()
+    
+    # Criar gráfico de barras para DDE
+    fig_dde = px.bar(
+        df_pandas, 
+        x="NmPorteLoja", 
+        y="DDE_diff_in_diff",
+        title=f"DDE Diff-in-Diff por Porte - {categoria}",
+        color="DDE_diff_in_diff",
+        color_continuous_scale=["#DC143C", "#808080", "#2E8B57"],
+        labels={"DDE_diff_in_diff": "DDE Diff-in-Diff (dias)", "NmPorteLoja": "Porte da Loja"}
+    )
+    
+    fig_dde.update_layout(
+        paper_bgcolor="#F2F2F2",
+        plot_bgcolor="white",
+        height=400
+    )
+    
+    fig_dde.show()
+    
+    # Criar gráfico de barras para Ruptura
+    fig_ruptura = px.bar(
+        df_pandas, 
+        x="NmPorteLoja", 
+        y="PctRupturaBinario_diff_in_diff",
+        title=f"% Ruptura Diff-in-Diff por Porte - {categoria}",
+        color="PctRupturaBinario_diff_in_diff",
+        color_continuous_scale=["#2E8B57", "#808080", "#DC143C"],
+        labels={"PctRupturaBinario_diff_in_diff": "% Ruptura Diff-in-Diff (p.p.)", "NmPorteLoja": "Porte da Loja"}
+    )
+    
+    fig_ruptura.update_layout(
+        paper_bgcolor="#F2F2F2",
+        plot_bgcolor="white",
+        height=400
+    )
+    
+    fig_ruptura.show()
+
+def create_regiao_visualization(df_regiao, categoria):
+    """
+    Cria visualização para análise por região
+    """
+    df_pandas = df_regiao.toPandas()
+    
+    # Criar gráfico de barras para DDE
+    fig_dde = px.bar(
+        df_pandas, 
+        x="NmRegiaoGeografica", 
+        y="DDE_diff_in_diff",
+        title=f"DDE Diff-in-Diff por Região - {categoria}",
+        color="DDE_diff_in_diff",
+        color_continuous_scale=["#DC143C", "#808080", "#2E8B57"],
+        labels={"DDE_diff_in_diff": "DDE Diff-in-Diff (dias)", "NmRegiaoGeografica": "Região"}
+    )
+    
+    fig_dde.update_layout(
+        paper_bgcolor="#F2F2F2",
+        plot_bgcolor="white",
+        height=400,
+        xaxis_tickangle=-45
+    )
+    
+    fig_dde.show()
+
+def create_delta_merecimento_visualization(df_delta, categoria):
+    """
+    Cria visualização para análise por delta de merecimento
+    """
+    df_pandas = df_delta.toPandas()
+    
+    # Criar gráfico de barras para DDE
+    fig_dde = px.bar(
+        df_pandas, 
+        x="bucket_delta", 
+        y="DDE_diff_in_diff",
+        title=f"DDE Diff-in-Diff por Delta Merecimento - {categoria}",
+        color="DDE_diff_in_diff",
+        color_continuous_scale=["#DC143C", "#808080", "#2E8B57"],
+        labels={"DDE_diff_in_diff": "DDE Diff-in-Diff (dias)", "bucket_delta": "Delta Merecimento"}
+    )
+    
+    fig_dde.update_layout(
+        paper_bgcolor="#F2F2F2",
+        plot_bgcolor="white",
+        height=400
+    )
+    
+    fig_dde.show()
+    
+    # Criar gráfico de barras para Ruptura
+    fig_ruptura = px.bar(
+        df_pandas, 
+        x="bucket_delta", 
+        y="PctRupturaBinario_diff_in_diff",
+        title=f"% Ruptura Diff-in-Diff por Delta Merecimento - {categoria}",
+        color="PctRupturaBinario_diff_in_diff",
+        color_continuous_scale=["#2E8B57", "#808080", "#DC143C"],
+        labels={"PctRupturaBinario_diff_in_diff": "% Ruptura Diff-in-Diff (p.p.)", "bucket_delta": "Delta Merecimento"}
+    )
+    
+    fig_ruptura.update_layout(
+        paper_bgcolor="#F2F2F2",
+        plot_bgcolor="white",
+        height=400
+    )
+    
+    fig_ruptura.show()
+
+# Executar visualizações por ângulos
+create_angle_visualizations(resultados_detalhados, categorias_teste)
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## TODO: análises de acompanhamento
 
 # COMMAND ----------
