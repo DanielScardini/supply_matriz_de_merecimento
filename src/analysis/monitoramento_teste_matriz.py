@@ -25,7 +25,9 @@ hoje_int = int(hoje.strftime("%Y%m%d"))
 GRUPOS_TESTE = ['Telef pp', 'TV 50 ALTO P', 'TV 55 ALTO P']
 print(GRUPOS_TESTE)
 
-data_inicio = "2025-08-15"
+data_inicio = "2025-09-01"
+fim_baseline = "2025-09-05"
+
 inicio_teste = "2025-09-05"
 
 categorias_teste = ['TELAS', 'TELEFONIA']
@@ -34,6 +36,29 @@ dict_diretorias = {
   'TELAS': 'TVS',
   'TELEFONIA': 'TELEFONIA CELULAR'
 }
+
+
+
+# COMMAND ----------
+
+def get_janela(inicio_teste: str, days_back: int = 3) -> str:
+    """
+    Retorna a data inicial da janela.
+    - Por padrão: 3 dias antes de ontem.
+    - Limitado para não ultrapassar inicio_teste.
+    """
+    dt_inicio_teste = datetime.strptime(inicio_teste, "%Y-%m-%d").date()
+    ontem = datetime.today().date() - timedelta(days=1)
+    inicio_calc = ontem - timedelta(days=days_back)
+
+    # se a data calculada for antes do inicio_teste, usa inicio_teste
+    if inicio_calc < dt_inicio_teste:
+        inicio_calc = dt_inicio_teste
+
+    return inicio_calc.strftime("%Y-%m-%d")
+
+janela_teste = get_janela(inicio_teste, days_back=3)
+print(janela_teste)
 
 # COMMAND ----------
 
@@ -95,15 +120,22 @@ df_merecimento_online['TELEFONIA'] = (
     .filter(F.col('grupo_de_necessidade').isin(GRUPOS_TESTE))
 )
 
+df_merecimento_offline['TELAS'].cache()#.display()
 df_merecimento_offline['TELAS']#.display()
 df_merecimento_offline['TELEFONIA']#.display()
+df_merecimento_offline['TELEFONIA'].cache()
 df_merecimento_online['TELAS']#.display()
+df_merecimento_online['TELAS'].cache()
 df_merecimento_online['TELEFONIA']#.display()
+df_merecimento_online['TELEFONIA'].cache()
 
+produtos_do_teste_offline = {}
+produtos_do_teste_offline['TELAS'] = df_merecimento_offline['TELAS'].select("CdSku", "grupo_de_necessidade").distinct()
+produtos_do_teste_offline['TELEFONIA'] = df_merecimento_offline['TELEFONIA'].select("CdSku", "grupo_de_necessidade").distinct()
 
-produtos_do_teste = {}
-produtos_do_teste['TELAS'] = df_merecimento_offline['TELAS'].select("CdSku", "grupo_de_necessidade").distinct()
-produtos_do_teste['TELEFONIA'] = df_merecimento_offline['TELEFONIA'].select("CdSku", "grupo_de_necessidade").distinct()
+produtos_do_teste_online = {}
+produtos_do_teste_online['TELAS'] = df_merecimento_online['TELAS'].select("CdSku", "grupo_de_necessidade").distinct()
+produtos_do_teste_online['TELEFONIA'] = df_merecimento_online['TELEFONIA'].select("CdSku", "grupo_de_necessidade").distinct()
 
 # COMMAND ----------
 
@@ -112,7 +144,7 @@ produtos_do_teste['TELEFONIA'] = df_merecimento_offline['TELEFONIA'].select("CdS
 
 # COMMAND ----------
 
-df_matriz_neogrid = (
+df_matriz_neogrid_offline = (
     spark.createDataFrame(
         pd.read_csv(
             "/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/dados_analise/(DRP)_MATRIZ_20250902160333.csv",
@@ -134,14 +166,16 @@ df_matriz_neogrid = (
         on="CdSku")
 )
 
-df_matriz_neogrid_agg = (
-  df_matriz_neogrid
+df_matriz_neogrid_agg_offline = (
+  df_matriz_neogrid_offline
   .groupBy('CdFilial', 'grupo_de_necessidade')
   .agg(
     F.round(F.mean('PercMatrizNeogrid'), 3).alias('PercMatrizNeogrid'),
     F.round(F.median('PercMatrizNeogrid'),3).alias('PercMatrizNeogrid_median')
   )
 )
+
+df_matriz_neogrid_offline.cache()
 
 # COMMAND ----------
 
@@ -169,7 +203,7 @@ def load_estoque_loja_data(spark: SparkSession, categoria: str) -> DataFrame:
         .filter(F.col("DtAtual") >= data_inicio)
         .filter(F.col('DsSetor') == dict_diretorias[categoria])
         .join(
-            produtos_do_teste[categoria],
+            produtos_do_teste_offline[categoria],
             how="left",
             on="CdSku"
         )
@@ -186,10 +220,13 @@ def load_estoque_loja_data(spark: SparkSession, categoria: str) -> DataFrame:
         .dropDuplicates(["DtAtual", "CdSku", "CdFilial"])
         .withColumn("periodo_analise",
                     F.when(
-                        F.col("DtAtual") <= inicio_teste, F.lit('baseline')
+                        F.col("DtAtual") < fim_baseline, F.lit('baseline')
                     )
-                    .otherwise(F.lit('piloto'))
+                    .when(F.col("DtAtual") >= janela_teste, F.lit('piloto'))
+                    .otherwise(F.lit('ignorar'))
                     )
+        .filter(F.col("periodo_analise") != 'ignorar')
+                    
         .withColumn("DtAtual", F.to_date(F.col("DtAtual")))
     )
 
@@ -227,6 +264,148 @@ for categoria in categorias_teste:
     df_analise[categoria].display()
 
     
+
+# COMMAND ----------
+
+from pyspark.sql import functions as F
+
+# Saídas
+df_did = {}           # por categoria
+dfs_consolidados = [] # para união final
+
+for categoria in categorias_teste:
+    # 1) Base agregada com normalização de período
+    base = (
+        df_estoque_loja[categoria]
+        .withColumn(
+            "periodo_norm",
+            F.when(F.lower(F.trim(F.col("periodo_analise"))).isin("baseline","piloto"),
+                   F.lower(F.trim(F.col("periodo_analise"))))
+             .when(F.lower(F.col("periodo_analise")).like("%base%"), F.lit("baseline"))
+             .when(F.lower(F.col("periodo_analise")).like("%pil%"),  F.lit("piloto"))
+             .otherwise(F.lower(F.trim(F.col("periodo_analise"))))
+        )
+        .groupBy("grupo", "periodo_norm")
+        .agg(
+            F.round(F.median("DDE"), 1).alias("DDE_medio"),
+            F.round(100 * F.avg(F.when(F.col("FlagRuptura")==1, 1).otherwise(0)), 1).alias("PctRupturaBinario"),
+            (100 * (F.sum("ReceitaPerdidaRuptura") / F.sum("Receita"))).alias("PctRupturaReceita_raw")
+        )
+        .withColumn("PctRupturaReceita", F.round(F.col("PctRupturaReceita_raw"), 1))
+        .select("grupo","periodo_norm","DDE_medio","PctRupturaBinario","PctRupturaReceita")
+    )
+
+    # 2) baseline/piloto por grupo (sem pivot de linhas)
+    wide = (
+        base.groupBy("grupo")
+        .agg(
+            F.max(F.when(F.col("periodo_norm")=="baseline", F.col("DDE_medio"))).alias("baseline_DDE"),
+            F.max(F.when(F.col("periodo_norm")=="piloto",   F.col("DDE_medio"))).alias("piloto_DDE"),
+
+            F.max(F.when(F.col("periodo_norm")=="baseline", F.col("PctRupturaBinario"))).alias("baseline_PctBin"),
+            F.max(F.when(F.col("periodo_norm")=="piloto",   F.col("PctRupturaBinario"))).alias("piloto_PctBin"),
+
+            F.max(F.when(F.col("periodo_norm")=="baseline", F.col("PctRupturaReceita"))).alias("baseline_PctRec"),
+            F.max(F.when(F.col("periodo_norm")=="piloto",   F.col("PctRupturaReceita"))).alias("piloto_PctRec"),
+        )
+        .fillna(0.0)
+    )
+
+    # 3) deltas piloto - baseline
+    delta = (
+        wide
+        .withColumn("DDE_delta",       F.round(F.col("piloto_DDE")    - F.col("baseline_DDE"),    1))
+        .withColumn("PctBin_delta",    F.round(F.col("piloto_PctBin") - F.col("baseline_PctBin"), 1))
+        .withColumn("PctRec_delta",    F.round(F.col("piloto_PctRec") - F.col("baseline_PctRec"), 1))
+        .withColumn("k", F.lit(1))  # chave para join teste x controle
+    )
+
+    # 4) separar teste e controle com todos os valores baseline/piloto
+    teste = (
+        delta.filter(F.col("grupo")=="teste")
+        .select(
+            "k",
+            "baseline_DDE","piloto_DDE","DDE_delta",
+            "baseline_PctBin","piloto_PctBin","PctBin_delta",
+            "baseline_PctRec","piloto_PctRec","PctRec_delta"
+        )
+        .withColumnRenamed("baseline_DDE","baseline_DDE_teste")
+        .withColumnRenamed("piloto_DDE","piloto_DDE_teste")
+        .withColumnRenamed("DDE_delta","DDE_delta_teste")
+        .withColumnRenamed("baseline_PctBin","baseline_PctBin_teste")
+        .withColumnRenamed("piloto_PctBin","piloto_PctBin_teste")
+        .withColumnRenamed("PctBin_delta","PctRupturaBinario_delta_teste")
+        .withColumnRenamed("baseline_PctRec","baseline_PctRec_teste")
+        .withColumnRenamed("piloto_PctRec","piloto_PctRec_teste")
+        .withColumnRenamed("PctRec_delta","PctRupturaReceita_delta_teste")
+    )
+
+    controle = (
+        delta.filter(F.col("grupo")=="controle")
+        .select(
+            "k",
+            "baseline_DDE","piloto_DDE","DDE_delta",
+            "baseline_PctBin","piloto_PctBin","PctBin_delta",
+            "baseline_PctRec","piloto_PctRec","PctRec_delta"
+        )
+        .withColumnRenamed("baseline_DDE","baseline_DDE_controle")
+        .withColumnRenamed("piloto_DDE","piloto_DDE_controle")
+        .withColumnRenamed("DDE_delta","DDE_delta_controle")
+        .withColumnRenamed("baseline_PctBin","baseline_PctBin_controle")
+        .withColumnRenamed("piloto_PctBin","piloto_PctBin_controle")
+        .withColumnRenamed("PctBin_delta","PctRupturaBinario_delta_controle")
+        .withColumnRenamed("baseline_PctRec","baseline_PctRec_controle")
+        .withColumnRenamed("piloto_PctRec","piloto_PctRec_controle")
+        .withColumnRenamed("PctRec_delta","PctRupturaReceita_delta_controle")
+    )
+
+    # 5) join + Diff-in-Diff
+    did = (
+        teste.join(controle, on="k", how="inner").drop("k")
+        .withColumn("DDE_diff_in_diff",               F.round(F.col("DDE_delta_teste") - F.col("DDE_delta_controle"), 1))
+        .withColumn("PctRupturaBinario_diff_in_diff", F.round(F.col("PctRupturaBinario_delta_teste") - F.col("PctRupturaBinario_delta_controle"), 1))
+        .withColumn("PctRupturaReceita_diff_in_diff", F.round(F.col("PctRupturaReceita_delta_teste") - F.col("PctRupturaReceita_delta_controle"), 1))
+    )
+
+    # 6) Pivot por métrica: linhas = métricas, colunas = diff_in_diff | delta_teste | delta_controle | baseline/piloto por grupo
+    df_pivot_metricas = (
+        did.selectExpr(
+            "stack(3, "
+            # metrica, diff, delta_teste, delta_controle, baseline_teste, piloto_teste, baseline_controle, piloto_controle
+            " 'DDE',               DDE_diff_in_diff,               DDE_delta_teste,               DDE_delta_controle, "
+            " baseline_DDE_teste,  piloto_DDE_teste,               baseline_DDE_controle,         piloto_DDE_controle, "
+            " 'PctRupturaBinario', PctRupturaBinario_diff_in_diff, PctRupturaBinario_delta_teste, PctRupturaBinario_delta_controle, "
+            " baseline_PctBin_teste, piloto_PctBin_teste,          baseline_PctBin_controle,      piloto_PctBin_controle, "
+            " 'PctRupturaReceita', PctRupturaReceita_diff_in_diff, PctRupturaReceita_delta_teste, PctRupturaReceita_delta_controle, "
+            " baseline_PctRec_teste, piloto_PctRec_teste,          baseline_PctRec_controle,      piloto_PctRec_controle "
+            ") as (metrica, diff_in_diff, delta_teste, delta_controle, "
+            "baseline_teste, piloto_teste, baseline_controle, piloto_controle)"
+        )
+        .withColumn("categoria", F.lit(categoria))
+        .select(
+            "categoria","metrica",
+            "diff_in_diff","delta_teste","delta_controle",
+            "baseline_teste","piloto_teste","baseline_controle","piloto_controle"
+        )
+        .orderBy("metrica", "categoria")
+    )
+
+    # Guarda resultados
+    df_did[categoria] = df_pivot_metricas
+    dfs_consolidados.append(df_pivot_metricas)
+
+# 7) DataFrame final consolidado (todas as categorias)
+if dfs_consolidados:
+    df_did_final = dfs_consolidados[0]
+    for d in dfs_consolidados[1:]:
+        df_did_final = df_did_final.unionByName(d, allowMissingColumns=True)
+    # Mostra consolidado
+    df_did_final.display()
+
+# Também pode inspecionar cada categoria individual:
+# for cat, df in df_did.items():
+#     print(cat)
+#     df.display()
 
 # COMMAND ----------
 
@@ -278,93 +457,139 @@ for categoria in categorias_teste:
             .fillna(0.0, subset=["DDE_medio", "PctRupturaReceita"])
     )
 
-    df_analise_regiao[categoria].display()
+    df_analise_regiao[categoria].limit(1).display()
 
 # COMMAND ----------
 
 from pyspark.sql import functions as F
 
-df_analise_regiao = {}
+df_did_regiao = {}
+dfs_regiao_all = []
 
 for categoria in categorias_teste:
-    # 1) agrega métricas por grupo, período e região
+    # Usa o agregado pronto do seu dict
+    df_base0 = df_analise_regiao[categoria].dropna(subset=["NmRegiaoGeografica"])
+
+    # Normaliza rótulos de período para evitar NULL por variações de texto
     df_base = (
-        df_estoque_loja_porte_regiao[categoria]
-        .groupBy("grupo", "periodo_analise", "NmRegiaoGeografica")
-        .agg(
-            F.round(F.median("DDE"), 1).alias("DDE_medio"),
-            F.round(100 * F.avg(F.when(F.col("FlagRuptura") == 1, 1).otherwise(0)), 1).alias("PctRupturaBinario"),
-            # calcula % de receita perdida de forma robusta
-            F.sum("ReceitaPerdidaRuptura").alias("sum_perda"),
-            F.sum("Receita").alias("sum_receita"),
-        )
+        df_base0
         .withColumn(
-            "PctRupturaReceita",
-            F.round(100 * F.when(F.col("sum_receita") > 0, F.col("sum_perda") / F.col("sum_receita")).otherwise(0.0), 1)
+            "periodo_norm",
+            F.when(F.lower(F.trim(F.col("periodo_analise"))).isin("baseline","piloto"),
+                   F.lower(F.trim(F.col("periodo_analise"))))
+             .when(F.lower(F.col("periodo_analise")).like("%base%"), F.lit("baseline"))
+             .when(F.lower(F.col("periodo_analise")).like("%pil%"),  F.lit("piloto"))
+             .otherwise(F.lower(F.trim(F.col("periodo_analise"))))
         )
-        .select("grupo","periodo_analise","NmRegiaoGeografica","DDE_medio","PctRupturaBinario","PctRupturaReceita")
-        .dropna(subset=["NmRegiaoGeografica"])
+        .select(
+            "NmRegiaoGeografica","grupo","periodo_norm",
+            "DDE_medio","PctRupturaBinario","PctRupturaReceita"
+        )
     )
 
-    # 2) baseline e piloto via WHEN (sem pivot)
-    df_wide = (
-        df_base.groupBy("NmRegiaoGeografica", "grupo")
+    # baseline/piloto por Região x Grupo (sem pivot)
+    wide = (
+        df_base.groupBy("NmRegiaoGeografica","grupo")
         .agg(
-            F.max(F.when(F.col("periodo_analise")=="baseline", F.col("DDE_medio"))).alias("baseline_DDE_medio"),
-            F.max(F.when(F.col("periodo_analise")=="piloto",   F.col("DDE_medio"))).alias("piloto_DDE_medio"),
+            F.max(F.when(F.col("periodo_norm")=="baseline", F.col("DDE_medio"))).alias("baseline_DDE"),
+            F.max(F.when(F.col("periodo_norm")=="piloto",   F.col("DDE_medio"))).alias("piloto_DDE"),
 
-            F.max(F.when(F.col("periodo_analise")=="baseline", F.col("PctRupturaBinario"))).alias("baseline_PctRupturaBinario"),
-            F.max(F.when(F.col("periodo_analise")=="piloto",   F.col("PctRupturaBinario"))).alias("piloto_PctRupturaBinario"),
+            F.max(F.when(F.col("periodo_norm")=="baseline", F.col("PctRupturaBinario"))).alias("baseline_PctBin"),
+            F.max(F.when(F.col("periodo_norm")=="piloto",   F.col("PctRupturaBinario"))).alias("piloto_PctBin"),
 
-            F.max(F.when(F.col("periodo_analise")=="baseline", F.col("PctRupturaReceita"))).alias("baseline_PctRupturaReceita"),
-            F.max(F.when(F.col("periodo_analise")=="piloto",   F.col("PctRupturaReceita"))).alias("piloto_PctRupturaReceita"),
+            F.max(F.when(F.col("periodo_norm")=="baseline", F.col("PctRupturaReceita"))).alias("baseline_PctRec"),
+            F.max(F.when(F.col("periodo_norm")=="piloto",   F.col("PctRupturaReceita"))).alias("piloto_PctRec"),
         )
-        .fillna(0.0)  # evita nulos se faltar baseline/piloto em alguma combinação
+        .fillna(0.0)
     )
 
-    # 3) deltas piloto - baseline
-    df_delta = (
-        df_wide
-        .withColumn("DDE_delta", F.round(F.col("piloto_DDE_medio") - F.col("baseline_DDE_medio"), 1))
-        .withColumn("PctRupturaBinario_delta", F.round(F.col("piloto_PctRupturaBinario") - F.col("baseline_PctRupturaBinario"), 1))
-        .withColumn("PctRupturaReceita_delta", F.round(F.col("piloto_PctRupturaReceita") - F.col("baseline_PctRupturaReceita"), 1))
+    # deltas piloto - baseline
+    delta = (
+        wide
+        .withColumn("DDE_delta",    F.round(F.col("piloto_DDE")    - F.col("baseline_DDE"), 1))
+        .withColumn("PctBin_delta", F.round(F.col("piloto_PctBin") - F.col("baseline_PctBin"), 1))
+        .withColumn("PctRec_delta", F.round(F.col("piloto_PctRec") - F.col("baseline_PctRec"), 1))
     )
 
-    # 4) separar teste e controle
-    df_teste = (
-        df_delta.filter(F.col("grupo") == "teste")
+    # separa teste e controle por região
+    t = (
+        delta.filter(F.col("grupo")=="teste")
         .select(
             "NmRegiaoGeografica",
-            F.col("DDE_delta").alias("DDE_delta_teste"),
-            F.col("PctRupturaBinario_delta").alias("PctRupturaBinario_delta_teste"),
-            F.col("PctRupturaReceita_delta").alias("PctRupturaReceita_delta_teste"),
+            "baseline_DDE","piloto_DDE","DDE_delta",
+            "baseline_PctBin","piloto_PctBin","PctBin_delta",
+            "baseline_PctRec","piloto_PctRec","PctRec_delta"
         )
+        .withColumnRenamed("baseline_DDE","baseline_DDE_teste")
+        .withColumnRenamed("piloto_DDE","piloto_DDE_teste")
+        .withColumnRenamed("DDE_delta","DDE_delta_teste")
+        .withColumnRenamed("baseline_PctBin","baseline_PctBin_teste")
+        .withColumnRenamed("piloto_PctBin","piloto_PctBin_teste")
+        .withColumnRenamed("PctBin_delta","PctRupturaBinario_delta_teste")
+        .withColumnRenamed("baseline_PctRec","baseline_PctRec_teste")
+        .withColumnRenamed("piloto_PctRec","piloto_PctRec_teste")
+        .withColumnRenamed("PctRec_delta","PctRupturaReceita_delta_teste")
     )
 
-    df_controle = (
-        df_delta.filter(F.col("grupo") == "controle")
+    c = (
+        delta.filter(F.col("grupo")=="controle")
         .select(
             "NmRegiaoGeografica",
-            F.col("DDE_delta").alias("DDE_delta_controle"),
-            F.col("PctRupturaBinario_delta").alias("PctRupturaBinario_delta_controle"),
-            F.col("PctRupturaReceita_delta").alias("PctRupturaReceita_delta_controle"),
+            "baseline_DDE","piloto_DDE","DDE_delta",
+            "baseline_PctBin","piloto_PctBin","PctBin_delta",
+            "baseline_PctRec","piloto_PctRec","PctRec_delta"
         )
+        .withColumnRenamed("baseline_DDE","baseline_DDE_controle")
+        .withColumnRenamed("piloto_DDE","piloto_DDE_controle")
+        .withColumnRenamed("DDE_delta","DDE_delta_controle")
+        .withColumnRenamed("baseline_PctBin","baseline_PctBin_controle")
+        .withColumnRenamed("piloto_PctBin","piloto_PctBin_controle")
+        .withColumnRenamed("PctBin_delta","PctRupturaBinario_delta_controle")
+        .withColumnRenamed("baseline_PctRec","baseline_PctRec_controle")
+        .withColumnRenamed("piloto_PctRec","piloto_PctRec_controle")
+        .withColumnRenamed("PctRec_delta","PctRupturaReceita_delta_controle")
     )
 
-    # 5) Diff-in-Diff = delta_teste - delta_controle
-    df_diff = (
-        df_teste.join(df_controle, on="NmRegiaoGeografica", how="inner")
-        .withColumn("DDE_diff_in_diff", F.round(F.col("DDE_delta_teste") - F.col("DDE_delta_controle"), 1))
-        .withColumn("PctRupturaBinario_diff_in_diff", F.round(F.col("PctRupturaBinario_delta_teste") - F.col("PctRupturaBinario_delta_controle"), 1))
-        .withColumn("PctRupturaReceita_diff_in_diff", F.round(F.col("PctRupturaReceita_delta_teste") - F.col("PctRupturaReceita_delta_controle"), 1))
+    did = (
+        t.join(c, on="NmRegiaoGeografica", how="inner")
+         .withColumn("DDE_diff_in_diff",               F.round(F.col("DDE_delta_teste") - F.col("DDE_delta_controle"), 1))
+         .withColumn("PctRupturaBinario_diff_in_diff", F.round(F.col("PctRupturaBinario_delta_teste") - F.col("PctRupturaBinario_delta_controle"), 1))
+         .withColumn("PctRupturaReceita_diff_in_diff", F.round(F.col("PctRupturaReceita_delta_teste") - F.col("PctRupturaReceita_delta_controle"), 1))
     )
 
-    df_analise_regiao[categoria] = df_diff
-    df_diff.display()
+    # pivot por métrica para visualização
+    df_pivot_regiao = (
+        did.selectExpr(
+            "NmRegiaoGeografica",
+            "stack(3, "
+            " 'DDE',               DDE_diff_in_diff,               DDE_delta_teste,               DDE_delta_controle, "
+            " baseline_DDE_teste,  piloto_DDE_teste,               baseline_DDE_controle,         piloto_DDE_controle, "
+            " 'PctRupturaBinario', PctRupturaBinario_diff_in_diff, PctRupturaBinario_delta_teste, PctRupturaBinario_delta_controle, "
+            " baseline_PctBin_teste, piloto_PctBin_teste,          baseline_PctBin_controle,      piloto_PctBin_controle, "
+            " 'PctRupturaReceita', PctRupturaReceita_diff_in_diff, PctRupturaReceita_delta_teste, PctRupturaReceita_delta_controle, "
+            " baseline_PctRec_teste, piloto_PctRec_teste,          baseline_PctRec_controle,      piloto_PctRec_controle "
+            ") as (metrica, diff_in_diff, delta_teste, delta_controle, "
+            "baseline_teste, piloto_teste, baseline_controle, piloto_controle)"
+        )
+        .withColumn("categoria", F.lit(categoria))
+        .select(
+            "categoria","NmRegiaoGeografica","metrica",
+            "diff_in_diff","delta_teste","delta_controle",
+            "baseline_teste","piloto_teste","baseline_controle","piloto_controle"
+        )
+        .orderBy("categoria","metrica" ,"NmRegiaoGeografica")
+    )
 
-# COMMAND ----------
+    df_did_regiao[categoria] = df_pivot_regiao
+    dfs_regiao_all.append(df_pivot_regiao)
+    #df_pivot_regiao.display()
 
-df_wide.display()
+# Consolidado de todas as categorias
+if dfs_regiao_all:
+    df_did_regiao_final = dfs_regiao_all[0]
+    for d in dfs_regiao_all[1:]:
+        df_did_regiao_final = df_did_regiao_final.unionByName(d, allowMissingColumns=True)
+    df_did_regiao_final.display()
 
 # COMMAND ----------
 
@@ -402,62 +627,142 @@ for categoria in categorias_teste:
         .dropna(subset=["NmPorteLoja"])
     )
 
-    # 2) baseline/piloto via WHEN (sem pivot)
-    df_wide = (
-        df_base.groupBy("NmPorteLoja", "grupo")
+
+# COMMAND ----------
+
+from pyspark.sql import functions as F
+
+df_did_porte = {}
+dfs_porte_all = []
+
+for categoria in categorias_teste:
+    # normaliza período
+    df_norm = (
+        df_estoque_loja_porte_regiao[categoria]
+        .withColumn("periodo_norm", F.lower(F.trim(F.col("periodo_analise"))))
+    )
+
+    # 1) agrega métricas por grupo, período e porte
+    df_base = (
+        df_norm
+        .groupBy("grupo", "periodo_norm", "NmPorteLoja")
         .agg(
-            F.max(F.when(F.col("periodo_norm")=="baseline", F.col("DDE_medio"))).alias("baseline_DDE_medio"),
-            F.max(F.when(F.col("periodo_norm")=="piloto",   F.col("DDE_medio"))).alias("piloto_DDE_medio"),
+            F.round(F.median("DDE"), 1).alias("DDE_medio"),
+            F.round(100 * F.avg(F.when(F.col("FlagRuptura") == 1, 1).otherwise(0)), 1).alias("PctRupturaBinario"),
+            F.sum("ReceitaPerdidaRuptura").alias("sum_perda"),
+            F.sum("Receita").alias("sum_receita"),
+        )
+        .withColumn(
+            "PctRupturaReceita",
+            F.round(100 * F.when(F.col("sum_receita") > 0, F.col("sum_perda")/F.col("sum_receita")).otherwise(0.0), 1)
+        )
+        .select("grupo","periodo_norm","NmPorteLoja","DDE_medio","PctRupturaBinario","PctRupturaReceita")
+        .filter(F.col("NmPorteLoja") != "-")  # remove porte inválido
+    )
 
-            F.max(F.when(F.col("periodo_norm")=="baseline", F.col("PctRupturaBinario"))).alias("baseline_PctRupturaBinario"),
-            F.max(F.when(F.col("periodo_norm")=="piloto",   F.col("PctRupturaBinario"))).alias("piloto_PctRupturaBinario"),
+    # 2) baseline/piloto por porte x grupo
+    wide = (
+        df_base.groupBy("NmPorteLoja","grupo")
+        .agg(
+            F.max(F.when(F.col("periodo_norm")=="baseline", F.col("DDE_medio"))).alias("baseline_DDE"),
+            F.max(F.when(F.col("periodo_norm")=="piloto",   F.col("DDE_medio"))).alias("piloto_DDE"),
 
-            F.max(F.when(F.col("periodo_norm")=="baseline", F.col("PctRupturaReceita"))).alias("baseline_PctRupturaReceita"),
-            F.max(F.when(F.col("periodo_norm")=="piloto",   F.col("PctRupturaReceita"))).alias("piloto_PctRupturaReceita"),
+            F.max(F.when(F.col("periodo_norm")=="baseline", F.col("PctRupturaBinario"))).alias("baseline_PctBin"),
+            F.max(F.when(F.col("periodo_norm")=="piloto",   F.col("PctRupturaBinario"))).alias("piloto_PctBin"),
+
+            F.max(F.when(F.col("periodo_norm")=="baseline", F.col("PctRupturaReceita"))).alias("baseline_PctRec"),
+            F.max(F.when(F.col("periodo_norm")=="piloto",   F.col("PctRupturaReceita"))).alias("piloto_PctRec"),
         )
         .fillna(0.0)
     )
 
-    # 3) deltas piloto - baseline
-    df_delta = (
-        df_wide
-        .withColumn("DDE_delta", F.round(F.col("piloto_DDE_medio") - F.col("baseline_DDE_medio"), 1))
-        .withColumn("PctRupturaBinario_delta", F.round(F.col("piloto_PctRupturaBinario") - F.col("baseline_PctRupturaBinario"), 1))
-        .withColumn("PctRupturaReceita_delta", F.round(F.col("piloto_PctRupturaReceita") - F.col("baseline_PctRupturaReceita"), 1))
+    # 3) deltas
+    delta = (
+        wide
+        .withColumn("DDE_delta",    F.round(F.col("piloto_DDE")    - F.col("baseline_DDE"), 1))
+        .withColumn("PctBin_delta", F.round(F.col("piloto_PctBin") - F.col("baseline_PctBin"), 1))
+        .withColumn("PctRec_delta", F.round(F.col("piloto_PctRec") - F.col("baseline_PctRec"), 1))
     )
 
-    # 4) separar teste e controle com chave única para evitar ambiguidade
-    df_teste = (
-        df_delta.filter(F.col("grupo") == "teste")
+    # 4) separa teste e controle
+    t = (
+        delta.filter(F.col("grupo")=="teste")
         .select(
-            F.col("NmPorteLoja").alias("NmPorteLoja_key"),
-            F.col("DDE_delta").alias("DDE_delta_teste"),
-            F.col("PctRupturaBinario_delta").alias("PctRupturaBinario_delta_teste"),
-            F.col("PctRupturaReceita_delta").alias("PctRupturaReceita_delta_teste"),
+            "NmPorteLoja",
+            "baseline_DDE","piloto_DDE","DDE_delta",
+            "baseline_PctBin","piloto_PctBin","PctBin_delta",
+            "baseline_PctRec","piloto_PctRec","PctRec_delta"
         )
+        .withColumnRenamed("baseline_DDE","baseline_DDE_teste")
+        .withColumnRenamed("piloto_DDE","piloto_DDE_teste")
+        .withColumnRenamed("DDE_delta","DDE_delta_teste")
+        .withColumnRenamed("baseline_PctBin","baseline_PctBin_teste")
+        .withColumnRenamed("piloto_PctBin","piloto_PctBin_teste")
+        .withColumnRenamed("PctBin_delta","PctRupturaBinario_delta_teste")
+        .withColumnRenamed("baseline_PctRec","baseline_PctRec_teste")
+        .withColumnRenamed("piloto_PctRec","piloto_PctRec_teste")
+        .withColumnRenamed("PctRec_delta","PctRupturaReceita_delta_teste")
     )
 
-    df_controle = (
-        df_delta.filter(F.col("grupo") == "controle")
-            .select(
-            F.col("NmPorteLoja").alias("NmPorteLoja_key"),
-            F.col("DDE_delta").alias("DDE_delta_controle"),
-            F.col("PctRupturaBinario_delta").alias("PctRupturaBinario_delta_controle"),
-            F.col("PctRupturaReceita_delta").alias("PctRupturaReceita_delta_controle"),
+    c = (
+        delta.filter(F.col("grupo")=="controle")
+        .select(
+            "NmPorteLoja",
+            "baseline_DDE","piloto_DDE","DDE_delta",
+            "baseline_PctBin","piloto_PctBin","PctBin_delta",
+            "baseline_PctRec","piloto_PctRec","PctRec_delta"
         )
+        .withColumnRenamed("baseline_DDE","baseline_DDE_controle")
+        .withColumnRenamed("piloto_DDE","piloto_DDE_controle")
+        .withColumnRenamed("DDE_delta","DDE_delta_controle")
+        .withColumnRenamed("baseline_PctBin","baseline_PctBin_controle")
+        .withColumnRenamed("piloto_PctBin","piloto_PctBin_controle")
+        .withColumnRenamed("PctBin_delta","PctRupturaBinario_delta_controle")
+        .withColumnRenamed("baseline_PctRec","baseline_PctRec_controle")
+        .withColumnRenamed("piloto_PctRec","piloto_PctRec_controle")
+        .withColumnRenamed("PctRec_delta","PctRupturaReceita_delta_controle")
     )
 
-    # 5) Diff-in-Diff
-    df_diff = (
-        df_teste.join(df_controle, on="NmPorteLoja_key", how="inner")
-        .withColumnRenamed("NmPorteLoja_key", "NmPorteLoja")
-        .withColumn("DDE_diff_in_diff", F.round(F.col("DDE_delta_teste") - F.col("DDE_delta_controle"), 1))
-        .withColumn("PctRupturaBinario_diff_in_diff", F.round(F.col("PctRupturaBinario_delta_teste") - F.col("PctRupturaBinario_delta_controle"), 1))
-        .withColumn("PctRupturaReceita_diff_in_diff", F.round(F.col("PctRupturaReceita_delta_teste") - F.col("PctRupturaReceita_delta_controle"), 1))
+    did = (
+        t.join(c, on="NmPorteLoja", how="inner")
+         .withColumn("DDE_diff_in_diff",               F.round(F.col("DDE_delta_teste") - F.col("DDE_delta_controle"), 1))
+         .withColumn("PctRupturaBinario_diff_in_diff", F.round(F.col("PctRupturaBinario_delta_teste") - F.col("PctRupturaBinario_delta_controle"), 1))
+         .withColumn("PctRupturaReceita_diff_in_diff", F.round(F.col("PctRupturaReceita_delta_teste") - F.col("PctRupturaReceita_delta_controle"), 1))
     )
 
-    df_analise_porte[categoria] = df_diff
-    df_diff.filter(F.col("NmPorteLoja") != '-').orderBy("NmPorteLoja").display()
+    # 5) pivot por métrica
+    df_pivot_porte = (
+        did.selectExpr(
+            "NmPorteLoja",
+            "stack(3, "
+            " 'DDE',               DDE_diff_in_diff,               DDE_delta_teste,               DDE_delta_controle, "
+            " baseline_DDE_teste,  piloto_DDE_teste,               baseline_DDE_controle,         piloto_DDE_controle, "
+            " 'PctRupturaBinario', PctRupturaBinario_diff_in_diff, PctRupturaBinario_delta_teste, PctRupturaBinario_delta_controle, "
+            " baseline_PctBin_teste, piloto_PctBin_teste,          baseline_PctBin_controle,      piloto_PctBin_controle, "
+            " 'PctRupturaReceita', PctRupturaReceita_diff_in_diff, PctRupturaReceita_delta_teste, PctRupturaReceita_delta_controle, "
+            " baseline_PctRec_teste, piloto_PctRec_teste,          baseline_PctRec_controle,      piloto_PctRec_controle "
+            ") as (metrica, diff_in_diff, delta_teste, delta_controle, "
+            "baseline_teste, piloto_teste, baseline_controle, piloto_controle)"
+        )
+        .withColumn("categoria", F.lit(categoria))
+        .select(
+            "categoria","NmPorteLoja","metrica",
+            "diff_in_diff","delta_teste","delta_controle",
+            "baseline_teste","piloto_teste","baseline_controle","piloto_controle"
+        )
+        .orderBy("categoria","metrica", "NmPorteLoja",)
+    )
+
+    df_did_porte[categoria] = df_pivot_porte
+    dfs_porte_all.append(df_pivot_porte)
+    #df_pivot_porte.display()
+
+# Consolidado de todas as categorias
+if dfs_porte_all:
+    df_did_porte_final = dfs_porte_all[0]
+    for d in dfs_porte_all[1:]:
+        df_did_porte_final = df_did_porte_final.unionByName(d, allowMissingColumns=True)
+    df_did_porte_final.display()
 
 # COMMAND ----------
 
@@ -475,7 +780,7 @@ for categoria in categorias_teste:
     .filter(F.col("grupo_de_necessidade").isin(GRUPOS_TESTE))
     .distinct()
     .join(
-      df_matriz_neogrid_agg,
+      df_matriz_neogrid_agg_offline,
       on=["CdFilial", "grupo_de_necessidade"],
       how="inner"
     )
@@ -511,831 +816,149 @@ for categoria in categorias_teste:
         df_estoque_loja_porte_regiao[categoria]
         .join(
             df_comparacao[categoria]
-            .select("grupo_de_necessidade", "CdFilial", "bucket_delta")
+            .select("CdFilial", "bucket_delta")
             .distinct(),
-            on=["CdFilial", "grupo_de_necessidade"],
+            on=["CdFilial"],
             how="inner"
             )
-        .groupBy("grupo_de_necessidade", "bucket_delta", "periodo_analise")
+        .groupBy("bucket_delta", "periodo_analise")
         .agg(
             F.round(F.median("DDE"), 1).alias("DDE_medio"),
             F.round(100 * F.avg(F.when(F.col("FlagRuptura") == 1, 1).otherwise(0)), 1).alias("PctRupturaBinario"),
             F.round(100 * (F.sum("ReceitaPerdidaRuptura") / F.sum("Receita")), 1).alias("PctRupturaReceita")
         )
-        .orderBy('grupo_de_necessidade', 'bucket_delta')
+        .orderBy('bucket_delta')
     )
 
     df_analise_deltas[categoria].display()
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ## Visualizações com Cards - Diff-in-Diff
+from pyspark.sql import functions as F
 
-# COMMAND ----------
+df_did_bucket = {}
+dfs_all = []
 
-import plotly.graph_objects as go
-import plotly.express as px
-from plotly.subplots import make_subplots
-import plotly.offline as pyo
-
-def calculate_dde_percentage_diff(df_analise_regiao, categoria):
-    """
-    Calcula o diff-in-diff percentual para DDE baseado nos dados reais
-    """
-    df_pandas = df_analise_regiao[categoria].toPandas()
-    
-    # Calcular o baseline médio de DDE para teste e controle
-    # Assumindo que temos os dados de baseline em df_analise[categoria]
-    # Por enquanto, usar um valor estimado baseado na média das regiões
-    baseline_dde_medio = 15.0  # Este valor deve ser calculado dos dados reais
-    
-    # Calcular o diff-in-diff percentual
-    dde_diff_abs = df_pandas['DDE_diff_in_diff'].mean()
-    dde_pct_change = (dde_diff_abs / baseline_dde_medio) * 100 if baseline_dde_medio > 0 else 0
-    
-    return dde_pct_change
-
-def create_diff_in_diff_cards(df_analise_regiao, categorias_teste):
-    """
-    Cria cards visuais para mostrar diff-in-diff das métricas principais
-    """
-    cards = []
-    
-    for categoria in categorias_teste:
-        # Converter para pandas para facilitar manipulação
-        df_pandas = df_analise_regiao[categoria].toPandas()
-        
-        # Calcular médias ponderadas por região (assumindo igual peso)
-        avg_dde_diff = df_pandas['DDE_diff_in_diff'].mean()
-        avg_ruptura_binario_diff = df_pandas['PctRupturaBinario_diff_in_diff'].mean()
-        avg_ruptura_receita_diff = df_pandas['PctRupturaReceita_diff_in_diff'].mean()
-        
-        # Para DDE, calcular o percentual de mudança baseado no baseline
-        dde_pct_change = calculate_dde_percentage_diff(df_analise_regiao, categoria)
-        
-        # Criar cards para cada métrica
-        cards.extend([
-            create_metric_card(
-                title=f"DDE Médio - {categoria}",
-                value=f"{avg_dde_diff:+.1f}",
-                subtitle=f"dias ({dde_pct_change:+.1f}%)",
-                delta=avg_dde_diff,
-                threshold=1.0,
-                metric_type="dde"
-            ),
-            create_metric_card(
-                title=f"% Ruptura Binário - {categoria}",
-                value=f"{avg_ruptura_binario_diff:+.1f}",
-                subtitle="p.p.",
-                delta=avg_ruptura_binario_diff,
-                threshold=1.0,
-                metric_type="ruptura"
-            ),
-            create_metric_card(
-                title=f"% Ruptura Receita - {categoria}",
-                value=f"{avg_ruptura_receita_diff:+.1f}",
-                subtitle="p.p.",
-                delta=avg_ruptura_receita_diff,
-                threshold=1.0,
-                metric_type="ruptura"
-            )
-        ])
-    
-    return cards
-
-def create_metric_card(title, value, subtitle, delta, threshold=1.0, metric_type="dde"):
-    """
-    Cria um card individual para uma métrica
-    """
-    # Determinar cor e seta baseado no delta e tipo de métrica
-    if abs(delta) >= threshold:
-        if metric_type == "dde":
-            # Para DDE, aumento é ruim (vermelho), diminuição é boa (verde)
-            if delta > 0:
-                color = "#DC143C"  # Vermelho escuro - DDE aumentou (ruim)
-                arrow = "↑"
-                arrow_color = "#DC143C"
-            else:
-                color = "#2E8B57"  # Verde escuro - DDE diminuiu (bom)
-                arrow = "↓"
-                arrow_color = "#2E8B57"
-        else:
-            # Para ruptura, aumento é ruim (vermelho), diminuição é boa (verde)
-            if delta > 0:
-                color = "#DC143C"  # Vermelho escuro - ruptura aumentou (ruim)
-                arrow = "↑"
-                arrow_color = "#DC143C"
-            else:
-                color = "#2E8B57"  # Verde escuro - ruptura diminuiu (bom)
-                arrow = "↓"
-                arrow_color = "#2E8B57"
-    else:
-        color = "#808080"  # Cinza - mudança pequena
-        arrow = "→"
-        arrow_color = "#808080"
-    
-    # Criar o card
-    fig = go.Figure()
-    
-    # Adicionar retângulo de fundo
-    fig.add_shape(
-        type="rect",
-        x0=0, y0=0, x1=1, y1=1,
-        fillcolor="#F2F2F2",
-        line=dict(color="#E0E0E0", width=1),
-        layer="below"
-    )
-    
-    # Adicionar texto do título
-    fig.add_annotation(
-        x=0.5, y=0.8,
-        text=title,
-        showarrow=False,
-        font=dict(size=14, color="#333333", family="Arial"),
-        xref="paper", yref="paper"
-    )
-    
-    # Adicionar valor principal
-    fig.add_annotation(
-        x=0.5, y=0.5,
-        text=f"<b>{value}</b>",
-        showarrow=False,
-        font=dict(size=24, color=color, family="Arial Black"),
-        xref="paper", yref="paper"
-    )
-    
-    # Adicionar subtítulo
-    fig.add_annotation(
-        x=0.5, y=0.35,
-        text=subtitle,
-        showarrow=False,
-        font=dict(size=12, color="#666666", family="Arial"),
-        xref="paper", yref="paper"
-    )
-    
-    # Adicionar seta
-    fig.add_annotation(
-        x=0.5, y=0.15,
-        text=f"<span style='font-size:20px; color:{arrow_color}'>{arrow}</span>",
-        showarrow=False,
-        xref="paper", yref="paper"
-    )
-    
-    # Configurar layout
-    fig.update_layout(
-        width=200,
-        height=150,
-        margin=dict(l=10, r=10, t=10, b=10),
-        plot_bgcolor="rgba(0,0,0,0)",
-        paper_bgcolor="rgba(0,0,0,0)",
-        xaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
-        yaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
-        xaxis_range=[0, 1],
-        yaxis_range=[0, 1]
-    )
-    
-    return fig
-
-# Gerar os cards
-cards = create_diff_in_diff_cards(df_analise_regiao, categorias_teste)
-
-# Exibir os cards
-for i, card in enumerate(cards):
-    print(f"\n--- Card {i+1} ---")
-    card.show()
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Cards por Região - Detalhamento
-
-# COMMAND ----------
-
-def create_regional_cards(df_analise_regiao, categorias_teste):
-    """
-    Cria cards detalhados por região
-    """
-    for categoria in categorias_teste:
-        df_pandas = df_analise_regiao[categoria].toPandas()
-        
-        print(f"\n=== {categoria} - Análise por Região ===")
-        
-        # Criar subplot com cards por região
-        fig = make_subplots(
-            rows=2, cols=3,
-            subplot_titles=[f"{regiao}" for regiao in df_pandas['NmRegiaoGeografica'].unique()[:6]],
-            specs=[[{"type": "indicator"}, {"type": "indicator"}, {"type": "indicator"}],
-                   [{"type": "indicator"}, {"type": "indicator"}, {"type": "indicator"}]]
-        )
-        
-        row, col = 1, 1
-        for idx, regiao in enumerate(df_pandas['NmRegiaoGeografica'].unique()[:6]):
-            regiao_data = df_pandas[df_pandas['NmRegiaoGeografica'] == regiao].iloc[0]
-            
-            # DDE
-            dde_delta = regiao_data['DDE_diff_in_diff']
-            dde_color = "#2E8B57" if dde_delta >= 1 else "#DC143C" if dde_delta <= -1 else "#808080"
-            
-            fig.add_trace(go.Indicator(
-                mode = "number+delta",
-                value = dde_delta,
-                delta = {"reference": 0, "valueformat": ".1f"},
-                title = {"text": f"DDE (dias)<br>{regiao}"},
-                number = {"font": {"color": dde_color}},
-                domain = {"row": row-1, "column": col-1}
-            ), row=row, col=col)
-            
-            col += 1
-            if col > 3:
-                col = 1
-                row += 1
-        
-        fig.update_layout(
-            height=400,
-            title=f"Diff-in-Diff por Região - {categoria}",
-            paper_bgcolor="#F2F2F2"
-        )
-        
-        fig.show()
-
-# Gerar cards regionais
-create_regional_cards(df_analise_regiao, categorias_teste)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Resumo Executivo - Cards Consolidados
-
-# COMMAND ----------
-
-def create_executive_summary(df_analise_regiao, categorias_teste):
-    """
-    Cria resumo executivo com cards consolidados
-    """
-    summary_data = []
-    
-    for categoria in categorias_teste:
-        df_pandas = df_analise_regiao[categoria].toPandas()
-        
-        # Calcular médias
-        avg_dde = df_pandas['DDE_diff_in_diff'].mean()
-        avg_ruptura_bin = df_pandas['PctRupturaBinario_diff_in_diff'].mean()
-        avg_ruptura_rec = df_pandas['PctRupturaReceita_diff_in_diff'].mean()
-        
-        summary_data.append({
-            'Categoria': categoria,
-            'DDE_Diff': avg_dde,
-            'Ruptura_Bin_Diff': avg_ruptura_bin,
-            'Ruptura_Rec_Diff': avg_ruptura_rec
-        })
-    
-    # Criar figura com subplots
-    fig = make_subplots(
-        rows=1, cols=3,
-        subplot_titles=['DDE Médio (dias)', '% Ruptura Binário (p.p.)', '% Ruptura Receita (p.p.)'],
-        specs=[[{"type": "indicator"}, {"type": "indicator"}, {"type": "indicator"}]]
-    )
-    
-    # DDE
-    dde_values = [data['DDE_Diff'] for data in summary_data]
-    dde_colors = ["#2E8B57" if v >= 1 else "#DC143C" if v <= -1 else "#808080" for v in dde_values]
-    
-    fig.add_trace(go.Indicator(
-        mode = "number+delta",
-        value = sum(dde_values) / len(dde_values),
-        delta = {"reference": 0, "valueformat": ".1f"},
-        title = {"text": "DDE Médio<br>(média das categorias)"},
-        number = {"font": {"color": "#2E8B57" if sum(dde_values) >= 0 else "#DC143C"}},
-        domain = {"row": 0, "column": 0}
-    ), row=1, col=1)
-    
-    # Ruptura Binário
-    ruptura_bin_values = [data['Ruptura_Bin_Diff'] for data in summary_data]
-    
-    fig.add_trace(go.Indicator(
-        mode = "number+delta",
-        value = sum(ruptura_bin_values) / len(ruptura_bin_values),
-        delta = {"reference": 0, "valueformat": ".1f"},
-        title = {"text": "% Ruptura Binário<br>(média das categorias)"},
-        number = {"font": {"color": "#2E8B57" if sum(ruptura_bin_values) <= 0 else "#DC143C"}},
-        domain = {"row": 0, "column": 1}
-    ), row=1, col=2)
-    
-    # Ruptura Receita
-    ruptura_rec_values = [data['Ruptura_Rec_Diff'] for data in summary_data]
-    
-    fig.add_trace(go.Indicator(
-        mode = "number+delta",
-        value = sum(ruptura_rec_values) / len(ruptura_rec_values),
-        delta = {"reference": 0, "valueformat": ".1f"},
-        title = {"text": "% Ruptura Receita<br>(média das categorias)"},
-        number = {"font": {"color": "#2E8B57" if sum(ruptura_rec_values) <= 0 else "#DC143C"}},
-        domain = {"row": 0, "column": 2}
-    ), row=1, col=3)
-    
-    fig.update_layout(
-        height=300,
-        title="Resumo Executivo - Diff-in-Diff Consolidado",
-        paper_bgcolor="#F2F2F2"
-    )
-    
-    fig.show()
-
-# Gerar resumo executivo
-create_executive_summary(df_analise_regiao, categorias_teste)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Dashboard Consolidado - Todos os Cards
-
-# COMMAND ----------
-
-def create_consolidated_dashboard(df_analise_regiao, categorias_teste):
-    """
-    Cria um dashboard consolidado com todos os cards em uma única visualização
-    """
-    # Criar figura com subplots para organizar os cards
-    fig = make_subplots(
-        rows=2, cols=3,
-        subplot_titles=[
-            f"DDE Médio - {categorias_teste[0]}" if len(categorias_teste) > 0 else "DDE Médio",
-            f"% Ruptura Binário - {categorias_teste[0]}" if len(categorias_teste) > 0 else "% Ruptura Binário", 
-            f"% Ruptura Receita - {categorias_teste[0]}" if len(categorias_teste) > 0 else "% Ruptura Receita",
-            f"DDE Médio - {categorias_teste[1]}" if len(categorias_teste) > 1 else "DDE Médio",
-            f"% Ruptura Binário - {categorias_teste[1]}" if len(categorias_teste) > 1 else "% Ruptura Binário",
-            f"% Ruptura Receita - {categorias_teste[1]}" if len(categorias_teste) > 1 else "% Ruptura Receita"
-        ],
-        specs=[[{"type": "indicator"}, {"type": "indicator"}, {"type": "indicator"}],
-               [{"type": "indicator"}, {"type": "indicator"}, {"type": "indicator"}]]
-    )
-    
-    card_positions = [(1, 1), (1, 2), (1, 3), (2, 1), (2, 2), (2, 3)]
-    card_index = 0
-    
-    for categoria in categorias_teste:
-        df_pandas = df_analise_regiao[categoria].toPandas()
-        
-        # Calcular métricas
-        avg_dde_diff = df_pandas['DDE_diff_in_diff'].mean()
-        avg_ruptura_binario_diff = df_pandas['PctRupturaBinario_diff_in_diff'].mean()
-        avg_ruptura_receita_diff = df_pandas['PctRupturaReceita_diff_in_diff'].mean()
-        
-        # Calcular percentual para DDE
-        dde_pct_change = calculate_dde_percentage_diff(df_analise_regiao, categoria)
-        
-        # Determinar cores
-        dde_color = "#DC143C" if avg_dde_diff > 1 else "#2E8B57" if avg_dde_diff < -1 else "#808080"
-        ruptura_bin_color = "#DC143C" if avg_ruptura_binario_diff > 1 else "#2E8B57" if avg_ruptura_binario_diff < -1 else "#808080"
-        ruptura_rec_color = "#DC143C" if avg_ruptura_receita_diff > 1 else "#2E8B57" if avg_ruptura_receita_diff < -1 else "#808080"
-        
-        # Adicionar indicadores
-        metrics = [
-            (avg_dde_diff, f"dias ({dde_pct_change:+.1f}%)", dde_color),
-            (avg_ruptura_binario_diff, "p.p.", ruptura_bin_color),
-            (avg_ruptura_receita_diff, "p.p.", ruptura_rec_color)
-        ]
-        
-        for metric_value, subtitle, color in metrics:
-            if card_index < len(card_positions):
-                row, col = card_positions[card_index]
-                
-                fig.add_trace(go.Indicator(
-                    mode = "number+delta",
-                    value = metric_value,
-                    delta = {"reference": 0, "valueformat": ".1f"},
-                    title = {"text": f"{subtitle}"},
-                    number = {"font": {"color": color, "size": 20}},
-                    domain = {"row": row-1, "column": col-1}
-                ), row=row, col=col)
-                
-                card_index += 1
-    
-    # Configurar layout
-    fig.update_layout(
-        height=600,
-        title="Dashboard Consolidado - Diff-in-Diff por Categoria",
-        paper_bgcolor="#F2F2F2",
-        font=dict(family="Arial", size=12)
-    )
-    
-    # Ajustar espaçamento entre subplots
-    fig.update_layout(
-        margin=dict(l=50, r=50, t=100, b=50)
-    )
-    
-    fig.show()
-
-# Gerar dashboard consolidado
-create_consolidated_dashboard(df_analise_regiao, categorias_teste)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Análise Detalhada por Categoria e Ângulos
-
-# COMMAND ----------
-
-def analyze_by_angles(df_estoque_loja_porte_regiao, df_comparacao, categorias_teste):
-    """
-    Analisa diff-in-diff por categoria e 3 ângulos: Porte, Região e Delta Merecimento
-    """
-    resultados = {}
-    
-    for categoria in categorias_teste:
-        print(f"\n=== ANÁLISE DETALHADA - {categoria} ===")
-        
-        # 1. ANÁLISE POR PORTE DE LOJA
-        print("\n--- 1. ANÁLISE POR PORTE DE LOJA ---")
-        df_porte = analyze_by_porte(df_estoque_loja_porte_regiao[categoria], categoria)
-        resultados[f"{categoria}_porte"] = df_porte
-        
-        # 2. ANÁLISE POR REGIÃO
-        print("\n--- 2. ANÁLISE POR REGIÃO ---")
-        df_regiao = analyze_by_regiao(df_estoque_loja_porte_regiao[categoria], categoria)
-        resultados[f"{categoria}_regiao"] = df_regiao
-        
-        # 3. ANÁLISE POR DELTA MERECIMENTO
-        print("\n--- 3. ANÁLISE POR DELTA MERECIMENTO ---")
-        df_delta_merecimento = analyze_by_delta_merecimento(
-            df_estoque_loja_porte_regiao[categoria], 
-            df_comparacao[categoria], 
-            categoria
-        )
-        resultados[f"{categoria}_delta_merecimento"] = df_delta_merecimento
-    
-    return resultados
-
-def analyze_by_porte(df_estoque, categoria):
-    """
-    Analisa diff-in-diff por porte de loja
-    """
-    # Agregar por grupo, período e porte
-    df_base = (
-        df_estoque
-        .groupBy("grupo", "periodo_analise", "NmPorteLoja")
-        .agg(
-            F.round(F.median("DDE"), 1).alias("DDE_medio"),
-            F.round(100 * F.avg(F.when(F.col("FlagRuptura") == 1, 1).otherwise(0)), 1).alias("PctRupturaBinario"),
-            F.sum("ReceitaPerdidaRuptura").alias("sum_perda"),
-            F.sum("Receita").alias("sum_receita"),
-        )
-        .withColumn(
-            "PctRupturaReceita",
-            F.round(100 * F.when(F.col("sum_receita") > 0, F.col("sum_perda")/F.col("sum_receita")).otherwise(0.0), 1)
-        )
-        .select("grupo","periodo_analise","NmPorteLoja","DDE_medio","PctRupturaBinario","PctRupturaReceita")
-        .dropna(subset=["NmPorteLoja"])
-    )
-    
-    # Calcular diff-in-diff
-    df_diff = calculate_diff_in_diff(df_base, "NmPorteLoja")
-    
-    print(f"Diff-in-Diff por Porte - {categoria}:")
-    df_diff.orderBy("NmPorteLoja").display()
-    
-    return df_diff
-
-def analyze_by_regiao(df_estoque, categoria):
-    """
-    Analisa diff-in-diff por região
-    """
-    # Agregar por grupo, período e região
-    df_base = (
-        df_estoque
-        .groupBy("grupo", "periodo_analise", "NmRegiaoGeografica")
-        .agg(
-            F.round(F.median("DDE"), 1).alias("DDE_medio"),
-            F.round(100 * F.avg(F.when(F.col("FlagRuptura") == 1, 1).otherwise(0)), 1).alias("PctRupturaBinario"),
-            F.sum("ReceitaPerdidaRuptura").alias("sum_perda"),
-            F.sum("Receita").alias("sum_receita"),
-        )
-        .withColumn(
-            "PctRupturaReceita",
-            F.round(100 * F.when(F.col("sum_receita") > 0, F.col("sum_perda")/F.col("sum_receita")).otherwise(0.0), 1)
-        )
-        .select("grupo","periodo_analise","NmRegiaoGeografica","DDE_medio","PctRupturaBinario","PctRupturaReceita")
-        .dropna(subset=["NmRegiaoGeografica"])
-    )
-    
-    # Calcular diff-in-diff
-    df_diff = calculate_diff_in_diff(df_base, "NmRegiaoGeografica")
-    
-    print(f"Diff-in-Diff por Região - {categoria}:")
-    df_diff.orderBy("NmRegiaoGeografica").display()
-    
-    return df_diff
-
-def analyze_by_delta_merecimento(df_estoque, df_comparacao, categoria):
-    """
-    Analisa diff-in-diff por delta de merecimento (acima, abaixo, manteve)
-    """
-    # Join com dados de comparação para obter bucket_delta
-    df_joined = (
-        df_estoque
+for categoria in categorias_teste:
+    # base do usuário + grupo incluído e período normalizado
+    base = (
+        df_estoque_loja_porte_regiao[categoria]
         .join(
-            df_comparacao
-            .select("CdFilial", "grupo_de_necessidade", "bucket_delta")
-            .distinct(),
-            on=["CdFilial", "grupo_de_necessidade"],
-            how="inner"
+            df_comparacao[categoria].select("CdFilial","bucket_delta").distinct(),
+            on=["CdFilial"], how="inner"
         )
-    )
-    
-    # Agregar por grupo, período e bucket_delta
-    df_base = (
-        df_joined
-        .groupBy("grupo", "periodo_analise", "bucket_delta")
+        .withColumn("periodo_norm", F.lower(F.trim(F.col("periodo_analise"))))
+        .groupBy("bucket_delta", "grupo", "periodo_norm")
         .agg(
             F.round(F.median("DDE"), 1).alias("DDE_medio"),
-            F.round(100 * F.avg(F.when(F.col("FlagRuptura") == 1, 1).otherwise(0)), 1).alias("PctRupturaBinario"),
-            F.sum("ReceitaPerdidaRuptura").alias("sum_perda"),
-            F.sum("Receita").alias("sum_receita"),
+            F.round(100 * F.avg(F.when(F.col("FlagRuptura")==1, 1).otherwise(0)), 1).alias("PctRupturaBinario"),
+            F.round(100 * (F.sum("ReceitaPerdidaRuptura") / F.sum("Receita")), 1).alias("PctRupturaReceita")
         )
-        .withColumn(
-            "PctRupturaReceita",
-            F.round(100 * F.when(F.col("sum_receita") > 0, F.col("sum_perda")/F.col("sum_receita")).otherwise(0.0), 1)
-        )
-        .select("grupo","periodo_analise","bucket_delta","DDE_medio","PctRupturaBinario","PctRupturaReceita")
-        .dropna(subset=["bucket_delta"])
     )
-    
-    # Calcular diff-in-diff
-    df_diff = calculate_diff_in_diff(df_base, "bucket_delta")
-    
-    print(f"Diff-in-Diff por Delta Merecimento - {categoria}:")
-    df_diff.orderBy("bucket_delta").display()
-    
-    return df_diff
 
-def calculate_diff_in_diff(df_base, group_column):
-    """
-    Calcula diff-in-diff para qualquer agrupamento
-    """
-    # Baseline e piloto via WHEN
-    df_wide = (
-        df_base.groupBy(group_column, "grupo")
+    # baseline/piloto por bucket x grupo (sem pivot)
+    wide = (
+        base.groupBy("bucket_delta","grupo")
         .agg(
-            F.max(F.when(F.col("periodo_analise")=="baseline", F.col("DDE_medio"))).alias("baseline_DDE_medio"),
-            F.max(F.when(F.col("periodo_analise")=="piloto",   F.col("DDE_medio"))).alias("piloto_DDE_medio"),
-            F.max(F.when(F.col("periodo_analise")=="baseline", F.col("PctRupturaBinario"))).alias("baseline_PctRupturaBinario"),
-            F.max(F.when(F.col("periodo_analise")=="piloto",   F.col("PctRupturaBinario"))).alias("piloto_PctRupturaBinario"),
-            F.max(F.when(F.col("periodo_analise")=="baseline", F.col("PctRupturaReceita"))).alias("baseline_PctRupturaReceita"),
-            F.max(F.when(F.col("periodo_analise")=="piloto",   F.col("PctRupturaReceita"))).alias("piloto_PctRupturaReceita"),
+            F.max(F.when(F.col("periodo_norm")=="baseline", F.col("DDE_medio"))).alias("baseline_DDE"),
+            F.max(F.when(F.col("periodo_norm")=="piloto",   F.col("DDE_medio"))).alias("piloto_DDE"),
+
+            F.max(F.when(F.col("periodo_norm")=="baseline", F.col("PctRupturaBinario"))).alias("baseline_PctBin"),
+            F.max(F.when(F.col("periodo_norm")=="piloto",   F.col("PctRupturaBinario"))).alias("piloto_PctBin"),
+
+            F.max(F.when(F.col("periodo_norm")=="baseline", F.col("PctRupturaReceita"))).alias("baseline_PctRec"),
+            F.max(F.when(F.col("periodo_norm")=="piloto",   F.col("PctRupturaReceita"))).alias("piloto_PctRec"),
         )
         .fillna(0.0)
     )
-    
-    # Deltas piloto - baseline
-    df_delta = (
-        df_wide
-        .withColumn("DDE_delta", F.round(F.col("piloto_DDE_medio") - F.col("baseline_DDE_medio"), 1))
-        .withColumn("PctRupturaBinario_delta", F.round(F.col("piloto_PctRupturaBinario") - F.col("baseline_PctRupturaBinario"), 1))
-        .withColumn("PctRupturaReceita_delta", F.round(F.col("piloto_PctRupturaReceita") - F.col("baseline_PctRupturaReceita"), 1))
+
+    # deltas piloto - baseline
+    delta = (
+        wide
+        .withColumn("DDE_delta",    F.round(F.col("piloto_DDE")    - F.col("baseline_DDE"), 1))
+        .withColumn("PctBin_delta", F.round(F.col("piloto_PctBin") - F.col("baseline_PctBin"), 1))
+        .withColumn("PctRec_delta", F.round(F.col("piloto_PctRec") - F.col("baseline_PctRec"), 1))
     )
-    
-    # Separar teste e controle
-    df_teste = (
-        df_delta.filter(F.col("grupo") == "teste")
+
+    # separa teste e controle
+    t = (
+        delta.filter(F.col("grupo")=="teste")
         .select(
-            F.col(group_column).alias(f"{group_column}_key"),
-            F.col("DDE_delta").alias("DDE_delta_teste"),
-            F.col("PctRupturaBinario_delta").alias("PctRupturaBinario_delta_teste"),
-            F.col("PctRupturaReceita_delta").alias("PctRupturaReceita_delta_teste"),
+            "bucket_delta",
+            "baseline_DDE","piloto_DDE","DDE_delta",
+            "baseline_PctBin","piloto_PctBin","PctBin_delta",
+            "baseline_PctRec","piloto_PctRec","PctRec_delta"
         )
+        .withColumnRenamed("baseline_DDE","baseline_DDE_teste")
+        .withColumnRenamed("piloto_DDE","piloto_DDE_teste")
+        .withColumnRenamed("DDE_delta","DDE_delta_teste")
+        .withColumnRenamed("baseline_PctBin","baseline_PctBin_teste")
+        .withColumnRenamed("piloto_PctBin","piloto_PctBin_teste")
+        .withColumnRenamed("PctBin_delta","PctRupturaBinario_delta_teste")
+        .withColumnRenamed("baseline_PctRec","baseline_PctRec_teste")
+        .withColumnRenamed("piloto_PctRec","piloto_PctRec_teste")
+        .withColumnRenamed("PctRec_delta","PctRupturaReceita_delta_teste")
     )
-    
-    df_controle = (
-        df_delta.filter(F.col("grupo") == "controle")
+
+    c = (
+        delta.filter(F.col("grupo")=="controle")
         .select(
-            F.col(group_column).alias(f"{group_column}_key"),
-            F.col("DDE_delta").alias("DDE_delta_controle"),
-            F.col("PctRupturaBinario_delta").alias("PctRupturaBinario_delta_controle"),
-            F.col("PctRupturaReceita_delta").alias("PctRupturaReceita_delta_controle"),
+            "bucket_delta",
+            "baseline_DDE","piloto_DDE","DDE_delta",
+            "baseline_PctBin","piloto_PctBin","PctBin_delta",
+            "baseline_PctRec","piloto_PctRec","PctRec_delta"
         )
+        .withColumnRenamed("baseline_DDE","baseline_DDE_controle")
+        .withColumnRenamed("piloto_DDE","piloto_DDE_controle")
+        .withColumnRenamed("DDE_delta","DDE_delta_controle")
+        .withColumnRenamed("baseline_PctBin","baseline_PctBin_controle")
+        .withColumnRenamed("piloto_PctBin","piloto_PctBin_controle")
+        .withColumnRenamed("PctBin_delta","PctRupturaBinario_delta_controle")
+        .withColumnRenamed("baseline_PctRec","baseline_PctRec_controle")
+        .withColumnRenamed("piloto_PctRec","piloto_PctRec_controle")
+        .withColumnRenamed("PctRec_delta","PctRupturaReceita_delta_controle")
     )
-    
-    # Diff-in-Diff = delta_teste - delta_controle
-    df_diff = (
-        df_teste.join(df_controle, on=f"{group_column}_key", how="inner")
-        .withColumnRenamed(f"{group_column}_key", group_column)
-        .withColumn("DDE_diff_in_diff", F.round(F.col("DDE_delta_teste") - F.col("DDE_delta_controle"), 1))
-        .withColumn("PctRupturaBinario_diff_in_diff", F.round(F.col("PctRupturaBinario_delta_teste") - F.col("PctRupturaBinario_delta_controle"), 1))
-        .withColumn("PctRupturaReceita_diff_in_diff", F.round(F.col("PctRupturaReceita_delta_teste") - F.col("PctRupturaReceita_delta_controle"), 1))
-    )
-    
-    return df_diff
 
-# Executar análises detalhadas
-resultados_detalhados = analyze_by_angles(df_estoque_loja_porte_regiao, df_comparacao, categorias_teste)
+    did = (
+        t.join(c, on="bucket_delta", how="inner")
+         .withColumn("DDE_diff_in_diff",               F.round(F.col("DDE_delta_teste") - F.col("DDE_delta_controle"), 1))
+         .withColumn("PctRupturaBinario_diff_in_diff", F.round(F.col("PctRupturaBinario_delta_teste") - F.col("PctRupturaBinario_delta_controle"), 1))
+         .withColumn("PctRupturaReceita_diff_in_diff", F.round(F.col("PctRupturaReceita_delta_teste") - F.col("PctRupturaReceita_delta_controle"), 1))
+    )
 
-# COMMAND ----------
+    # pivot por métrica; categoria primeiro
+    df_pivot_bucket = (
+        did.selectExpr(
+            "bucket_delta",
+            "stack(3, "
+            " 'DDE',               DDE_diff_in_diff,               DDE_delta_teste,               DDE_delta_controle, "
+            " baseline_DDE_teste,  piloto_DDE_teste,               baseline_DDE_controle,         piloto_DDE_controle, "
+            " 'PctRupturaBinario', PctRupturaBinario_diff_in_diff, PctRupturaBinario_delta_teste, PctRupturaBinario_delta_controle, "
+            " baseline_PctBin_teste, piloto_PctBin_teste,          baseline_PctBin_controle,      piloto_PctBin_controle, "
+            " 'PctRupturaReceita', PctRupturaReceita_diff_in_diff, PctRupturaReceita_delta_teste, PctRupturaReceita_delta_controle, "
+            " baseline_PctRec_teste, piloto_PctRec_teste,          baseline_PctRec_controle,      piloto_PctRec_controle "
+            ") as (metrica, diff_in_diff, delta_teste, delta_controle, "
+            "baseline_teste, piloto_teste, baseline_controle, piloto_controle)"
+        )
+        .withColumn("categoria", F.lit(categoria))
+        .select(
+            "categoria","bucket_delta","metrica",
+            "diff_in_diff","delta_teste","delta_controle",
+            "baseline_teste","piloto_teste","baseline_controle","piloto_controle"
+        )
+        .orderBy("categoria","metrica", "bucket_delta")
+    )
 
-# MAGIC %md
-# MAGIC ## Visualizações por Ângulos de Análise
+    df_did_bucket[categoria] = df_pivot_bucket
+    dfs_all.append(df_pivot_bucket)
+    #df_pivot_bucket.display()
 
-# COMMAND ----------
-
-def create_angle_visualizations(resultados_detalhados, categorias_teste):
-    """
-    Cria visualizações específicas para cada ângulo de análise
-    """
-for categoria in categorias_teste:
-        print(f"\n=== VISUALIZAÇÕES - {categoria} ===")
-        
-        # 1. Visualização por Porte
-        create_porte_visualization(resultados_detalhados[f"{categoria}_porte"], categoria)
-        
-        # 2. Visualização por Região
-        create_regiao_visualization(resultados_detalhados[f"{categoria}_regiao"], categoria)
-        
-        # 3. Visualização por Delta Merecimento
-        create_delta_merecimento_visualization(resultados_detalhados[f"{categoria}_delta_merecimento"], categoria)
-
-def create_porte_visualization(df_porte, categoria):
-    """
-    Cria visualização para análise por porte
-    """
-    df_pandas = df_porte.toPandas()
-    
-    # Calcular delta percentual para DDE (assumindo baseline médio de 15 dias)
-    baseline_dde_medio = 15.0
-    df_pandas['DDE_delta_pct'] = (df_pandas['DDE_diff_in_diff'] / baseline_dde_medio) * 100
-    
-    # Criar gráfico de barras para DDE
-    fig_dde = px.bar(
-        df_pandas, 
-        x="NmPorteLoja", 
-        y="DDE_diff_in_diff",
-        title=f"DDE Diff-in-Diff por Porte - {categoria}",
-        color="DDE_diff_in_diff",
-        color_continuous_scale=["#DC143C", "#808080", "#2E8B57"],
-        labels={"DDE_diff_in_diff": "DDE Diff-in-Diff (dias)", "NmPorteLoja": "Porte da Loja"},
-        text_auto=True
-    )
-    
-    # Adicionar anotações com delta percentual
-    fig_dde.update_traces(
-        texttemplate="%{y:.1f}<br><span style='font-size:10px'>(%{customdata:.1f}%)</span>",
-        textposition="outside",
-        customdata=df_pandas['DDE_delta_pct']
-    )
-    
-    fig_dde.update_layout(
-        paper_bgcolor="#F2F2F2",
-        plot_bgcolor="white",
-        height=500,
-        margin=dict(t=80, b=80, l=60, r=60),
-        font=dict(size=14),
-        xaxis=dict(tickfont=dict(size=12)),
-        yaxis=dict(tickfont=dict(size=12))
-    )
-    
-    fig_dde.show()
-    
-    # Criar gráfico de barras para Ruptura
-    fig_ruptura = px.bar(
-        df_pandas, 
-        x="NmPorteLoja", 
-        y="PctRupturaBinario_diff_in_diff",
-        title=f"% Ruptura Diff-in-Diff por Porte - {categoria}",
-        color="PctRupturaBinario_diff_in_diff",
-        color_continuous_scale=["#2E8B57", "#808080", "#DC143C"],
-        labels={"PctRupturaBinario_diff_in_diff": "% Ruptura Diff-in-Diff (p.p.)", "NmPorteLoja": "Porte da Loja"},
-        text_auto=True
-    )
-    
-    fig_ruptura.update_traces(
-        texttemplate="%{y:.1f}",
-        textposition="outside"
-    )
-    
-    fig_ruptura.update_layout(
-        paper_bgcolor="#F2F2F2",
-        plot_bgcolor="white",
-        height=500,
-        margin=dict(t=80, b=80, l=60, r=60),
-        font=dict(size=14),
-        xaxis=dict(tickfont=dict(size=12)),
-        yaxis=dict(tickfont=dict(size=12))
-    )
-    
-    fig_ruptura.show()
-
-def create_regiao_visualization(df_regiao, categoria):
-    """
-    Cria visualização para análise por região
-    """
-    df_pandas = df_regiao.toPandas()
-    
-    # Calcular delta percentual para DDE (assumindo baseline médio de 15 dias)
-    baseline_dde_medio = 15.0
-    df_pandas['DDE_delta_pct'] = (df_pandas['DDE_diff_in_diff'] / baseline_dde_medio) * 100
-    
-    # Criar gráfico de barras para DDE
-    fig_dde = px.bar(
-        df_pandas, 
-        x="NmRegiaoGeografica", 
-        y="DDE_diff_in_diff",
-        title=f"DDE Diff-in-Diff por Região - {categoria}",
-        color="DDE_diff_in_diff",
-        color_continuous_scale=["#DC143C", "#808080", "#2E8B57"],
-        labels={"DDE_diff_in_diff": "DDE Diff-in-Diff (dias)", "NmRegiaoGeografica": "Região"},
-        text_auto=True
-    )
-    
-    # Adicionar anotações com delta percentual
-    fig_dde.update_traces(
-        texttemplate="%{y:.1f}<br><span style='font-size:10px'>(%{customdata:.1f}%)</span>",
-        textposition="outside",
-        customdata=df_pandas['DDE_delta_pct']
-    )
-    
-    fig_dde.update_layout(
-        paper_bgcolor="#F2F2F2",
-        plot_bgcolor="white",
-        height=500,
-        margin=dict(t=80, b=80, l=60, r=60),
-        font=dict(size=14),
-        xaxis=dict(tickfont=dict(size=12), tickangle=-45),
-        yaxis=dict(tickfont=dict(size=12))
-    )
-    
-    fig_dde.show()
-
-def create_delta_merecimento_visualization(df_delta, categoria):
-    """
-    Cria visualização para análise por delta de merecimento
-    """
-    df_pandas = df_delta.toPandas()
-    
-    # Calcular delta percentual para DDE (assumindo baseline médio de 15 dias)
-    baseline_dde_medio = 15.0
-    df_pandas['DDE_delta_pct'] = (df_pandas['DDE_diff_in_diff'] / baseline_dde_medio) * 100
-    
-    # Criar gráfico de barras para DDE
-    fig_dde = px.bar(
-        df_pandas, 
-        x="bucket_delta", 
-        y="DDE_diff_in_diff",
-        title=f"DDE Diff-in-Diff por Delta Merecimento - {categoria}",
-        color="DDE_diff_in_diff",
-        color_continuous_scale=["#DC143C", "#808080", "#2E8B57"],
-        labels={"DDE_diff_in_diff": "DDE Diff-in-Diff (dias)", "bucket_delta": "Delta Merecimento"},
-        text_auto=True
-    )
-    
-    # Adicionar anotações com delta percentual
-    fig_dde.update_traces(
-        texttemplate="%{y:.1f}<br><span style='font-size:10px'>(%{customdata:.1f}%)</span>",
-        textposition="outside",
-        customdata=df_pandas['DDE_delta_pct']
-    )
-    
-    fig_dde.update_layout(
-        paper_bgcolor="#F2F2F2",
-        plot_bgcolor="white",
-        height=500,
-        margin=dict(t=80, b=80, l=60, r=60),
-        font=dict(size=14),
-        xaxis=dict(tickfont=dict(size=12)),
-        yaxis=dict(tickfont=dict(size=12))
-    )
-    
-    fig_dde.show()
-    
-    # Criar gráfico de barras para Ruptura
-    fig_ruptura = px.bar(
-        df_pandas, 
-        x="bucket_delta", 
-        y="PctRupturaBinario_diff_in_diff",
-        title=f"% Ruptura Diff-in-Diff por Delta Merecimento - {categoria}",
-        color="PctRupturaBinario_diff_in_diff",
-        color_continuous_scale=["#2E8B57", "#808080", "#DC143C"],
-        labels={"PctRupturaBinario_diff_in_diff": "% Ruptura Diff-in-Diff (p.p.)", "bucket_delta": "Delta Merecimento"},
-        text_auto=True
-    )
-    
-    fig_ruptura.update_traces(
-        texttemplate="%{y:.1f}",
-        textposition="outside"
-    )
-    
-    fig_ruptura.update_layout(
-        paper_bgcolor="#F2F2F2",
-        plot_bgcolor="white",
-        height=500,
-        margin=dict(t=80, b=80, l=60, r=60),
-        font=dict(size=14),
-        xaxis=dict(tickfont=dict(size=12)),
-        yaxis=dict(tickfont=dict(size=12))
-    )
-    
-    fig_ruptura.show()
-
-# Executar visualizações por ângulos
-create_angle_visualizations(resultados_detalhados, categorias_teste)
+# consolidado opcional
+if dfs_all:
+    df_did_bucket_final = dfs_all[0]
+    for d in dfs_all[1:]:
+        df_did_bucket_final = df_did_bucket_final.unionByName(d, allowMissingColumns=True)
+    df_did_bucket_final.display()
 
 # COMMAND ----------
 
