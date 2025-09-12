@@ -1085,7 +1085,9 @@ def create_tudo_cut_visualization(df_estoque, categoria):
         paper_bgcolor="#F2F2F2",
         plot_bgcolor="white",
         height=500,
-        font=dict(size=12)
+        font=dict(size=12),
+        bargap=0.3,  # Espaçamento entre grupos de barras
+        bargroupgap=0.1  # Espaçamento entre barras do mesmo grupo
     )
     
     fig.show()
@@ -1194,7 +1196,9 @@ def create_porte_cut_visualization(df_estoque, categoria):
         plot_bgcolor="white",
         height=500,
         font=dict(size=12),
-        xaxis_tickangle=-45
+        xaxis_tickangle=-45,
+        bargap=0.2,  # Espaçamento entre grupos de barras
+        bargroupgap=0.1  # Espaçamento entre barras do mesmo grupo
     )
     
     fig.show()
@@ -1303,7 +1307,9 @@ def create_regiao_cut_visualization(df_estoque, categoria):
         plot_bgcolor="white",
         height=500,
         font=dict(size=12),
-        xaxis_tickangle=-45
+        xaxis_tickangle=-45,
+        bargap=0.2,  # Espaçamento entre grupos de barras
+        bargroupgap=0.1  # Espaçamento entre barras do mesmo grupo
     )
     
     fig.show()
@@ -1361,13 +1367,33 @@ def create_delta_merecimento_cut_visualization(df_estoque, df_comparacao, catego
     for bucket in buckets:
         bucket_data = df_pandas[df_pandas['bucket_delta'] == bucket]
         
-        # Teste
-        teste_baseline = bucket_data[bucket_data['grupo'] == 'teste']['baseline'].iloc[0] if 'baseline' in bucket_data.columns else 0
-        teste_piloto = bucket_data[bucket_data['grupo'] == 'teste']['piloto'].iloc[0] if 'piloto' in bucket_data.columns else 0
+        # Verificar se existem dados para este bucket
+        if bucket_data.empty:
+            continue
+            
+        # Teste - com verificação de segurança
+        teste_data = bucket_data[bucket_data['grupo'] == 'teste']
+        if not teste_data.empty and 'baseline' in teste_data.columns:
+            teste_baseline = teste_data['baseline'].iloc[0] if not teste_data['baseline'].isna().iloc[0] else 0
+        else:
+            teste_baseline = 0
+            
+        if not teste_data.empty and 'piloto' in teste_data.columns:
+            teste_piloto = teste_data['piloto'].iloc[0] if not teste_data['piloto'].isna().iloc[0] else 0
+        else:
+            teste_piloto = 0
         
-        # Controle
-        controle_baseline = bucket_data[bucket_data['grupo'] == 'controle']['baseline'].iloc[0] if 'baseline' in bucket_data.columns else 0
-        controle_piloto = bucket_data[bucket_data['grupo'] == 'controle']['piloto'].iloc[0] if 'piloto' in bucket_data.columns else 0
+        # Controle - com verificação de segurança
+        controle_data = bucket_data[bucket_data['grupo'] == 'controle']
+        if not controle_data.empty and 'baseline' in controle_data.columns:
+            controle_baseline = controle_data['baseline'].iloc[0] if not controle_data['baseline'].isna().iloc[0] else 0
+        else:
+            controle_baseline = 0
+            
+        if not controle_data.empty and 'piloto' in controle_data.columns:
+            controle_piloto = controle_data['piloto'].iloc[0] if not controle_data['piloto'].isna().iloc[0] else 0
+        else:
+            controle_piloto = 0
         
         # Adicionar barras
         fig.add_trace(go.Bar(
@@ -1424,7 +1450,9 @@ def create_delta_merecimento_cut_visualization(df_estoque, df_comparacao, catego
         plot_bgcolor="white",
         height=500,
         font=dict(size=12),
-        xaxis_tickangle=-45
+        xaxis_tickangle=-45,
+        bargap=0.2,  # Espaçamento entre grupos de barras
+        bargroupgap=0.1  # Espaçamento entre barras do mesmo grupo
     )
     
     fig.show()
