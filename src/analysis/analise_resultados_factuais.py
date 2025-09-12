@@ -340,7 +340,7 @@ df_result_wsmape.display()
 from pyspark.sql import functions as F
 
 # selecione a aba desejada do dict df_comparacao
-aba = "TELAS"  # ex.: "TELEFONIA", "TELAS", etc.
+aba = "TELEFONIA"  # ex.: "TELEFONIA", "TELAS", etc.
 df_base = df_comparacao[aba]
 
 # helpers
