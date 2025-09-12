@@ -214,13 +214,13 @@ df_analise = {}
 
 for categoria in categorias_teste:
     df_analise[categoria] = (
-        df_estoque_loja[categoria]
-        .groupBy("periodo_analise", "grupo")
-        .agg(
-            F.round(F.median("DDE"), 1).alias("DDE_medio"),
+            df_estoque_loja[categoria]
+            .groupBy("periodo_analise", "grupo")
+            .agg(
+                F.round(F.median("DDE"), 1).alias("DDE_medio"),
             F.round(100 * F.avg(F.when(F.col("FlagRuptura") == 1, 1).otherwise(0)), 1).alias("PctRupturaBinario"),
             F.round(100 * (F.sum("ReceitaPerdidaRuptura") / F.sum("Receita")), 1).alias("PctRupturaReceita")
-        )
+            )
         .orderBy(F.desc("grupo"), F.desc("periodo_analise"))
     )
 
@@ -268,7 +268,7 @@ for categoria in categorias_teste:
     df_analise_regiao[categoria] = (
         df_estoque_loja_porte_regiao[categoria]
         .groupBy('grupo', 'periodo_analise', 'NmRegiaoGeografica')
-       .agg(
+        .agg(
             F.round(F.median("DDE"), 1).alias("DDE_medio"),
             F.round(100 * F.avg(F.when(F.col("FlagRuptura") == 1, 1).otherwise(0)), 1).alias("PctRupturaBinario"),
             F.round(100 * (F.sum("ReceitaPerdidaRuptura") / F.sum("Receita")), 1).alias("PctRupturaReceita")
@@ -439,7 +439,7 @@ for categoria in categorias_teste:
 
     df_controle = (
         df_delta.filter(F.col("grupo") == "controle")
-        .select(
+            .select(
             F.col("NmPorteLoja").alias("NmPorteLoja_key"),
             F.col("DDE_delta").alias("DDE_delta_controle"),
             F.col("PctRupturaBinario_delta").alias("PctRupturaBinario_delta_controle"),
@@ -1141,7 +1141,7 @@ def create_angle_visualizations(resultados_detalhados, categorias_teste):
     """
     Cria visualizações específicas para cada ângulo de análise
     """
-    for categoria in categorias_teste:
+for categoria in categorias_teste:
         print(f"\n=== VISUALIZAÇÕES - {categoria} ===")
         
         # 1. Visualização por Porte
@@ -1159,6 +1159,10 @@ def create_porte_visualization(df_porte, categoria):
     """
     df_pandas = df_porte.toPandas()
     
+    # Calcular delta percentual para DDE (assumindo baseline médio de 15 dias)
+    baseline_dde_medio = 15.0
+    df_pandas['DDE_delta_pct'] = (df_pandas['DDE_diff_in_diff'] / baseline_dde_medio) * 100
+    
     # Criar gráfico de barras para DDE
     fig_dde = px.bar(
         df_pandas, 
@@ -1167,13 +1171,25 @@ def create_porte_visualization(df_porte, categoria):
         title=f"DDE Diff-in-Diff por Porte - {categoria}",
         color="DDE_diff_in_diff",
         color_continuous_scale=["#DC143C", "#808080", "#2E8B57"],
-        labels={"DDE_diff_in_diff": "DDE Diff-in-Diff (dias)", "NmPorteLoja": "Porte da Loja"}
+        labels={"DDE_diff_in_diff": "DDE Diff-in-Diff (dias)", "NmPorteLoja": "Porte da Loja"},
+        text_auto=True
+    )
+    
+    # Adicionar anotações com delta percentual
+    fig_dde.update_traces(
+        texttemplate="%{y:.1f}<br><span style='font-size:10px'>(%{customdata:.1f}%)</span>",
+        textposition="outside",
+        customdata=df_pandas['DDE_delta_pct']
     )
     
     fig_dde.update_layout(
         paper_bgcolor="#F2F2F2",
         plot_bgcolor="white",
-        height=400
+        height=500,
+        margin=dict(t=80, b=80, l=60, r=60),
+        font=dict(size=14),
+        xaxis=dict(tickfont=dict(size=12)),
+        yaxis=dict(tickfont=dict(size=12))
     )
     
     fig_dde.show()
@@ -1186,13 +1202,23 @@ def create_porte_visualization(df_porte, categoria):
         title=f"% Ruptura Diff-in-Diff por Porte - {categoria}",
         color="PctRupturaBinario_diff_in_diff",
         color_continuous_scale=["#2E8B57", "#808080", "#DC143C"],
-        labels={"PctRupturaBinario_diff_in_diff": "% Ruptura Diff-in-Diff (p.p.)", "NmPorteLoja": "Porte da Loja"}
+        labels={"PctRupturaBinario_diff_in_diff": "% Ruptura Diff-in-Diff (p.p.)", "NmPorteLoja": "Porte da Loja"},
+        text_auto=True
+    )
+    
+    fig_ruptura.update_traces(
+        texttemplate="%{y:.1f}",
+        textposition="outside"
     )
     
     fig_ruptura.update_layout(
         paper_bgcolor="#F2F2F2",
         plot_bgcolor="white",
-        height=400
+        height=500,
+        margin=dict(t=80, b=80, l=60, r=60),
+        font=dict(size=14),
+        xaxis=dict(tickfont=dict(size=12)),
+        yaxis=dict(tickfont=dict(size=12))
     )
     
     fig_ruptura.show()
@@ -1203,6 +1229,10 @@ def create_regiao_visualization(df_regiao, categoria):
     """
     df_pandas = df_regiao.toPandas()
     
+    # Calcular delta percentual para DDE (assumindo baseline médio de 15 dias)
+    baseline_dde_medio = 15.0
+    df_pandas['DDE_delta_pct'] = (df_pandas['DDE_diff_in_diff'] / baseline_dde_medio) * 100
+    
     # Criar gráfico de barras para DDE
     fig_dde = px.bar(
         df_pandas, 
@@ -1211,14 +1241,25 @@ def create_regiao_visualization(df_regiao, categoria):
         title=f"DDE Diff-in-Diff por Região - {categoria}",
         color="DDE_diff_in_diff",
         color_continuous_scale=["#DC143C", "#808080", "#2E8B57"],
-        labels={"DDE_diff_in_diff": "DDE Diff-in-Diff (dias)", "NmRegiaoGeografica": "Região"}
+        labels={"DDE_diff_in_diff": "DDE Diff-in-Diff (dias)", "NmRegiaoGeografica": "Região"},
+        text_auto=True
+    )
+    
+    # Adicionar anotações com delta percentual
+    fig_dde.update_traces(
+        texttemplate="%{y:.1f}<br><span style='font-size:10px'>(%{customdata:.1f}%)</span>",
+        textposition="outside",
+        customdata=df_pandas['DDE_delta_pct']
     )
     
     fig_dde.update_layout(
         paper_bgcolor="#F2F2F2",
         plot_bgcolor="white",
-        height=400,
-        xaxis_tickangle=-45
+        height=500,
+        margin=dict(t=80, b=80, l=60, r=60),
+        font=dict(size=14),
+        xaxis=dict(tickfont=dict(size=12), tickangle=-45),
+        yaxis=dict(tickfont=dict(size=12))
     )
     
     fig_dde.show()
@@ -1229,6 +1270,10 @@ def create_delta_merecimento_visualization(df_delta, categoria):
     """
     df_pandas = df_delta.toPandas()
     
+    # Calcular delta percentual para DDE (assumindo baseline médio de 15 dias)
+    baseline_dde_medio = 15.0
+    df_pandas['DDE_delta_pct'] = (df_pandas['DDE_diff_in_diff'] / baseline_dde_medio) * 100
+    
     # Criar gráfico de barras para DDE
     fig_dde = px.bar(
         df_pandas, 
@@ -1237,13 +1282,25 @@ def create_delta_merecimento_visualization(df_delta, categoria):
         title=f"DDE Diff-in-Diff por Delta Merecimento - {categoria}",
         color="DDE_diff_in_diff",
         color_continuous_scale=["#DC143C", "#808080", "#2E8B57"],
-        labels={"DDE_diff_in_diff": "DDE Diff-in-Diff (dias)", "bucket_delta": "Delta Merecimento"}
+        labels={"DDE_diff_in_diff": "DDE Diff-in-Diff (dias)", "bucket_delta": "Delta Merecimento"},
+        text_auto=True
+    )
+    
+    # Adicionar anotações com delta percentual
+    fig_dde.update_traces(
+        texttemplate="%{y:.1f}<br><span style='font-size:10px'>(%{customdata:.1f}%)</span>",
+        textposition="outside",
+        customdata=df_pandas['DDE_delta_pct']
     )
     
     fig_dde.update_layout(
         paper_bgcolor="#F2F2F2",
         plot_bgcolor="white",
-        height=400
+        height=500,
+        margin=dict(t=80, b=80, l=60, r=60),
+        font=dict(size=14),
+        xaxis=dict(tickfont=dict(size=12)),
+        yaxis=dict(tickfont=dict(size=12))
     )
     
     fig_dde.show()
@@ -1256,13 +1313,23 @@ def create_delta_merecimento_visualization(df_delta, categoria):
         title=f"% Ruptura Diff-in-Diff por Delta Merecimento - {categoria}",
         color="PctRupturaBinario_diff_in_diff",
         color_continuous_scale=["#2E8B57", "#808080", "#DC143C"],
-        labels={"PctRupturaBinario_diff_in_diff": "% Ruptura Diff-in-Diff (p.p.)", "bucket_delta": "Delta Merecimento"}
+        labels={"PctRupturaBinario_diff_in_diff": "% Ruptura Diff-in-Diff (p.p.)", "bucket_delta": "Delta Merecimento"},
+        text_auto=True
+    )
+    
+    fig_ruptura.update_traces(
+        texttemplate="%{y:.1f}",
+        textposition="outside"
     )
     
     fig_ruptura.update_layout(
         paper_bgcolor="#F2F2F2",
         plot_bgcolor="white",
-        height=400
+        height=500,
+        margin=dict(t=80, b=80, l=60, r=60),
+        font=dict(size=14),
+        xaxis=dict(tickfont=dict(size=12)),
+        yaxis=dict(tickfont=dict(size=12))
     )
     
     fig_ruptura.show()
