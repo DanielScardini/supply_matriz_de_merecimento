@@ -243,6 +243,40 @@ df.display()
 
 from pyspark.sql import functions as F, Window
 
+df = df_merecimento_lojas_agg['TELAS'] \
+    .select(
+        'grupo_de_necessidade',
+        'NmPorteLoja',
+        F.round(F.col('Merecimento_Porte_Nova'), 2).alias('Merecimento_Porte_Nova'),
+        F.round(F.col('Merecimento_Porte_Atual'), 2).alias('Merecimento_Porte_Atual')
+    ) \
+    .dropDuplicates(['grupo_de_necessidade', 'NmPorteLoja']) \
+    .filter(F.col("NmPorteLoja").isNotNull()) \
+    .filter(F.col("NmPorteLoja") != '-') \
+    .orderBy('grupo_de_necessidade', 'NmPorteLoja')
+
+# janela por grupo
+w = Window.partitionBy("grupo_de_necessidade")
+
+df = df \
+    .withColumn("total_nova", F.sum("Merecimento_Porte_Nova").over(w)) \
+    .withColumn("total_atual", F.sum("Merecimento_Porte_Atual").over(w)) \
+    .withColumn("Merecimento_Porte_Nova",
+                F.round(100 * F.col("Merecimento_Porte_Nova") / F.col("total_nova"), 2)) \
+    .withColumn("Merecimento_Porte_Atual",
+                F.round(100 * F.col("Merecimento_Porte_Atual") / F.col("total_atual"), 2)) \
+    .withColumn("deltaMatriz", 
+                F.round(F.col("Merecimento_Porte_Nova") - F.col("Merecimento_Porte_Atual"), 2)) \
+    .withColumn("deltaMatriz_percentual",
+                F.round(100 * F.col("deltaMatriz") / F.col("Merecimento_Porte_Nova"), 1)) \
+    .drop("total_nova", "total_atual")
+
+df.display()
+
+# COMMAND ----------
+
+from pyspark.sql import functions as F, Window
+
 df_merecimento_lojas_agg_regiao = {}
 
 # base
