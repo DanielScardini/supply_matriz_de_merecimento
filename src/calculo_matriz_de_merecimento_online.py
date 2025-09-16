@@ -320,6 +320,117 @@ def aplicar_mapeamentos_produtos(df: DataFrame, categoria: str,
 
 # COMMAND ----------
 
+def remover_outliers_series_historicas(df: DataFrame, 
+                                     coluna_valor: str = "demanda_robusta",
+                                     n_sigmas_padrao: float = 3.0,
+                                     n_sigmas_atacado: float = 1.5,
+                                     filiais_atacado: list = None) -> DataFrame:
+    """
+    Remove outliers das séries históricas (grupo de necessidade x filial) usando dois métodos:
+    
+    1. Método padrão: n desvios padrão (3 sigmas por padrão)
+    2. Método atacado: n desvios padrão específico para filiais na watchlist de atacado
+    
+    Os outliers são saturados para exatamente o threshold (média + n*sigmas).
+    
+    Args:
+        df: DataFrame com dados históricos
+        coluna_valor: Nome da coluna com os valores a serem tratados
+        n_sigmas_padrao: Número de desvios padrão para método padrão
+        n_sigmas_atacado: Número de desvios padrão para filiais de atacado
+        filiais_atacado: Lista de filiais consideradas de atacado
+        
+    Returns:
+        DataFrame com outliers removidos (saturados no threshold)
+    """
+    print(f"🔄 Removendo outliers das séries históricas...")
+    print(f"  • Coluna valor: {coluna_valor}")
+    print(f"  • N sigmas padrão: {n_sigmas_padrao}")
+    print(f"  • N sigmas atacado: {n_sigmas_atacado}")
+    print(f"  • Filiais atacado: {filiais_atacado if filiais_atacado else 'Não definidas'}")
+    
+    # Se não há filiais de atacado definidas, usa método padrão para todas
+    if not filiais_atacado:
+        filiais_atacado = []
+    
+    # Janela para calcular estatísticas por grupo_de_necessidade x filial
+    w_grupo_filial = Window.partitionBy("grupo_de_necessidade", "CdFilial")
+    
+    # Calcular estatísticas por grupo_de_necessidade x filial
+    df_com_stats = (
+        df
+        .withColumn("media_grupo_filial", F.avg(F.col(coluna_valor)).over(w_grupo_filial))
+        .withColumn("desvio_grupo_filial", F.stddev(F.col(coluna_valor)).over(w_grupo_filial))
+        .withColumn("is_atacado", F.col("CdFilial").isin(filiais_atacado))
+    )
+    
+    # Calcular thresholds baseado no tipo de filial
+    df_com_thresholds = (
+        df_com_stats
+        .withColumn(
+            "n_sigmas_aplicado",
+            F.when(F.col("is_atacado"), F.lit(n_sigmas_atacado))
+            .otherwise(F.lit(n_sigmas_padrao))
+        )
+        .withColumn(
+            "threshold_superior",
+            F.col("media_grupo_filial") + (F.col("n_sigmas_aplicado") * F.col("desvio_grupo_filial"))
+        )
+        .withColumn(
+            "threshold_inferior",
+            F.greatest(
+                F.col("media_grupo_filial") - (F.col("n_sigmas_aplicado") * F.col("desvio_grupo_filial")),
+                F.lit(0)  # Não permite valores negativos
+            )
+        )
+    )
+    
+    # Aplicar saturação dos outliers
+    df_sem_outliers = (
+        df_com_thresholds
+        .withColumn(
+            f"{coluna_valor}_original",
+            F.col(coluna_valor)
+        )
+        .withColumn(
+            coluna_valor,
+            F.when(
+                F.col(coluna_valor) > F.col("threshold_superior"),
+                F.col("threshold_superior")
+            )
+            .when(
+                F.col(coluna_valor) < F.col("threshold_inferior"),
+                F.col("threshold_inferior")
+            )
+            .otherwise(F.col(coluna_valor))
+        )
+        .withColumn(
+            "flag_outlier_removido",
+            F.when(
+                (F.col(f"{coluna_valor}_original") != F.col(coluna_valor)),
+                F.lit(1)
+            ).otherwise(F.lit(0))
+        )
+        .drop(
+            "media_grupo_filial", "desvio_grupo_filial", "is_atacado", 
+            "n_sigmas_aplicado", "threshold_superior", "threshold_inferior"
+        )
+    )
+    
+    # Calcular estatísticas de remoção
+    total_registros = df_sem_outliers.count()
+    outliers_removidos = (
+        df_sem_outliers
+        .filter(F.col("flag_outlier_removido") == 1)
+        .count()
+    )
+    
+    print(f"✅ Outliers removidos: {outliers_removidos:,} de {total_registros:,} registros ({outliers_removidos/total_registros*100:.2f}%)")
+    
+    return df_sem_outliers
+
+# COMMAND ----------
+
 def detectar_outliers_meses_atipicos(df: DataFrame, categoria: str) -> tuple:
     """
     Detecta outliers e meses atípicos baseado no grupo_de_necessidade.
@@ -883,23 +994,38 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         # 6. Filtragem de meses atípicos
         df_filtrado = filtrar_meses_atipicos(df_com_grupo, df_meses_atipicos)
         
-        # 7. Cálculo das medidas centrais
-        df_com_medidas = calcular_medidas_centrais_com_medias_aparadas(df_filtrado)
+        # 7. Remoção de outliers das séries históricas
+        print("=" * 80)
+        print("🔄 Aplicando remoção de outliers das séries históricas...")
         
-        # 8. Consolidação final
+        # Definir filiais de atacado (exemplo - ajustar conforme necessário)
+        filiais_atacado = [1001, 1002, 1003]  # Lista de filiais consideradas de atacado
+        
+        df_sem_outliers = remover_outliers_series_historicas(
+            df_filtrado,
+            coluna_valor="demanda_robusta",
+            n_sigmas_padrao=PARAMETROS_OUTLIERS["desvios_historico_loja"],
+            n_sigmas_atacado=PARAMETROS_OUTLIERS["desvios_atacado_loja"],
+            filiais_atacado=filiais_atacado
+        )
+        
+        # 8. Cálculo das medidas centrais
+        df_com_medidas = calcular_medidas_centrais_com_medias_aparadas(df_sem_outliers)
+        
+        # 9. Consolidação final
         df_final = consolidar_medidas(df_com_medidas)
         
-        # 9. Cálculo de merecimento por CD e filial
+        # 10. Cálculo de merecimento por CD e filial
         print("=" * 80)
         print("🔄 Iniciando cálculo de merecimento...")
         
-        # 9.1 Merecimento a nível CD
+        # 10.1 Merecimento a nível CD
         df_merecimento_cd = calcular_merecimento_cd(df_final, data_calculo, categoria)
         
-        # 9.2 Merecimento interno ao CD
+        # 10.2 Merecimento interno ao CD
         df_merecimento_interno = calcular_merecimento_interno_cd(df_final, data_calculo, categoria)
         
-        # 9.3 Merecimento final
+        # 10.3 Merecimento final
         df_merecimento_final = calcular_merecimento_final(df_merecimento_cd, df_merecimento_interno)
 
         # Criar o esqueleto
