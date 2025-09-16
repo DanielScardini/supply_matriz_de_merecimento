@@ -299,7 +299,7 @@ def aplicar_mapeamentos_produtos(df: DataFrame, categoria: str,
 # COMMAND ----------
 
 def remover_outliers_series_historicas(df: DataFrame, 
-                                     coluna_valor: str = "demanda_robusta",
+                                     coluna_valor: str = "QtMercadoria",
                                      n_sigmas_padrao: float = 3.0,
                                      n_sigmas_atacado: float = 1.5,
                                      filiais_atacado: list = None) -> DataFrame:
@@ -831,7 +831,7 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
 
 # COMMAND ----------
 
-def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str = "2025-07-31") -> DataFrame:
+def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str = "2025-09-15") -> DataFrame:
     """
     Cria esqueleto completo da matriz com cross join entre todas as filiais e SKUs.
     
@@ -913,7 +913,7 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
 
 def executar_calculo_matriz_merecimento_completo(categoria: str, 
                                                 data_inicio: str = "2024-07-01",
-                                                data_calculo: str = "2025-07-31") -> DataFrame:
+                                                data_calculo: str = "2025-09-15") -> DataFrame:
     """
     Função principal que executa todo o fluxo da matriz de merecimento.
     """
@@ -935,12 +935,12 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         
         # 4. Definição do grupo_de_necessidade
         df_com_grupo = determinar_grupo_necessidade(categoria, df_com_mapeamentos)
-        # df_com_grupo = (
-        #     df_com_grupo
-        #     .filter(
-        #         F.col("grupo_de_necessidade").isin('Telef pp', 'TV 50 ALTO P', 'TV 55 ALTO P')
-        #     )
-        # )
+        df_com_grupo = (
+            df_com_grupo
+            .filter(
+                F.col("grupo_de_necessidade").isin('Telef pp', 'TV 50 ALTO P', 'TV 55 ALTO P')
+            )
+        )
         df_com_grupo.cache()
         
         # 5. Detecção de outliers
@@ -954,11 +954,11 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         print("🔄 Aplicando remoção de outliers das séries históricas...")
         
         # Definir filiais de atacado (exemplo - ajustar conforme necessário)
-        filiais_atacado = [1001, 1002, 1003]  # Lista de filiais consideradas de atacado
+        filiais_atacado = []  # Lista de filiais consideradas de atacado
         
         df_sem_outliers = remover_outliers_series_historicas(
             df_filtrado,
-            coluna_valor="demanda_robusta",
+            coluna_valor="QtMercadoria",
             n_sigmas_padrao=PARAMETROS_OUTLIERS["desvios_historico_loja"],
             n_sigmas_atacado=PARAMETROS_OUTLIERS["desvios_atacado_loja"],
             filiais_atacado=filiais_atacado
@@ -1029,10 +1029,10 @@ print("=" * 80)
 
 # Lista de todas as categorias disponíveis
 categorias = [
-    #"DIRETORIA DE TELAS",
+    "DIRETORIA DE TELAS",
     #"DIRETORIA TELEFONIA CELULAR", 
     #"DIRETORIA DE LINHA BRANCA",
-    "DIRETORIA LINHA LEVE",
+    #"DIRETORIA LINHA LEVE",
     # "DIRETORIA INFO/PERIFERICOS"
 ]
 
@@ -1047,7 +1047,7 @@ for categoria in categorias:
         df_matriz_final = executar_calculo_matriz_merecimento_completo(
             categoria=categoria,
             data_inicio="2024-07-01",
-            data_calculo="2025-08-30"
+            data_calculo="2025-09-07"
         )
         
         # Salva em tabela específica da categoria
@@ -1058,7 +1058,7 @@ for categoria in categorias:
             .upper()
         )
         
-        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste1509"
+        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_backtest1609"
         
         print(f"💾 Salvando matriz de merecimento para: {categoria}")
         print(f"📊 Tabela: {nome_tabela}")

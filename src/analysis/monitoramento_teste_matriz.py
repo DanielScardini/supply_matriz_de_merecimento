@@ -53,8 +53,8 @@ def get_janela(inicio_teste: str, days_back: int = 7) -> str:
     inicio_calc = ontem - timedelta(days=days_back)
 
     # se a data calculada for antes do inicio_teste, usa inicio_teste
-    if inicio_calc < dt_inicio_teste:
-        inicio_calc = dt_inicio_teste
+    # if inicio_calc < dt_inicio_teste:
+    #     inicio_calc = dt_inicio_teste
 
     return inicio_calc.strftime("%Y-%m-%d")
 
@@ -137,6 +137,17 @@ produtos_do_teste_offline['TELEFONIA'] = df_merecimento_offline['TELEFONIA'].sel
 produtos_do_teste_online = {}
 produtos_do_teste_online['TELAS'] = df_merecimento_online['TELAS'].select("CdSku", "grupo_de_necessidade").distinct()
 produtos_do_teste_online['TELEFONIA'] = df_merecimento_online['TELEFONIA'].select("CdSku", "grupo_de_necessidade").distinct()
+
+# COMMAND ----------
+
+# MAGIC %sql 
+# MAGIC
+# MAGIC SELECT * FROM data_engineering_prd.app_logistica.gi_boss_qualidade_estoque
+# MAGIC
+# MAGIC WHERE DtAtual = '2025-09-16'
+# MAGIC AND DsMarca = 'APPLE          '
+# MAGIC AND QtEstoqueSaldo >= 1
+# MAGIC AND DsEstoqueLojaDeposito = 'D'
 
 # COMMAND ----------
 
@@ -226,18 +237,18 @@ def load_estoque_loja_data(spark: SparkSession, categoria: str) -> DataFrame:
                     .when(F.col("DtAtual") >= janela_teste, F.lit('piloto'))
                     .otherwise(F.lit('ignorar'))
                     )
-        .filter(F.col("periodo_analise") != 'ignorar')
+        #.filter(F.col("periodo_analise") != 'ignorar')
                     
         .withColumn("DtAtual", F.to_date(F.col("DtAtual")))
     )
 
 df_estoque_loja = {}
 
-df_estoque_loja['TELAS'] = load_estoque_loja_data(spark, 'TELAS')
+df_estoque_loja['TELAS'] = load_estoque_loja_data(spark, 'TELAS').filter(F.col("periodo_analise") != 'ignorar')
 df_estoque_loja['TELAS'].cache()
 df_estoque_loja['TELAS'].limit(1).display()
 
-df_estoque_loja['TELEFONIA'] = load_estoque_loja_data(spark, 'TELEFONIA')
+df_estoque_loja['TELEFONIA'] = load_estoque_loja_data(spark, 'TELEFONIA').filter(F.col("periodo_analise") != 'ignorar')
 df_estoque_loja['TELEFONIA'].cache()
 df_estoque_loja['TELEFONIA'].limit(1).display()
 
@@ -1352,6 +1363,10 @@ for categoria in categorias_teste:
         on=['CdFilial', 'grupo_de_necessidade'],
         how='inner'
       )
+      .join(df_matriz_neogrid_agg_offline,
+            on=['CdFilial', 'grupo_de_necessidade'],
+            how="left")
+
       .fillna(0.0, subset=['Percentual_QtDemanda', 'merecimento_percentual'])
   )
 
@@ -1413,6 +1428,87 @@ for categoria in categorias_teste:
     df_result_overall.display()
     df_result_por_porte.display()
     #df_result_por_regiao.display()
+
+# COMMAND ----------
+
+from pyspark.sql import functions as F
+
+dim_loja = (
+    spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+    .select("CdFilial", "NmPorteLoja", "NmRegiaoGeografica")
+    .dropDuplicates(["CdFilial"])
+)
+
+COL_REAL = "Percentual_QtDemanda"
+COL_PESO = "QtDemanda"
+COL_MATRIZ_NOVA = "merecimento_percentual"
+COL_NEOGRID = "PercMatrizNeogrid"
+
+def add_metrics(df, pred_col, label):
+    denom = F.abs(F.col(pred_col)) + F.abs(F.col(COL_REAL))
+    smape_comp = F.when(denom == 0, F.lit(0.0))\
+                  .otherwise(200.0 * F.abs(F.col(pred_col) - F.col(COL_REAL)) / denom)
+
+    df_ws = df.withColumn(f"sMAPE_comp_{label}", smape_comp)\
+              .withColumn(f"WSMAPE_comp_{label}", smape_comp * F.col(COL_PESO))
+
+    overall = (
+        df_ws.agg(
+            (F.sum(F.col(f"WSMAPE_comp_{label}")) / F.sum(F.col(COL_PESO))).alias(f"wSMAPE_{label}"),
+            F.avg(F.col(f"sMAPE_comp_{label}")).alias(f"sMAPE_{label}")
+        )
+        .withColumn("categoria", F.lit(categoria))
+        .withColumn("modelo", F.lit(label))
+    )
+
+    por_porte = (
+        df_ws.groupBy("NmPorteLoja")
+        .agg((F.sum(F.col(f"WSMAPE_comp_{label}")) / F.sum(F.col(COL_PESO))).alias(f"wSMAPE_{label}"))
+        .withColumn("categoria", F.lit(categoria))
+        .withColumn("modelo", F.lit(label))
+        .select("categoria", "modelo", "NmPorteLoja", f"wSMAPE_{label}")
+        .filter(F.col("NmPorteLoja").isin('PORTE 1','PORTE 2','PORTE 3','PORTE 4','PORTE 5','PORTE 6'))
+        .orderBy("NmPorteLoja")
+    )
+
+    por_regiao = (
+        df_ws.groupBy("NmRegiaoGeografica")
+        .agg((F.sum(F.col(f"WSMAPE_comp_{label}")) / F.sum(F.col(COL_PESO))).alias(f"wSMAPE_{label}"))
+        .withColumn("categoria", F.lit(categoria))
+        .withColumn("modelo", F.lit(label))
+        .select("categoria", "modelo", "NmRegiaoGeografica", f"wSMAPE_{label}")
+    )
+
+    return overall, por_porte, por_regiao
+
+for categoria in categorias_teste:
+    df_base = (
+        df_acuracia[categoria]
+        .join(dim_loja, on="CdFilial", how="left")
+        .withColumn(COL_REAL, F.col(COL_REAL).cast("double"))
+        .withColumn(COL_PESO, F.col(COL_PESO).cast("double"))
+        .withColumn(COL_MATRIZ_NOVA, F.col(COL_MATRIZ_NOVA).cast("double"))
+        .withColumn(COL_NEOGRID, F.col(COL_NEOGRID).cast("double"))
+    )
+
+    # métricas MatrizNova
+    overall_mn, porte_mn, reg_mn = add_metrics(df_base, COL_MATRIZ_NOVA, "MatrizNova")
+
+    # métricas Neogrid
+    overall_ng, porte_ng, reg_ng = add_metrics(df_base, COL_NEOGRID, "NeogridMean")
+
+    print(f"Categoria: {categoria} — Overall")
+    overall_mn.display()
+    overall_ng.display()
+
+    print(f"Categoria: {categoria} — Por porte")
+    porte_mn.display()
+    porte_ng.display()
+
+    # se quiser por região, descomente:
+    # print(f"Categoria: {categoria} — Por região")
+    # reg_mn.display()
+    # reg_ng.display()
 
 # COMMAND ----------
 
@@ -1793,4 +1889,215 @@ create_dde_comparison_visualizations_teste_only(df_estoque_loja_porte_regiao, df
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Análise de viés de erro por porte
 
+# COMMAND ----------
+
+df_acuracia_porte = {}
+
+for categoria in categorias_teste:
+  df_acuracia_porte[categoria] = (
+    df_acuracia[categoria]
+    .join(
+      dim_loja, 
+      how="left",
+      on="CdFilial"
+    )
+    .groupBy("NmPorteLoja")
+    .agg(
+      F.round(F.sum("merecimento_percentual")/2, 1).alias("merecimento_percentual"),
+      F.round(F.sum("Percentual_QtDemanda")/2, 1).alias("Percentual_QtDemanda")
+    )
+    .filter(F.col("NmPorteLoja") != ('-'))
+    .filter(F.col("NmPorteLoja").isNotNull())
+    .withColumn("erroPorte", 
+                F.round(F.col("merecimento_percentual") - F.col("Percentual_QtDemanda"), 1))
+    .withColumn("categoria", F.lit(categoria))
+    .orderBy("NmPorteLoja")
+    .display()
+  )
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Gráfico de ruptura
+
+# COMMAND ----------
+
+janela_teste_ruptura = get_janela(inicio_teste, days_back=60)
+print(janela_teste_ruptura)
+
+def load_estoque_loja_data_ruptura(spark: SparkSession, categoria: str) -> DataFrame:
+    """
+    Carrega dados de estoque das lojas ativas.
+    
+    Args:
+        spark: Sessão do Spark
+        current_year: Ano atual para filtro de partição
+        
+    Returns:
+        DataFrame com dados de estoque das lojas, incluindo:
+        - Informações da filial e SKU
+        - Dados de estoque e classificação
+        - Métricas de DDE e faixas
+    """
+    return (
+        spark.read.table("databox.bcg_comum.supply_base_merecimento_diario_v4")
+        .filter(F.col("DtAtual") >= janela_teste_ruptura)
+        .filter(F.col('DsSetor') == dict_diretorias[categoria])
+        .join(
+            produtos_do_teste_offline[categoria],
+            how="left",
+            on="CdSku"
+        )
+
+        .withColumn(
+            "grupo",
+            F.when(
+                F.col("grupo_de_necessidade").isNotNull(), F.lit("teste")
+            )
+            .otherwise(F.lit("controle"))
+        
+            
+        )
+        .dropDuplicates(["DtAtual", "CdSku", "CdFilial"])
+        .withColumn("periodo_analise",
+                    F.when(
+                        F.col("DtAtual") < fim_baseline, F.lit('baseline')
+                    )
+                    .when(F.col("DtAtual") >= janela_teste_ruptura, F.lit('piloto'))
+                    .otherwise(F.lit('ignorar'))
+                    )
+        #.filter(F.col("periodo_analise") != 'ignorar')
+                    
+        .withColumn("DtAtual", F.to_date(F.col("DtAtual")))
+    )
+
+# COMMAND ----------
+
+from pyspark.sql import functions as F
+
+for categoria in categorias_teste:
+    base = (
+        load_estoque_loja_data_ruptura(spark, categoria=categoria)
+        .filter(F.col('grupo_de_necessidade').isin(GRUPOS_TESTE))
+        .withColumn("Dt", F.col("DtAtual").cast("date"))
+        .withColumn("dayofweek", F.dayofweek("Dt"))  # 1 = domingo, 7 = sábado
+        .groupBy("Dt", "dayofweek")
+        .agg(
+            F.sum("Receita").alias("Receita"),
+            F.sum("ReceitaPerdidaRuptura").alias("ReceitaPerdidaRuptura")
+        )
+        .withColumn(
+            "RupturaReceitaPerc",
+            F.when(
+                (F.col("dayofweek") == 1),  # domingo
+                F.lit(None).cast("double")
+            ).when(
+                F.col("Receita") > 0,
+                F.round(100 * F.col("ReceitaPerdidaRuptura") / F.col("Receita"), 1)
+            ).otherwise(F.lit(0.0))
+        )
+        .withColumn("data", F.date_format("Dt", "yyyy-MM-dd"))
+    )
+
+    # métricas em long
+    receita = base.select(F.lit("Receita").alias("metric"), "data", F.col("Receita").cast("double").alias("value"))
+    receita_perdida = base.select(F.lit("ReceitaPerdidaRuptura").alias("metric"), "data", F.col("ReceitaPerdidaRuptura").cast("double").alias("value"))
+    perc = base.select(F.lit("RupturaReceitaPerc").alias("metric"), "data", F.col("RupturaReceitaPerc").cast("double").alias("value"))
+
+    long_df = receita.unionByName(receita_perdida).unionByName(perc)
+
+    wide = (
+        long_df.groupBy("metric")
+        .pivot("data")
+        .agg(F.first("value"))
+        #.na.fill(0.0)
+    )
+
+    # converte para string e troca ponto por vírgula
+    for c in wide.columns:
+        if c != "metric":
+            wide = wide.withColumn(
+                c,
+                F.regexp_replace(F.format_number(F.col(c), 2), r"\.", ",")
+            )
+
+    print(f"Categoria: {categoria}")
+    wide.display()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Análise de Telas - envios manuais
+
+# COMMAND ----------
+
+import pandas as pd
+import pyspark.sql.functions as F
+from pyspark.sql import Window
+
+# Leitura e transformações
+df_envios_manuais_TELAS_teste = (
+    spark.createDataFrame(
+        pd.read_excel(
+            '/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/dados_analise/(DRP)_INDICADOR_DE_PROGRAMAÇÕES_20250916134135.xlsx',
+            skiprows=1
+        )
+    )
+    .filter(F.col("DIR_OPERACIONAL") != 'ONLINE')
+    .filter(F.col("DATA_PROGRAMACAO") > 20250905)
+    .filter(F.col("ATIVIDADE_PRINCIPAL") == 'L')
+    .groupBy("DIRETORIA", "TIPO DE PEDIDO")
+    .agg(
+        F.sum("QUANTIDADE_PEDIDA").alias("QtdPedida")
+    )
+)
+
+# Define janela por diretoria
+w = Window.partitionBy("DIRETORIA")
+
+# Percentual dentro de cada diretoria
+df_envios_manuais_TELAS_teste = df_envios_manuais_TELAS_teste.withColumn(
+    "Percentual", (F.col("QtdPedida") / F.sum("QtdPedida").over(w)) * 100
+)
+
+# Exibe
+df_envios_manuais_TELAS_teste.display()
+
+# COMMAND ----------
+
+import pandas as pd
+import pyspark.sql.functions as F
+from pyspark.sql import Window
+
+# Leitura e transformações
+df_envios_manuais_TELAS_teste = (
+    spark.createDataFrame(
+        pd.read_excel(
+            '/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/dados_analise/(DRP)_INDICADOR_DE_PROGRAMAÇÕES_20250916134135.xlsx',
+            skiprows=1
+        )
+    )
+    .filter(F.col("DIR_OPERACIONAL") != 'ONLINE')
+    .filter(F.col("DATA_PROGRAMACAO") > 20250905)
+    .filter(F.col("ATIVIDADE_PRINCIPAL") == 'L')
+    .filter(F.col("DIRETORIA") == 'TELEFONIA')
+    #.filter(F.col("CHIP") == 'NAO')
+    .groupBy("DIRETORIA", "TIPO DE PEDIDO")
+    .agg(
+        F.sum("QUANTIDADE_PEDIDA").alias("QtdPedida")
+    )
+)
+
+# Define janela por diretoria
+w = Window.partitionBy("DIRETORIA")
+
+# Percentual dentro de cada diretoria
+df_envios_manuais_TELAS_teste = df_envios_manuais_TELAS_teste.withColumn(
+    "Percentual", (F.col("QtdPedida") / F.sum("QtdPedida").over(w)) * 100
+)
+
+# Exibe
+df_envios_manuais_TELAS_teste.display()

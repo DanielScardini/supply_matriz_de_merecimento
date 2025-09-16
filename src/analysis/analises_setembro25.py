@@ -116,7 +116,7 @@ df_matriz_neogrid.display()
 df_merecimento = {}
 
 df_merecimento['TELAS'] = (
-    spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas')
+    spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_teste1609')
     .select('CdFilial', 'grupo_de_necessidade', 
             F.round(100*F.col('Merecimento_Final_Media90_Qt_venda_sem_ruptura'), 2).alias('merecimento_percentual')
     ).dropDuplicates(subset=['CdFilial', 'grupo_de_necessidade'])
@@ -133,7 +133,7 @@ df_merecimento['TELAS'] = (
 
 
 df_merecimento['TELEFONIA'] = (
-    spark.table('databox.bcg_comum.supply_matriz_merecimento_telefonia_celular')
+    spark.table('databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste1009')
     .select('CdFilial', 'grupo_de_necessidade', 
             F.round(100*F.col('Merecimento_Final_Media90_Qt_venda_sem_ruptura'), 2).alias('merecimento_percentual')
     ).dropDuplicates(subset=['CdFilial', 'grupo_de_necessidade'])
@@ -402,7 +402,7 @@ de_para_modelos_gemeos.display()
 # COMMAND ----------
 
 df_base_calculo_factual = (
-  spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3')
+  spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
   .filter(F.col('DtAtual') >= '2025-06-01')
   .filter(F.col("NmAgrupamentoDiretoriaSetor").isin('DIRETORIA DE TELAS', 'DIRETORIA TELEFONIA CELULAR')
   )
