@@ -30,17 +30,18 @@ hoje = datetime.now() - timedelta(days=1)
 hoje_str = hoje.strftime("%Y-%m-%d")
 hoje_int = int(hoje.strftime("%Y%m%d"))
 
-
-GRUPOS_TESTE = ['Telef pp', 'TV 50 ALTO P', 'TV 55 ALTO P']
+GRUPOS_TESTE = ['LIQUIDIFICADORES ACIMA 1001 W._110 VOLTS                               ',
+                'LIQUIDIFICADORES ACIMA 1001 W._110V                                    ',
+                'LIQUIDIFICADORES ACIMA 1001 W._220 VOLTS                               ',
+                'LIQUIDIFICADORES ACIMA 1001 W._220V                                    ']
 print(GRUPOS_TESTE)
-
 
 data_inicio = "2025-08-29"
 fim_baseline = "2025-09-05"
 
 inicio_teste = "2025-09-05"
 
-categorias_teste = ['TELEFONIA_CELULAR']
+categorias_teste = ['LINHA_LEVE']
 
 
 # COMMAND ----------
@@ -61,9 +62,9 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     
     categorias = [
         #"DE_TELAS",
-        "TELEFONIA_CELULAR", 
+        #"TELEFONIA_CELULAR", 
         #"LINHA_BRANCA",
-        #"LINHA_LEVE",
+        "LINHA_LEVE",
         #"INFO_GAMES"
     ]
     
@@ -85,9 +86,35 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     return matrizes
 
 df_merecimento_offline = {}
-df_merecimento_offline['TELEFONIA_CELULAR'] = carregar_matrizes_merecimento_calculadas()['TELEFONIA_CELULAR']
+df_merecimento_offline['LINHA_LEVE'] = carregar_matrizes_merecimento_calculadas()['LINHA_LEVE']
 
-df_merecimento_offline['TELEFONIA_CELULAR'].limit(1).display()
+df_merecimento_offline['LINHA_LEVE'].limit(1).display()
+
+# COMMAND ----------
+
+df_grupo_de_necessidade_leves = (
+    df_merecimento_offline['LINHA_LEVE']
+        .select("CdSku", 
+                F.col("grupo_de_necessidade").alias("grupo_de_necessidade")
+        )
+        .distinct()
+)
+
+df_grupo_de_necessidade_leves.write.mode("overwrite").saveAsTable("databox.bcg_comum.supply_grupo_de_necessidade_linha_leve")
+
+# COMMAND ----------
+
+df_de_para_SKU_cadastro_mercadoria = (
+    spark.table('data_engineering_prd.app_venda.mercadoria')
+    .filter(F.col("NmAgrupamentoDiretoriaSetor") == 'DIRETORIA LINHA LEVE')
+    .select(
+        F.col("CdSkuLoja").alias("CdSku"),
+        "NmAgrupamentoDiretoriaSetor",
+        F.col("NmSetorGerencial"),
+        "NmClasseGerencial",
+        "NmEspecieGerencial",
+    )
+)
 
 # COMMAND ----------
 
@@ -113,9 +140,10 @@ df_matriz_neogrid_offline = (
     .dropDuplicates()
     #.filter(F.col('TIPO_ENTREGA') == 'SL')
     .join(
-        spark.table('databox.bcg_comum.supply_de_para_modelos_gemeos_tecnologia'),
-        how="inner",
-        on="CdSku")
+        spark.table("databox.bcg_comum.supply_grupo_de_necessidade_linha_leve"),
+        on="CdSku",
+        how="left"
+    )
     .filter(F.col("grupo_de_necessidade").isNotNull())
 )
 
@@ -140,6 +168,11 @@ df_matriz_neogrid_agg_offline.limit(1).display()
 
 # COMMAND ----------
 
+spark.table("databox.bcg_comum.supply_matriz_merecimento_linha_leve_teste1509").columns
+
+
+# COMMAND ----------
+
 inicio_janela = "2025-09-01"
 fim_janela = "2025-09-16"
 
@@ -152,14 +185,17 @@ df_proporcao_factual = (
     spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
     .filter(F.col('DtAtual') >= inicio_janela)
     .filter(F.col('DtAtual') <= fim_janela)      
+    .filter(F.col("NmAgrupamentoDiretoriaSetor").isin('DIRETORIA LINHA LEVE'))
     .fillna(0, subset=['deltaRuptura', 'QtMercadoria'])
     .withColumn("QtDemanda", F.col("QtMercadoria") + F.col("deltaRuptura"))
     .join(
-        spark.table('databox.bcg_comum.supply_de_para_modelos_gemeos_tecnologia'),
-        how="inner",
-        on="CdSku")
-    .filter(F.col("grupo_de_necessidade").isin(GRUPOS_TESTE))
+        spark.table("databox.bcg_comum.supply_grupo_de_necessidade_linha_leve"),
+        on="CdSku",
+        how="left"
+    )
     .dropna(subset='grupo_de_necessidade')
+    .filter(F.col("NmSetorGerencial") == 'PORTATEIS')
+    .filter(F.col("grupo_de_necessidade").isin(GRUPOS_TESTE))
     .groupBy('CdFilial', 'grupo_de_necessidade')
     .agg(
         F.round(F.sum('QtDemanda'), 0).alias('QtDemanda'),
@@ -322,7 +358,7 @@ for categoria in categorias_teste:
     df_tmp = (
         df_base
         .withColumn("merecimento_percentual",
-                    F.col("Merecimento_Final_Media180_Qt_venda_sem_ruptura"))
+                    F.col("Merecimento_Final_Media90_Qt_venda_sem_ruptura"))
         .join(
             spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
             .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
@@ -338,7 +374,7 @@ for categoria in categorias_teste:
     ]
     # agrega também neogrid se existir
     if has_neogrid:
-        agg_exprs.append(F.avg("PercMatrizNeogrid_median").alias("y_neogrid"))
+        agg_exprs.append(F.avg("PercMatrizNeogrid").alias("y_neogrid"))
 
     df_filial_mean[categoria] = (
         df_tmp
@@ -392,14 +428,14 @@ def make_scatter(df, y_col, y_label, categoria):
         paper_bgcolor="#f2f2f2",
         plot_bgcolor="#f2f2f2",
         margin=dict(l=40, r=40, t=60, b=40),
-        xaxis=dict(showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)", zeroline=False, range=[0,0.6]),
-        yaxis=dict(showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)", zeroline=False, range=[0,2]),
+        xaxis=dict(showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)", zeroline=False, range=[0, 1.0]),
+        yaxis=dict(showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)", zeroline=False, range=[0, 2]),
         legend=dict(title="Região Geográfica", orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5),
         width=1200,
         height=400,
     )
     fig.update_traces(marker=dict(line=dict(width=0.1, color="rgba(0,0,0,0.35)")))
-    fig.add_shape(type="line", x0=0, y0=0, x1=1, y1=1,
+    fig.add_shape(type="line", x0=0, y0=0, x1=5, y1=5,
                   line=dict(color="rgba(0,0,0,0.45)", width=0.2, dash="dash"))
     return fig
 

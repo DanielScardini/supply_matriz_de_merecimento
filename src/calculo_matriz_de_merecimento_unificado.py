@@ -99,7 +99,7 @@ REGRAS_AGRUPAMENTO = {
 
 # Configuração de parâmetros para detecção de outliers
 PARAMETROS_OUTLIERS = {
-    "desvios_meses_atipicos": 3,  # Desvios para meses atípicos
+    "desvios_meses_atipicos": 2,  # Desvios para meses atípicos
     "desvios_historico_cd": 3,     # Desvios para outliers históricos a nível CD
     "desvios_historico_loja": 3,   # Desvios para outliers históricos a nível loja
     "desvios_atacado_cd": 1.5,     # Desvios para outliers CD em lojas de atacado
@@ -191,6 +191,8 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-07-01") -> Data
     df_base = (
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
         .filter(F.col("NmAgrupamentoDiretoriaSetor") == categoria)
+        #####
+        .filter(F.col("NmSetorGerencial") == 'PORTATEIS')
         .filter(F.col("DtAtual") >= data_inicio)
         .withColumn(
             "year_month",
@@ -935,12 +937,12 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         
         # 4. Definição do grupo_de_necessidade
         df_com_grupo = determinar_grupo_necessidade(categoria, df_com_mapeamentos)
-        df_com_grupo = (
-            df_com_grupo
-            .filter(
-                F.col("grupo_de_necessidade").isin('Telef pp', 'TV 50 ALTO P', 'TV 55 ALTO P')
-            )
-        )
+        # df_com_grupo = (
+        #     df_com_grupo
+        #     .filter(
+        #         F.col("grupo_de_necessidade").isin('Telef pp', 'TV 50 ALTO P', 'TV 55 ALTO P')
+        #     )
+        # )
         df_com_grupo.cache()
         
         # 5. Detecção de outliers
@@ -1029,10 +1031,10 @@ print("=" * 80)
 
 # Lista de todas as categorias disponíveis
 categorias = [
-    "DIRETORIA DE TELAS",
+    #"DIRETORIA DE TELAS",
     #"DIRETORIA TELEFONIA CELULAR", 
     #"DIRETORIA DE LINHA BRANCA",
-    #"DIRETORIA LINHA LEVE",
+    "DIRETORIA LINHA LEVE",
     # "DIRETORIA INFO/PERIFERICOS"
 ]
 
@@ -1047,7 +1049,7 @@ for categoria in categorias:
         df_matriz_final = executar_calculo_matriz_merecimento_completo(
             categoria=categoria,
             data_inicio="2024-07-01",
-            data_calculo="2025-09-07"
+            data_calculo="2025-08-30"
         )
         
         # Salva em tabela específica da categoria
@@ -1058,7 +1060,7 @@ for categoria in categorias:
             .upper()
         )
         
-        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_backtest1609"
+        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_test1609"
         
         print(f"💾 Salvando matriz de merecimento para: {categoria}")
         print(f"📊 Tabela: {nome_tabela}")

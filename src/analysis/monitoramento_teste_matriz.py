@@ -84,6 +84,18 @@ df_merecimento_offline['TELAS'] = (
     .filter(F.col('grupo_de_necessidade').isin(GRUPOS_TESTE))
 )
 
+df_merecimento_offline['TELAS'] = (
+    spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_teste1009')
+    .select('CdFilial', 'grupo_de_necessidade', 'CdSku',
+            F.round(100*F.col('Merecimento_Final_Media90_Qt_venda_sem_ruptura'), 2).alias('merecimento_percentual')
+    ).dropDuplicates(subset=['CdFilial', 'grupo_de_necessidade','CdSku',])
+    .join(spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+          .select("CdFilial", "NmFilial", "NmRegiaoGeografica", "NmPorteLoja").distinct(),
+          how="left",
+          on="CdFilial")
+    .filter(F.col('grupo_de_necessidade').isin(GRUPOS_TESTE))
+)
+
 df_merecimento_online['TELAS'] = (
     spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste0809')
     .select('CdFilial', 'grupo_de_necessidade', 'CdSku',
@@ -137,17 +149,6 @@ produtos_do_teste_offline['TELEFONIA'] = df_merecimento_offline['TELEFONIA'].sel
 produtos_do_teste_online = {}
 produtos_do_teste_online['TELAS'] = df_merecimento_online['TELAS'].select("CdSku", "grupo_de_necessidade").distinct()
 produtos_do_teste_online['TELEFONIA'] = df_merecimento_online['TELEFONIA'].select("CdSku", "grupo_de_necessidade").distinct()
-
-# COMMAND ----------
-
-# MAGIC %sql 
-# MAGIC
-# MAGIC SELECT * FROM data_engineering_prd.app_logistica.gi_boss_qualidade_estoque
-# MAGIC
-# MAGIC WHERE DtAtual = '2025-09-16'
-# MAGIC AND DsMarca = 'APPLE          '
-# MAGIC AND QtEstoqueSaldo >= 1
-# MAGIC AND DsEstoqueLojaDeposito = 'D'
 
 # COMMAND ----------
 
@@ -255,7 +256,7 @@ df_estoque_loja['TELEFONIA'].limit(1).display()
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Análise de DDExRuptura - Geral
+# MAGIC ## Análise de DDE x Ruptura - Geral
 
 # COMMAND ----------
 
@@ -470,6 +471,317 @@ for categoria in categorias_teste:
     )
 
     df_analise_regiao[categoria].limit(1).display()
+
+# COMMAND ----------
+
+from pyspark.sql import functions as F
+
+df_delta = {}
+df_delta_porte = {}
+
+def period_norm(col):
+    c = F.lower(col)
+    return (
+        F.when(c.like("%baseline%"), F.lit("BASELINE"))
+         .when(c.like("%piloto%"),   F.lit("PILOTO"))
+         .otherwise(F.lit(None))
+    )
+
+for categoria in categorias_teste:
+    # ---------- TOTAL CIA ----------
+    agg = (
+        df_estoque_loja[categoria]
+        .filter(F.col("grupo") == "teste")
+        .filter(F.col("periodo_analise") != "ignorar")
+        .withColumn("period_norm", period_norm(F.col("periodo_analise")))
+        .filter(F.col("period_norm").isin("BASELINE","PILOTO"))
+        .groupBy("period_norm")
+        .agg(F.sum("EstoqueLoja").alias("EstoqueCia"))
+    )
+
+    wide = (
+        agg.groupBy()
+           .pivot("period_norm", ["BASELINE","PILOTO"])
+           .agg(F.first("EstoqueCia"))
+           .withColumnRenamed("BASELINE", "EstoqueCia_BASELINE")
+           .withColumnRenamed("PILOTO",   "EstoqueCia_PILOTO")
+    )
+
+    result = (
+        wide
+        .withColumn("DeltaAbs", F.col("EstoqueCia_PILOTO") - F.col("EstoqueCia_BASELINE"))
+        .withColumn(
+            "DeltaPerc",
+            F.when(F.col("EstoqueCia_BASELINE") != 0,
+                   100.0 * F.col("DeltaAbs") / F.col("EstoqueCia_BASELINE"))
+             .otherwise(F.lit(None).cast("double"))
+        )
+        .withColumn("categoria", F.lit(categoria))
+        .select("categoria","EstoqueCia_BASELINE","EstoqueCia_PILOTO","DeltaAbs","DeltaPerc")
+    )
+    df_delta[categoria] = result
+
+    # ---------- POR PORTE ----------
+    agg_porte = (
+        df_estoque_loja_porte_regiao[categoria]
+        .filter(F.col("grupo") == "teste")
+        .filter(F.col("periodo_analise") != "ignorar")
+        .withColumn("period_norm", period_norm(F.col("periodo_analise")))
+        .filter(F.col("period_norm").isin("BASELINE","PILOTO"))
+        .groupBy("NmPorteLoja", "period_norm")
+        .agg(F.sum("EstoqueLoja").alias("EstoqueCia"))
+    )
+
+    wide_porte = (
+        agg_porte.groupBy("NmPorteLoja")
+                 .pivot("period_norm", ["BASELINE","PILOTO"])
+                 .agg(F.first("EstoqueCia"))
+                 .withColumnRenamed("BASELINE", "EstoqueCia_BASELINE")
+                 .withColumnRenamed("PILOTO",   "EstoqueCia_PILOTO")
+    )
+
+    result_porte = (
+        wide_porte
+        .withColumn("DeltaAbs", F.col("EstoqueCia_PILOTO") - F.col("EstoqueCia_BASELINE"))
+        .withColumn(
+            "DeltaPerc",
+            F.when(F.col("EstoqueCia_BASELINE") != 0,
+                   100.0 * (F.col("EstoqueCia_PILOTO") - F.col("EstoqueCia_BASELINE")) / F.col("EstoqueCia_BASELINE"))
+             .otherwise(F.lit(None).cast("double"))
+        )
+        .withColumn("_ord_porte", F.regexp_extract(F.col("NmPorteLoja"), r'(\d+)', 1).cast("int"))
+        .withColumn("categoria", F.lit(categoria))
+        .select("categoria","NmPorteLoja","EstoqueCia_BASELINE","EstoqueCia_PILOTO","DeltaAbs","DeltaPerc","_ord_porte")
+        .orderBy("_ord_porte", "NmPorteLoja")
+        .drop("_ord_porte")
+    )
+    df_delta_porte[categoria] = result_porte
+
+    # ---------- EXIBIR ----------
+    print(f"Categoria: {categoria} — Total Cia")
+    result.display()
+    print(f"Categoria: {categoria} — Por Porte")
+    result_porte.display()
+
+# COMMAND ----------
+
+df_analise_DDE = {}
+
+for categoria in categorias_teste:
+    df_analise_DDE[categoria] = (
+        df_estoque_loja_porte_regiao[categoria]
+        .filter(F.col("grupo") == 'teste')
+        .groupBy('grupo', 'periodo_analise', 'CdFilial', "NmPorteLoja")
+        .agg(
+            F.round(F.median("DDE"), 1).alias("DDE_medio"),
+            F.round(100 * F.avg(F.when(F.col("FlagRuptura") == 1, 1).otherwise(0)), 1).alias("PctRupturaBinario"),
+            F.round(100 * (F.sum("ReceitaPerdidaRuptura") / F.sum("Receita")), 1).alias("PctRupturaReceita")
+        )
+            .orderBy(F.desc("grupo"), F.desc("periodo_analise"))
+            #.dropna(subset=["NmRegiaoGeografica"])
+            .fillna(0.0, subset=["DDE_medio", "PctRupturaReceita"])
+    )
+
+from pyspark.sql import functions as F
+import plotly.express as px
+
+# normalizador de período -> BASELINE / PILOTO
+def period_norm(col):
+    col_l = F.lower(col)
+    return (
+        F.when(col_l.like("%baseline%"), F.lit("BASELINE"))
+         .when(col_l.like("%piloto%"),   F.lit("PILOTO"))
+         .otherwise(F.lit(None))
+    )
+
+df_pivot_por_filial = {}  # guarda o pivot por categoria
+
+for categoria in categorias_teste:
+    # base agregada já criada acima (grupo = 'teste')
+    base = df_analise_DDE[categoria].withColumn("period_norm", period_norm(F.col("periodo_analise")))\
+                                    .filter(F.col("period_norm").isin("BASELINE","PILOTO"))
+
+    # pivot: 1 linha por filial, colunas DDE_BASELINE e DDE_PILOTO
+    pivot = (
+        base.groupBy("CdFilial")
+            .pivot("period_norm", ["BASELINE","PILOTO"])
+            .agg(F.first("DDE_medio").alias("DDE"))
+            .withColumnRenamed("BASELINE_DDE", "DDE_BASELINE")
+            .withColumnRenamed("PILOTO_DDE",   "DDE_PILOTO")
+    )
+
+    # contagem para tamanho da bolha (linhas no piloto por filial)
+    cnt = (
+        df_estoque_loja_porte_regiao[categoria]
+        .filter(F.col("grupo") == "teste")
+        .withColumn("period_norm", period_norm(F.col("periodo_analise")))
+        .filter(F.col("period_norm") == "PILOTO")
+        .groupBy("CdFilial")
+        .count()
+        .withColumnRenamed("count", "qtd_obs_piloto")
+    )
+
+    from pyspark.sql import functions as F
+import plotly.express as px
+
+# normalizador de período -> BASELINE / PILOTO
+def period_norm(col):
+    col_l = F.lower(col)
+    return (
+        F.when(col_l.like("%baseline%"), F.lit("BASELINE"))
+         .when(col_l.like("%piloto%"),   F.lit("PILOTO"))
+         .otherwise(F.lit(None))
+    )
+
+df_pivot_por_filial = {}
+
+for categoria in categorias_teste:
+    # base agregada (grupo = 'teste')
+    base = (
+        df_analise_DDE[categoria]
+        .withColumn("period_norm", period_norm(F.col("periodo_analise")))
+        .filter(F.col("period_norm").isin("BASELINE","PILOTO"))
+    )
+
+    # pivot -> colunas "BASELINE" e "PILOTO"
+    pivot_tmp = (
+        base.groupBy("CdFilial")
+            .pivot("period_norm", ["BASELINE","PILOTO"])
+            .agg(F.first("DDE_medio"))
+    )
+
+    # renomeia de forma segura (colunas podem vir sem alias)
+    cols = pivot_tmp.columns
+    pivot = pivot_tmp
+    if "BASELINE" in cols:
+        pivot = pivot.withColumnRenamed("BASELINE", "DDE_BASELINE")
+    if "PILOTO" in cols:
+        pivot = pivot.withColumnRenamed("PILOTO", "DDE_PILOTO")
+    # fallback caso venham como BASELINE_DDE/PILOTO_DDE
+    if "BASELINE_DDE" in pivot.columns and "DDE_BASELINE" not in pivot.columns:
+        pivot = pivot.withColumnRenamed("BASELINE_DDE", "DDE_BASELINE")
+    if "PILOTO_DDE" in pivot.columns and "DDE_PILOTO" not in pivot.columns:
+        pivot = pivot.withColumnRenamed("PILOTO_DDE", "DDE_PILOTO")
+
+    # contagem p/ tamanho da bolha (no piloto)
+    cnt = (
+        df_estoque_loja_porte_regiao[categoria]
+        .filter(F.col("grupo") == "teste")
+        .withColumn("period_norm", period_norm(F.col("periodo_analise")))
+        .filter(F.col("period_norm") == "PILOTO")
+        .groupBy("CdFilial")
+        .count()
+        .withColumnRenamed("count", "qtd_obs_piloto")
+    )
+
+    # junta e tipa
+    pivot = (
+        pivot.join(cnt, "CdFilial", "left")
+             .withColumn("DDE_BASELINE", F.col("DDE_BASELINE").cast("double"))
+             .withColumn("DDE_PILOTO",   F.col("DDE_PILOTO").cast("double"))
+             .withColumn("qtd_obs_piloto", F.coalesce(F.col("qtd_obs_piloto").cast("double"), F.lit(1.0)))
+             .orderBy("CdFilial")
+    )
+
+    df_pivot_por_filial[categoria] = pivot
+
+    print(f"Pivot — {categoria}")
+    pivot.display()
+
+    # bubbleplot: X = depois (PILOTO), Y = antes (BASELINE)
+    pdf = pivot.toPandas()
+    fig = px.scatter(
+        pdf,
+        x="DDE_PILOTO",
+        y="DDE_BASELINE",
+        size="qtd_obs_piloto",
+        hover_name="CdFilial",
+        hover_data={"DDE_PILOTO":":.1f","DDE_BASELINE":":.1f","qtd_obs_piloto":True},
+        title=f"DDE Baseline vs Piloto — {categoria} (por Filial)"
+    )
+    fig.update_layout(xaxis_title="DDE Piloto (depois)", yaxis_title="DDE Baseline (antes)")
+    fig.show()
+    df_analise_DDE[categoria].limit(1).display()
+
+# COMMAND ----------
+
+from pyspark.sql import functions as F
+import plotly.express as px
+
+def period_norm(col):
+    col_l = F.lower(col)
+    return (
+        F.when(col_l.like("%baseline%"), F.lit("BASELINE"))
+         .when(col_l.like("%piloto%"),   F.lit("PILOTO"))
+         .otherwise(F.lit(None))
+    )
+
+df_pivot_por_filial = {}
+
+for categoria in categorias_teste:
+    base = (
+        df_analise_DDE[categoria]
+        .withColumn("period_norm", period_norm(F.col("periodo_analise")))
+        .filter(F.col("period_norm").isin("BASELINE","PILOTO"))
+    )
+
+    # porte por filial (primeiro valor observado)
+    porte_por_filial = (
+        base.groupBy("CdFilial")
+            .agg(F.first("NmPorteLoja", ignorenulls=True).alias("NmPorteLoja"))
+    ).withColumn(
+        "porte_num",
+        F.when(F.col("NmPorteLoja").rlike(r'^\s*\d+\s*$'), F.col("NmPorteLoja").cast("int"))
+         .otherwise(F.regexp_extract(F.col("NmPorteLoja"), r'(\d+)', 1).cast("int"))
+    )
+
+    # pivot DDE
+    pivot_tmp = (
+        base.groupBy("CdFilial")
+            .pivot("period_norm", ["BASELINE","PILOTO"])
+            .agg(F.first("DDE_medio"))
+    )
+    # renomeia
+    pivot = pivot_tmp
+    if "BASELINE" in pivot.columns:
+        pivot = pivot.withColumnRenamed("BASELINE", "DDE_BASELINE")
+    if "PILOTO" in pivot.columns:
+        pivot = pivot.withColumnRenamed("PILOTO", "DDE_PILOTO")
+    if "BASELINE_DDE" in pivot.columns and "DDE_BASELINE" not in pivot.columns:
+        pivot = pivot.withColumnRenamed("BASELINE_DDE", "DDE_BASELINE")
+    if "PILOTO_DDE" in pivot.columns and "DDE_PILOTO" not in pivot.columns:
+        pivot = pivot.withColumnRenamed("PILOTO_DDE", "DDE_PILOTO")
+
+    # junta porte e tipa
+    pivot = (
+        pivot.join(porte_por_filial, "CdFilial", "left")
+             .withColumn("DDE_BASELINE", F.col("DDE_BASELINE").cast("double"))
+             .withColumn("DDE_PILOTO",   F.col("DDE_PILOTO").cast("double"))
+             .withColumn("porte_num", F.coalesce(F.col("porte_num"), F.lit(1)))
+             .orderBy("CdFilial")
+    )
+
+    df_pivot_por_filial[categoria] = pivot
+
+    # exibe pivot
+    print(f"Pivot — {categoria}")
+    pivot.display()
+
+    # bubbleplot: size ~ porte; cor clara para porte maior
+    pdf = pivot.toPandas()
+    fig = px.scatter(
+        pdf,
+        x="DDE_PILOTO",
+        y="DDE_BASELINE",
+        size="porte_num",
+        color="porte_num",
+        color_continuous_scale="Blues_r",  # maior porte = mais claro
+        hover_name="CdFilial",
+        hover_data={"NmPorteLoja": True, "porte_num": True, "DDE_PILOTO":":.1f", "DDE_BASELINE":":.1f"},
+        title=f"DDE Baseline vs Piloto — {categoria} (por Filial; tamanho = porte)"
+    )
+    fig.update_layout(xaxis_title="DDE Piloto (depois)", yaxis_title="DDE Baseline (antes)")
+    fig.show()
 
 # COMMAND ----------
 
@@ -778,6 +1090,69 @@ if dfs_porte_all:
 
 # COMMAND ----------
 
+df_estoque_loja_porte_regiao[categoria].limit(10).display()
+
+# COMMAND ----------
+
+from pyspark.sql import functions as F
+
+df_analise_porte_demanda = {}
+
+def to_period_norm(col):
+    c = F.lower(F.trim(col))
+    return (
+        F.when(c.like("%baseline%"), F.lit("BASELINE"))
+         .when(c.like("%piloto%"),   F.lit("PILOTO"))
+         .otherwise(F.lit(None))
+    )
+
+for categoria in categorias_teste:
+    # agrega demanda por porte e período (grupo = piloto)
+    agg = (
+        df_estoque_loja_porte_regiao[categoria]
+        .filter(F.col("grupo") == "teste")
+        #.filter(~F.col("NmPorteLoja").isin("-", None))
+        .withColumn("period_norm", to_period_norm(F.col("periodo_analise")))
+        .filter(F.col("period_norm").isin("BASELINE","PILOTO"))
+        .groupBy("NmPorteLoja", "period_norm")
+        .agg(F.sum("QtMercadoria").alias("TotalMercadoria"))
+    )
+
+    #display(agg)
+
+    # pivot: colunas BASELINE e PILOTO
+    wide = (
+        agg.groupBy("NmPorteLoja")
+           .pivot("period_norm", ["BASELINE","PILOTO"])
+           .agg(F.first("TotalMercadoria"))
+           .withColumnRenamed("BASELINE", "Total_BASELINE")
+           .withColumnRenamed("PILOTO",   "Total_PILOTO")
+    )
+
+    # deltas e ordenação por porte 1..6
+    result = (
+        wide
+        .withColumn("DeltaAbs", F.col("Total_PILOTO") - F.col("Total_BASELINE"))
+        .withColumn(
+            "DeltaPerc",
+            F.when(F.col("Total_BASELINE") != 0,
+                   100.0 * F.col("DeltaAbs") / F.col("Total_BASELINE"))
+             .otherwise(F.lit(None).cast("double"))
+        )
+        .withColumn("_ord_porte", F.regexp_extract(F.col("NmPorteLoja"), r'(\d+)', 1).cast("int"))
+        .withColumn("categoria", F.lit(categoria))
+        .select("categoria","NmPorteLoja","Total_BASELINE","Total_PILOTO","DeltaAbs","DeltaPerc","_ord_porte")
+        .orderBy("_ord_porte", "NmPorteLoja")
+        .drop("_ord_porte")
+    )
+
+    df_analise_porte_demanda[categoria] = result
+
+    print(f"Categoria: {categoria}")
+    result.display()
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Cálculo dos delta merecimentos
 
@@ -979,70 +1354,89 @@ if dfs_all:
 
 # COMMAND ----------
 
-# dicionário de saída
+from pyspark.sql import functions as F
+
+# dicionários de saída
 df_estoque_loja_porte_regiao_bucket = {}
 df_counts_export = {}
 
+# novos buckets
+buckets = ["0-15","15-30","30-45","45-60","60+","Nulo"]
+
 for categoria in categorias_teste:
-    df_estoque_loja_porte_regiao_bucket[categoria] = (
+    # agrega e cria buckets para média e mediana
+    df_buckets = (
         df_estoque_loja_porte_regiao[categoria]
         .groupBy("CdFilial", "grupo", "periodo_analise")
         .agg(
             F.round(F.mean("DDE"), 1).alias("DDE_medio"),
-            # mediana robusta em Spark
             F.round(F.percentile_approx("DDE", 0.5, 100), 1).alias("DDE_mediano")
         )
         # bucket para média
         .withColumn(
             "bucket_DDE_medio",
-            F.when(F.col("DDE_medio").isNull(), F.lit("Nulo"))
-             .when(F.col("DDE_medio") > 90, F.lit("90+"))
-             .when(F.col("DDE_medio") >= 60, F.lit("60-90"))
-             .when(F.col("DDE_medio") >= 30, F.lit("30-60"))
-             .when(F.col("DDE_medio") >= 15, F.lit("15-30"))
-             .when(F.col("DDE_medio") >= 0,  F.lit("0-15"))
-             .otherwise(F.lit("Nulo"))  # negativos ou casos fora do esperado
+            F.when(F.col("DDE_medio").isNull(), "Nulo")
+             .when(F.col("DDE_medio") > 60, "60+")
+             .when(F.col("DDE_medio") >= 45, "45-60")
+             .when(F.col("DDE_medio") >= 30, "30-45")
+             .when(F.col("DDE_medio") >= 15, "15-30")
+             .when(F.col("DDE_medio") >= 0,  "0-15")
+             .otherwise("Nulo")
         )
         # bucket para mediana
         .withColumn(
             "bucket_DDE_mediano",
-            F.when(F.col("DDE_mediano").isNull(), F.lit("Nulo"))
-             .when(F.col("DDE_mediano") > 90, F.lit("90+"))
-             .when(F.col("DDE_mediano") >= 60, F.lit("60-90"))
-             .when(F.col("DDE_mediano") >= 30, F.lit("30-60"))
-             .when(F.col("DDE_mediano") >= 15, F.lit("15-30"))
-             .when(F.col("DDE_mediano") >= 0,  F.lit("0-15"))
-             .otherwise(F.lit("Nulo"))
+            F.when(F.col("DDE_mediano").isNull(), "Nulo")
+             .when(F.col("DDE_mediano") > 60, "60+")
+             .when(F.col("DDE_mediano") >= 45, "45-60")
+             .when(F.col("DDE_mediano") >= 30, "30-45")
+             .when(F.col("DDE_mediano") >= 15, "15-30")
+             .when(F.col("DDE_mediano") >= 0,  "0-15")
+             .otherwise("Nulo")
         )
     )
 
-    df_buckets = df_estoque_loja_porte_regiao_bucket[categoria]
+    df_estoque_loja_porte_regiao_bucket[categoria] = df_buckets
 
-    # --- Count por grupo e período (DDE_medio) ---
+    # counts por grupo e período (média)
     df_counts_medio = (
         df_buckets
         .groupBy("grupo", "periodo_analise")
-        .pivot("bucket_DDE_medio", ["0-15","15-30","30-60","60-90","90+","Nulo"])
+        .pivot("bucket_DDE_medio", buckets)
         .count()
+        .na.fill(0)
+    )
+    for b in buckets:
+        df_counts_medio = df_counts_medio.withColumn(b, F.col(b).cast("long"))
+    df_counts_medio = (
+        df_counts_medio
+        .select("grupo", "periodo_analise", *buckets)
         .withColumn("Metrica", F.lit("DDE_medio"))
         .withColumn("Categoria", F.lit(categoria))
     )
 
-    # --- Count por grupo e período (DDE_mediano) ---
+    # counts por grupo e período (mediana)
     df_counts_mediano = (
         df_buckets
         .groupBy("grupo", "periodo_analise")
-        .pivot("bucket_DDE_mediano", ["0-15","15-30","30-60","60-90","90+","Nulo"])
+        .pivot("bucket_DDE_mediano", buckets)
         .count()
+        .na.fill(0)
+    )
+    for b in buckets:
+        df_counts_mediano = df_counts_mediano.withColumn(b, F.col(b).cast("long"))
+    df_counts_mediano = (
+        df_counts_mediano
+        .select("grupo", "periodo_analise", *buckets)
         .withColumn("Metrica", F.lit("DDE_mediano"))
         .withColumn("Categoria", F.lit(categoria))
     )
 
-    # --- Union dos dois ---
+    # union e exibição
     df_counts_export[categoria] = df_counts_medio.unionByName(df_counts_mediano)
 
-    # Exibir para inspeção
-    df_counts_export[categoria].fillna(0).display()
+    print(f"Categoria: {categoria}")
+    df_counts_export[categoria].display()
 
 # COMMAND ----------
 
@@ -1382,75 +1776,23 @@ dim_loja = (
     .dropDuplicates(["CdFilial"])
 )
 
-for categoria in categorias_teste:
-    df_base = (
-        df_acuracia[categoria]
-        .join(dim_loja, on="CdFilial", how="left")
-    )
-
-    denom = F.abs(F.col("merecimento_percentual")) + F.abs(F.col("Percentual_QtDemanda"))
-    smape_comp = F.when(denom == 0, F.lit(0.0))\
-                  .otherwise(200.0 * F.abs(F.col("merecimento_percentual") - F.col("Percentual_QtDemanda")) / denom)
-
-    df_ws = (
-        df_base
-        .withColumn("WSMAPE_comp", smape_comp * F.col("QtDemanda"))
-    )
-
-    # Overall
-    df_result_overall = df_ws.agg(
-        (F.sum("WSMAPE_comp") / F.sum("QtDemanda")).alias("WSMAPE_MatrizNova")
-    ).withColumn("categoria", F.lit(categoria))
-
-    # Por porte
-    df_result_por_porte = (
-        df_ws.groupBy("NmPorteLoja")
-        .agg(
-            (F.sum("WSMAPE_comp") / F.sum("QtDemanda")).alias("WSMAPE_MatrizNova")
-        )
-        .withColumn("categoria", F.lit(categoria))
-        .select("categoria", "NmPorteLoja", "WSMAPE_MatrizNova")
-        .filter(F.col("NmPorteLoja").isin('PORTE 1', 'PORTE 2', 'PORTE 3', 'PORTE 4', 'PORTE 5', 'PORTE 6'))
-        .orderBy("NmPorteLoja")
-    )
-
-    # Por região
-    df_result_por_regiao = (
-        df_ws.groupBy("NmRegiaoGeografica")
-        .agg(
-            (F.sum("WSMAPE_comp") / F.sum("QtDemanda")).alias("WSMAPE_MatrizNova")
-        )
-        .withColumn("categoria", F.lit(categoria))
-        .select("categoria", "NmRegiaoGeografica", "WSMAPE_MatrizNova")
-    )
-
-    # Exibir
-    df_result_overall.display()
-    df_result_por_porte.display()
-    #df_result_por_regiao.display()
-
-# COMMAND ----------
-
-from pyspark.sql import functions as F
-
-dim_loja = (
-    spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
-    .select("CdFilial", "NmPorteLoja", "NmRegiaoGeografica")
-    .dropDuplicates(["CdFilial"])
-)
-
 COL_REAL = "Percentual_QtDemanda"
 COL_PESO = "QtDemanda"
 COL_MATRIZ_NOVA = "merecimento_percentual"
 COL_NEOGRID = "PercMatrizNeogrid"
+
+# ordem desejada das regiões
+REGIOES_ORD = ["Norte","Nordeste","Centro Oeste","Sudeste","Sul"]
 
 def add_metrics(df, pred_col, label):
     denom = F.abs(F.col(pred_col)) + F.abs(F.col(COL_REAL))
     smape_comp = F.when(denom == 0, F.lit(0.0))\
                   .otherwise(200.0 * F.abs(F.col(pred_col) - F.col(COL_REAL)) / denom)
 
-    df_ws = df.withColumn(f"sMAPE_comp_{label}", smape_comp)\
-              .withColumn(f"WSMAPE_comp_{label}", smape_comp * F.col(COL_PESO))
+    df_ws = (df
+        .withColumn(f"sMAPE_comp_{label}", smape_comp)
+        .withColumn(f"WSMAPE_comp_{label}", smape_comp * F.col(COL_PESO))
+    )
 
     overall = (
         df_ws.agg(
@@ -1479,6 +1821,14 @@ def add_metrics(df, pred_col, label):
         .select("categoria", "modelo", "NmRegiaoGeografica", f"wSMAPE_{label}")
     )
 
+    # aplica ordenação customizada
+    por_regiao = por_regiao.withColumn(
+        "_ord",
+        F.when(F.col("NmRegiaoGeografica").isin(*REGIOES_ORD),
+               F.array_position(F.array(*[F.lit(r) for r in REGIOES_ORD]), F.col("NmRegiaoGeografica")))
+         .otherwise(F.lit(999))
+    ).orderBy("_ord", "NmRegiaoGeografica").drop("_ord")
+
     return overall, por_porte, por_regiao
 
 for categoria in categorias_teste:
@@ -1491,10 +1841,7 @@ for categoria in categorias_teste:
         .withColumn(COL_NEOGRID, F.col(COL_NEOGRID).cast("double"))
     )
 
-    # métricas MatrizNova
     overall_mn, porte_mn, reg_mn = add_metrics(df_base, COL_MATRIZ_NOVA, "MatrizNova")
-
-    # métricas Neogrid
     overall_ng, porte_ng, reg_ng = add_metrics(df_base, COL_NEOGRID, "NeogridMean")
 
     print(f"Categoria: {categoria} — Overall")
@@ -1505,21 +1852,21 @@ for categoria in categorias_teste:
     porte_mn.display()
     porte_ng.display()
 
-    # se quiser por região, descomente:
-    # print(f"Categoria: {categoria} — Por região")
-    # reg_mn.display()
-    # reg_ng.display()
+    print(f"Categoria: {categoria} — Por região")
+    reg_mn.display()
+    reg_ng.display()
 
 # COMMAND ----------
 
 from pyspark.sql import functions as F
 
 df_porte_percentual = {}
+df_regiao_percentual = {}
 
 for categoria in categorias_teste:
     df_base = df_estoque_loja_porte_regiao[categoria]
 
-    # total por porte
+    # --- Total por porte ---
     df_por_porte = (
         df_base.groupBy("NmPorteLoja")
         .agg(F.sum("QtMercadoria").alias("QtMercadoria_total"))
@@ -1528,19 +1875,23 @@ for categoria in categorias_teste:
     # total geral
     total_mercadoria = df_por_porte.agg(F.sum("QtMercadoria_total")).collect()[0][0]
 
-    # percentual
+    # percentual e ordenação por porte (1..6)
     df_por_porte = (
         df_por_porte
-        .withColumn("percentual", (F.col("QtMercadoria_total") / F.lit(total_mercadoria)) * 100)
+        .withColumn("percentual", 100 * F.col("QtMercadoria_total") / F.lit(total_mercadoria))
         .withColumn("categoria", F.lit(categoria))
+        .withColumn("_ord_porte", F.regexp_extract(F.col("NmPorteLoja"), r'(\d+)', 1).cast("int"))
+        .orderBy("_ord_porte")
+        .drop("_ord_porte")
     )
 
     # somatório portes 3–6
     df_soma_3a6 = (
         df_por_porte
-        .filter(F.col("NmPorteLoja").rlike("3|4|5|6"))
+        .withColumn("_porte_num", F.regexp_extract(F.col("NmPorteLoja"), r'(\d+)', 1).cast("int"))
+        .filter(F.col("_porte_num").between(3, 6))
         .agg(F.sum("QtMercadoria_total").alias("QtMercadoria_total_3a6"))
-        .withColumn("percentual_3a6", (F.col("QtMercadoria_total_3a6") / F.lit(total_mercadoria)) * 100)
+        .withColumn("percentual_3a6", 100 * F.col("QtMercadoria_total_3a6") / F.lit(total_mercadoria))
         .withColumn("categoria", F.lit(categoria))
     )
 
@@ -1549,9 +1900,24 @@ for categoria in categorias_teste:
         "soma_3a6": df_soma_3a6
     }
 
+    # --- Total por região ---
+    df_por_regiao = (
+        df_base.groupBy("NmRegiaoGeografica")
+        .agg(F.sum("QtMercadoria").alias("QtMercadoria_total"))
+        .withColumn("percentual", 100 * F.col("QtMercadoria_total") / F.lit(total_mercadoria))
+        .withColumn("categoria", F.lit(categoria))
+        .orderBy("NmRegiaoGeografica")
+    )
+
+    df_regiao_percentual[categoria] = df_por_regiao
+
     # exibir
+    print(f"Categoria: {categoria} — Por porte")
     df_por_porte.display()
+    print(f"Categoria: {categoria} — Somatório portes 3–6")
     df_soma_3a6.display()
+    print(f"Categoria: {categoria} — Por região")
+    df_por_regiao.display()
 
 # COMMAND ----------
 
@@ -2033,6 +2399,9 @@ for categoria in categorias_teste:
 # MAGIC ## Análise de Telas - envios manuais
 
 # COMMAND ----------
+
+
+!pip install openpyxl
 
 import pandas as pd
 import pyspark.sql.functions as F

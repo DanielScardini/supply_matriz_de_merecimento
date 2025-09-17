@@ -37,10 +37,6 @@ dict_diretorias = {
 
 # COMMAND ----------
 
-# MAGIC %sql SELECT * FROM databox.logistica_comum.estoque_saldo_qualidade
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC ## Análise de participação de vendas - grupo de necessidade de Linha Leve
 
@@ -93,7 +89,7 @@ df_proporcao_factual = (
         "perc_demanda"
     )
     .orderBy(F.desc("perc_receita"))
-    .limit(10)
+    #.limit(10)
     .display()
 )
 

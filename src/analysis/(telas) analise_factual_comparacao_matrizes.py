@@ -40,7 +40,7 @@ fim_baseline = "2025-09-05"
 
 inicio_teste = "2025-09-05"
 
-categorias_teste = ['TELEFONIA_CELULAR']
+categorias_teste = ['DE_TELAS']
 
 
 # COMMAND ----------
@@ -60,8 +60,8 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     print("🔄 Carregando matrizes de merecimento calculadas...")
     
     categorias = [
-        #"DE_TELAS",
-        "TELEFONIA_CELULAR", 
+        "DE_TELAS",
+        #"TELEFONIA_CELULAR", 
         #"LINHA_BRANCA",
         #"LINHA_LEVE",
         #"INFO_GAMES"
@@ -85,9 +85,9 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     return matrizes
 
 df_merecimento_offline = {}
-df_merecimento_offline['TELEFONIA_CELULAR'] = carregar_matrizes_merecimento_calculadas()['TELEFONIA_CELULAR']
+df_merecimento_offline['DE_TELAS'] = carregar_matrizes_merecimento_calculadas()['DE_TELAS']
 
-df_merecimento_offline['TELEFONIA_CELULAR'].limit(1).display()
+df_merecimento_offline['DE_TELAS'].limit(1).display()
 
 # COMMAND ----------
 
@@ -322,7 +322,7 @@ for categoria in categorias_teste:
     df_tmp = (
         df_base
         .withColumn("merecimento_percentual",
-                    F.col("Merecimento_Final_Media180_Qt_venda_sem_ruptura"))
+                    F.col("Merecimento_Final_Media270_Qt_venda_sem_ruptura"))
         .join(
             spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
             .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
@@ -392,7 +392,7 @@ def make_scatter(df, y_col, y_label, categoria):
         paper_bgcolor="#f2f2f2",
         plot_bgcolor="#f2f2f2",
         margin=dict(l=40, r=40, t=60, b=40),
-        xaxis=dict(showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)", zeroline=False, range=[0,0.6]),
+        xaxis=dict(showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)", zeroline=False, range=[0,1.0]),
         yaxis=dict(showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)", zeroline=False, range=[0,2]),
         legend=dict(title="Região Geográfica", orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5),
         width=1200,
