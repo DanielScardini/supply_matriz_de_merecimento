@@ -72,7 +72,7 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     
     for categoria in categorias:
         try:
-            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_teste1509"
+            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_test1609"
             df_matriz = spark.table(nome_tabela)
             
             matrizes[categoria] = df_matriz
@@ -342,6 +342,10 @@ metrics_all.orderBy("categoria", "modelo").display()
 
 # COMMAND ----------
 
+df_acuracia[categoria].display()
+
+# COMMAND ----------
+
 # === Plotly scatters ===
 import plotly.express as px
 from pyspark.sql import functions as F
@@ -358,7 +362,7 @@ for categoria in categorias_teste:
     df_tmp = (
         df_base
         .withColumn("merecimento_percentual",
-                    F.col("Merecimento_Final_Media90_Qt_venda_sem_ruptura"))
+                    F.col("Merecimento_Final_Media360_Qt_venda_sem_ruptura"))
         .join(
             spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
             .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
@@ -460,3 +464,8 @@ for categoria in categorias_teste:
         fig_neogrid.show()
     else:
         print(f"[{categoria}] Coluna PercMatrizNeogrid não disponível para plot.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Análise por CD

@@ -100,8 +100,8 @@ REGRAS_AGRUPAMENTO = {
 # Configuração de parâmetros para detecção de outliers
 PARAMETROS_OUTLIERS = {
     "desvios_meses_atipicos": 2,  # Desvios para meses atípicos
-    "desvios_historico_cd": 3,     # Desvios para outliers históricos a nível CD
-    "desvios_historico_loja": 3,   # Desvios para outliers históricos a nível loja
+    "desvios_historico_cd": 2,     # Desvios para outliers históricos a nível CD
+    "desvios_historico_loja": 2,   # Desvios para outliers históricos a nível loja
     "desvios_atacado_cd": 1.5,     # Desvios para outliers CD em lojas de atacado
     "desvios_atacado_loja": 1.5    # Desvios para outliers loja em lojas de atacado
 }
@@ -915,7 +915,7 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
 
 def executar_calculo_matriz_merecimento_completo(categoria: str, 
                                                 data_inicio: str = "2024-07-01",
-                                                data_calculo: str = "2025-09-15") -> DataFrame:
+                                                data_calculo: str = "2025-08-31") -> DataFrame:
     """
     Função principal que executa todo o fluxo da matriz de merecimento.
     """
@@ -986,7 +986,7 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         df_merecimento_final = calcular_merecimento_final(df_merecimento_cd, df_merecimento_interno)
 
         # Criar o esqueleto
-        df_esqueleto = criar_esqueleto_matriz_completa(df_com_grupo, "2025-08-30")
+        df_esqueleto = criar_esqueleto_matriz_completa(df_com_grupo, "2025-08-31")
 
         # Primeiro, identificar todas as colunas de merecimento final
         colunas_merecimento_final = [col for col in df_merecimento_final.columns 
