@@ -168,13 +168,9 @@ df_matriz_neogrid_agg_offline.limit(1).display()
 
 # COMMAND ----------
 
-spark.table("databox.bcg_comum.supply_matriz_merecimento_linha_leve_teste1509").columns
-
-
-# COMMAND ----------
-
-inicio_janela = "2025-09-01"
-fim_janela = "2025-09-16"
+# === Janela dinâmica: últimos 30 dias até ontem ===
+fim_janela = F.date_sub(F.current_date(), 1)
+inicio_janela = F.date_sub(fim_janela, 29)
 
 print(inicio_janela, fim_janela)
 
@@ -342,10 +338,6 @@ metrics_all.orderBy("categoria", "modelo").display()
 
 # COMMAND ----------
 
-df_acuracia[categoria].display()
-
-# COMMAND ----------
-
 # === Plotly scatters ===
 import plotly.express as px
 from pyspark.sql import functions as F
@@ -469,3 +461,170 @@ for categoria in categorias_teste:
 
 # MAGIC %md
 # MAGIC ## Análise por CD
+
+# COMMAND ----------
+
+def criar_de_para_filial_cd() -> DataFrame:
+    """
+    Cria o mapeamento filial → CD usando dados da tabela base.
+    """
+    print("🔄 Criando de-para filial → CD...")
+    
+    df_base = (
+        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
+        .filter(F.col("DtAtual") == "2025-08-01")
+        .filter(F.col("CdSku").isNotNull())
+    )
+    
+    de_para_filial_cd = (
+        df_base
+        .select("cdfilial", "cd_secundario")
+        .distinct()
+        .filter(F.col("cdfilial").isNotNull())
+        .withColumn(
+            "cd_vinculo",
+            F.coalesce(F.col("cd_secundario"), F.lit("SEM_CD"))
+        )
+        .drop("cd_secundario")
+    )
+    
+    print(f"✅ De-para filial → CD criado: {de_para_filial_cd.count():,} filiais")
+    return de_para_filial_cd
+
+de_para_filial_cd = criar_de_para_filial_cd()
+
+for categoria in categorias_teste:
+    df_acuracia_cd = (
+        df_acuracia[categoria]
+        .join(
+            de_para_filial_cd,
+            how="left",
+            on="CdFilial"
+        )
+        .groupBy("cd_vinculo", "grupo_de_necessidade")
+        .agg(
+            F.sum("QtDemanda").alias("QtDemanda"),
+            F.sum("Percentual_QtDemanda").alias("Percentual_QtDemanda"),
+            F.sum("Merecimento_Final_Media90_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media90_Qt_venda_sem_ruptura"),
+            F.sum("Merecimento_Final_Media180_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media180_Qt_venda_sem_ruptura"),
+            F.sum("Merecimento_Final_Media270_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media270_Qt_venda_sem_ruptura"),
+            F.sum("Merecimento_Final_Media360_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media360_Qt_venda_sem_ruptura"),
+            F.sum("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura"),
+            F.sum("Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura"),
+            F.sum("Merecimento_Final_MediaAparada270_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada270_Qt_venda_sem_ruptura"),
+            F.sum("Merecimento_Final_MediaAparada360_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada360_Qt_venda_sem_ruptura"),
+            F.sum("PercMatrizNeogrid").alias("PercMatrizNeogrid"),
+            F.sum("PercMatrizNeogrid_median").alias("PercMatrizNeogrid_median")
+        )
+)
+
+from pyspark.sql import functions as F
+from functools import reduce
+
+# ==== Config ====
+COL_REAL = "Percentual_QtDemanda"
+COL_PESO = "QtDemanda"
+
+# modelos base já existentes em `colunas`
+pred_cols_base = list(colunas)
+extras = ["PercMatrizNeogrid", "PercMatrizNeogrid_median"]
+
+def existing_pred_cols(df, base_cols, maybe_cols):
+    return base_cols + [c for c in maybe_cols if c in df.columns]
+
+# ==== sMAPE helpers ====
+def add_smape_components(df, pred_col, real_col=COL_REAL, peso_col=COL_PESO, label=None):
+    label = label or pred_col
+    denom = F.abs(F.col(pred_col)) + F.abs(F.col(real_col))
+    smape_comp = F.when(denom == 0, F.lit(0.0)) \
+                  .otherwise(200.0 * F.abs(F.col(pred_col) - F.col(real_col)) / denom)
+    return (
+        df
+        .withColumn(f"sMAPE_comp_{label}", smape_comp)
+        .withColumn(f"WSMAPE_comp_{label}", smape_comp * F.col(peso_col))
+    )
+
+# ==== agregação correta para CD: média ponderada por QtDemanda ====
+def aggregate_to_cd(df_cat, de_para):
+    df_join = (
+        df_cat.join(de_para, on="CdFilial", how="left")
+              .withColumn("cd_vinculo", F.coalesce(F.col("cd_vinculo"), F.lit("SEM_CD")))
+    )
+
+    # colunas de predição presentes
+    preds = existing_pred_cols(df_join, pred_cols_base, extras)
+
+    # numeradores: sum(valor * peso) para cada coluna (inclui o REAL)
+    num_exprs = [
+        (F.sum(F.col(COL_PESO)).alias("peso_total")),
+        (F.sum(F.col(COL_REAL) * F.col(COL_PESO)).alias(f"{COL_REAL}__num"))
+    ] + [
+        F.sum(F.col(c) * F.col(COL_PESO)).alias(f"{c}__num") for c in preds
+    ]
+
+    df_num = (
+        df_join
+        .groupBy("cd_vinculo", "grupo_de_necessidade")
+        .agg(*num_exprs)
+        .withColumn(COL_PESO, F.col("peso_total"))
+        .drop("peso_total")
+    )
+
+    # converte numeradores em médias ponderadas
+    df_cd = (
+        df_num
+        .withColumn(COL_REAL, F.when(F.col(COL_PESO) > 0, F.col(f"{COL_REAL}__num")/F.col(COL_PESO)).otherwise(F.lit(0.0)))
+    )
+
+    for c in preds:
+        df_cd = df_cd.withColumn(
+            c,
+            F.when(F.col(COL_PESO) > 0, F.col(f"{c}__num")/F.col(COL_PESO)).otherwise(F.lit(0.0))
+        )
+
+    # limpa numeradores temporários
+    cols_drop = [f"{COL_REAL}__num"] + [f"{c}__num" for c in preds]
+    df_cd = df_cd.drop(*cols_drop)
+
+    return df_cd, preds
+
+# ==== pipeline por categoria: CD-level sMAPE/WSMAPE ====
+metrics_cd_all = None
+
+for categoria in categorias_teste:
+    df_cat = df_acuracia[categoria]
+
+    df_cd, pred_cols = aggregate_to_cd(df_cat, de_para_filial_cd)
+
+    # adiciona componentes por modelo
+    df_cd_comp = reduce(
+        lambda acc, c: add_smape_components(acc, c, label=c),
+        pred_cols,
+        df_cd
+    )
+
+    # agrega sMAPE e WSMAPE na categoria inteira (sobre todas as linhas CD×grupo)
+    aggs = []
+    for c in pred_cols:
+        smape_col = f"sMAPE_comp_{c}"
+        wsmape_col = f"WSMAPE_comp_{c}"
+        aggs.append(
+            F.struct(
+                F.lit(categoria).alias("categoria"),
+                F.lit(c).alias("modelo"),
+                F.round(F.avg(F.col(smape_col)), 4).alias("sMAPE"),
+                F.round(F.sum(F.col(wsmape_col)) / F.sum(F.col(COL_PESO)), 4).alias("WSMAPE")
+            ).alias(c)
+        )
+
+    metrics_cat = df_cd_comp.select(*aggs)
+    metrics_cat = metrics_cat.select(F.explode(F.array(*metrics_cat.columns)).alias("m")).select("m.*")
+
+    metrics_cd_all = metrics_cat if metrics_cd_all is None else metrics_cd_all.unionByName(metrics_cat)
+
+# ==== saída ====
+# Métricas (categoria × modelo) no nível CD×grupo agregado corretamente por peso
+metrics_cd_all.orderBy("categoria", "modelo").display()
+
+# Se quiser inspecionar o dataframe base já agregado no nível CD×grupo para uma categoria:
+# df_cd_comp.select("cd_vinculo","grupo_de_necessidade", COL_PESO, COL_REAL, *pred_cols).limit(20).display()

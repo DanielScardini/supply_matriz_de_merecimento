@@ -119,9 +119,9 @@ REGRAS_AGRUPAMENTO = {
 
 # Configuração de parâmetros para detecção de outliers
 PARAMETROS_OUTLIERS = {
-    "desvios_meses_atipicos": 3,  # Desvios para meses atípicos
-    "desvios_historico_cd": 3,     # Desvios para outliers históricos a nível CD
-    "desvios_historico_loja": 3,   # Desvios para outliers históricos a nível loja
+    "desvios_meses_atipicos": 2,  # Desvios para meses atípicos
+    "desvios_historico_cd": 2,     # Desvios para outliers históricos a nível CD
+    "desvios_historico_loja": 2,   # Desvios para outliers históricos a nível loja
     "desvios_atacado_cd": 1.5,     # Desvios para outliers CD em lojas de atacado
     "desvios_atacado_loja": 1.5    # Desvios para outliers loja em lojas de atacado
 }
@@ -130,7 +130,7 @@ PARAMETROS_OUTLIERS = {
 JANELAS_MOVEIS = [90, 180, 270, 360]
 
 # Configuração das médias aparadas (percentual de corte)
-PERCENTUAL_CORTE_MEDIAS_APARADAS = 0.10  # 10% de corte superior e inferior
+PERCENTUAL_CORTE_MEDIAS_APARADAS = 0.02  # 2% de corte superior e inferior
 
 print("✅ Configurações carregadas:")
 print(f"  • Categorias suportadas: {list(REGRAS_AGRUPAMENTO.keys())}")
@@ -321,7 +321,7 @@ def aplicar_mapeamentos_produtos(df: DataFrame, categoria: str,
 # COMMAND ----------
 
 def remover_outliers_series_historicas(df: DataFrame, 
-                                     coluna_valor: str = "demanda_robusta",
+                                     coluna_valor: str = "QtMercadoria",
                                      n_sigmas_padrao: float = 3.0,
                                      n_sigmas_atacado: float = 1.5,
                                      filiais_atacado: list = None) -> DataFrame:
@@ -586,7 +586,7 @@ def calcular_medidas_centrais_com_medias_aparadas(df: DataFrame) -> DataFrame:
         add_media_aparada_rolling(
             df_com_medias,
             janelas=JANELAS_MOVEIS,
-            col_val="demanda_robusta",
+            col_val="QtMercadoria",
             col_ord="DtAtual",
             grupos=("CdSku","CdFilial"),
             alpha=PERCENTUAL_CORTE_MEDIAS_APARADAS,
@@ -1003,7 +1003,7 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         
         df_sem_outliers = remover_outliers_series_historicas(
             df_filtrado,
-            coluna_valor="demanda_robusta",
+            coluna_valor="QtMercadoria",
             n_sigmas_padrao=PARAMETROS_OUTLIERS["desvios_historico_loja"],
             n_sigmas_atacado=PARAMETROS_OUTLIERS["desvios_atacado_loja"],
             filiais_atacado=filiais_atacado
@@ -1103,7 +1103,7 @@ for categoria in categorias:
             .upper()
         )
         
-        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_online_teste1509"
+        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_online_teste1809"
         
         print(f"💾 Salvando matriz de merecimento para: {categoria}")
         print(f"📊 Tabela: {nome_tabela}")

@@ -100,7 +100,7 @@ REGRAS_AGRUPAMENTO = {
 # Configuração de parâmetros para detecção de outliers
 PARAMETROS_OUTLIERS = {
     "desvios_meses_atipicos": 2,  # Desvios para meses atípicos
-    "desvios_historico_cd": 2,     # Desvios para outliers históricos a nível CD
+    "desvios_historico_cd": 3,     # Desvios para outliers históricos a nível CD
     "desvios_historico_loja": 2,   # Desvios para outliers históricos a nível loja
     "desvios_atacado_cd": 1.5,     # Desvios para outliers CD em lojas de atacado
     "desvios_atacado_loja": 1.5    # Desvios para outliers loja em lojas de atacado
@@ -110,7 +110,7 @@ PARAMETROS_OUTLIERS = {
 JANELAS_MOVEIS = [90, 180, 270, 360]
 
 # Configuração das médias aparadas (percentual de corte)
-PERCENTUAL_CORTE_MEDIAS_APARADAS = 0.10  # 10% de corte superior e inferior
+PERCENTUAL_CORTE_MEDIAS_APARADAS = 0.01  # 2% de corte superior e inferior
 
 print("✅ Configurações carregadas:")
 print(f"  • Categorias suportadas: {list(REGRAS_AGRUPAMENTO.keys())}")
@@ -147,7 +147,7 @@ def determinar_grupo_necessidade(categoria: str, df: DataFrame) -> DataFrame:
         # Cria grupo de necessidade combinando NmEspecieGerencial + "_" + DsVoltagem (nulls preenchidos com "")
         df_com_grupo = df.withColumn(
             "DsVoltagem_filled",
-            F.coalesce(F.col("DsVoltagem"), F.lit(""))
+            F.substring(F.coalesce(F.col("DsVoltagem"), F.lit("")), 1, 3)
         ).withColumn(
             "grupo_de_necessidade",
             F.concat(
@@ -1060,7 +1060,7 @@ for categoria in categorias:
             .upper()
         )
         
-        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_test1609"
+        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste1809"
         
         print(f"💾 Salvando matriz de merecimento para: {categoria}")
         print(f"📊 Tabela: {nome_tabela}")

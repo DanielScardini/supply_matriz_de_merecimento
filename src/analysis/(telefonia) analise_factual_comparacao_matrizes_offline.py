@@ -140,39 +140,49 @@ df_matriz_neogrid_agg_offline.limit(1).display()
 
 # COMMAND ----------
 
-inicio_janela = "2025-09-01"
-fim_janela = "2025-09-16"
+from pyspark.sql import functions as F
+from pyspark.sql import Window
 
-print(inicio_janela, fim_janela)
+# === Janela dinâmica: últimos 30 dias até ontem ===
+fim_janela = F.date_sub(F.current_date(), 1)
+inicio_janela = F.date_sub(fim_janela, 29)
+
+# Log das datas (yyyy-MM-dd)
+_row = (
+    spark.range(1)
+    .select(
+        F.date_format(inicio_janela, "yyyy-MM-dd").alias("inicio"),
+        F.date_format(fim_janela, "yyyy-MM-dd").alias("fim"),
+    )
+).first()
+print(_row["inicio"], _row["fim"])
 
 # partindo do df_proporcao_factual já agregado por CdFilial × grupo_de_necessidade
 w_grp = Window.partitionBy("grupo_de_necessidade")
 
 df_proporcao_factual = (
     spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
-    .filter(F.col('DtAtual') >= inicio_janela)
-    .filter(F.col('DtAtual') <= fim_janela)      
+    .filter(F.col('DtAtual').between(inicio_janela, fim_janela))
     .fillna(0, subset=['deltaRuptura', 'QtMercadoria'])
     .withColumn("QtDemanda", F.col("QtMercadoria") + F.col("deltaRuptura"))
     .join(
         spark.table('databox.bcg_comum.supply_de_para_modelos_gemeos_tecnologia'),
         how="inner",
-        on="CdSku")
+        on="CdSku"
+    )
     .filter(F.col("grupo_de_necessidade").isin(GRUPOS_TESTE))
     .dropna(subset='grupo_de_necessidade')
     .groupBy('CdFilial', 'grupo_de_necessidade')
-    .agg(
-        F.round(F.sum('QtDemanda'), 0).alias('QtDemanda'),
-    )
+    .agg(F.round(F.sum('QtDemanda'), 0).alias('QtDemanda'))
     .withColumn("Total_QtDemanda", F.round(F.sum(F.col("QtDemanda")).over(w_grp), 0))
     .withColumn(
         "Proporcao_Interna_QtDemanda",
-        F.when(F.col("Total_QtDemanda") > 0, F.col("QtDemanda") / F.col("Total_QtDemanda")).otherwise(F.lit(0.0))
+        F.when(F.col("Total_QtDemanda") > 0,
+               F.col("QtDemanda") / F.col("Total_QtDemanda")).otherwise(F.lit(0.0))
     )
     .withColumn("Percentual_QtDemanda", F.round(F.col("Proporcao_Interna_QtDemanda") * 100.0, 3))
     .select('grupo_de_necessidade', 'CdFilial', 'Percentual_QtDemanda', 'QtDemanda', 'Total_QtDemanda')
-
-    )
+)
 
 #df_proporcao_factual.limit(1).display()
 
@@ -190,41 +200,39 @@ colunas = [
 df_acuracia = {}
 
 for categoria in categorias_teste:
-  df_acuracia[categoria] = (
-      df_proporcao_factual
-      .join(
-        df_merecimento_offline[categoria]
-        .drop("CdSku", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica")
-        .dropDuplicates(),
-        on=['CdFilial', 'grupo_de_necessidade'],
-        how='inner'
-      )
-      .join(df_matriz_neogrid_agg_offline,
+    df_acuracia[categoria] = (
+        df_proporcao_factual
+        .join(
+            df_merecimento_offline[categoria]
+            .drop("CdSku", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica")
+            .dropDuplicates(),
             on=['CdFilial', 'grupo_de_necessidade'],
-            how="left")
-
-      .fillna(0.0, subset=[
+            how='inner'
+        )
+        .join(
+            df_matriz_neogrid_agg_offline,
+            on=['CdFilial', 'grupo_de_necessidade'],
+            how="left"
+        )
+        .fillna(0.0, subset=[
             'Percentual_QtDemanda',
             'Merecimento_Final_Media90_Qt_venda_sem_ruptura',
             'Merecimento_Final_Media180_Qt_venda_sem_ruptura',
             'Merecimento_Final_Media270_Qt_venda_sem_ruptura',
-            'Merecimento_Final_Media360_Qt_venda_sem_ruptura',])
-      .select(
+            'Merecimento_Final_Media360_Qt_venda_sem_ruptura',
+        ])
+        .select(
             "CdFilial",
             "grupo_de_necessidade",
             "Percentual_QtDemanda",
             "QtDemanda",
-                *[F.round(F.col(c) * 100, 3).alias(c)
-                for c in colunas],
+            *[F.round(F.col(c) * 100, 3).alias(c) for c in colunas],
             "PercMatrizNeogrid",
             "PercMatrizNeogrid_median",
-      )
-  )
+        )
+    )
 
-
-  
-
-  df_acuracia[categoria].limit(1).display()
+    df_acuracia[categoria].limit(1).display()
 
 # COMMAND ----------
 
@@ -596,7 +604,3 @@ metrics_cd_all.orderBy("categoria", "modelo").display()
 
 # Se quiser inspecionar o dataframe base já agregado no nível CD×grupo para uma categoria:
 # df_cd_comp.select("cd_vinculo","grupo_de_necessidade", COL_PESO, COL_REAL, *pred_cols).limit(20).display()
-
-# COMMAND ----------
-
-

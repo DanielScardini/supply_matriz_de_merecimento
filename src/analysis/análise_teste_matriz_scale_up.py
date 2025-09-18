@@ -47,7 +47,7 @@ from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 
 # janela factual (últimos 8 dias)
-janela_factual = (datetime.now() - timedelta(days=60)).strftime("%Y-%m-%d")
+janela_factual = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
 print(janela_factual)
 
 # janela para total (sem partição = mesmo total para todas as linhas)
@@ -65,7 +65,7 @@ df_proporcao_factual = (
         "grupo_de_necessidade",
         F.concat(F.coalesce(F.col('NmEspecieGerencial'), F.lit("SEM_GN")), F.lit("_"), F.col("DsVoltagem_filled"))
     )
-    .groupBy("grupo_de_necessidade")
+    .groupBy("NmSetorGerencial")
     .agg(
         F.sum("Receita").alias("Receita"),
         F.sum("QtDemanda").alias("QtDemanda")
@@ -84,7 +84,7 @@ df_proporcao_factual = (
 (
     df_proporcao_factual
     .select(
-        "grupo_de_necessidade",
+        "NmSetorGerencial",
         "perc_receita", 
         "perc_demanda"
     )
