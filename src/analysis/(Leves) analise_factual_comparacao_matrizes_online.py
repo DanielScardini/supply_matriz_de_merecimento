@@ -30,10 +30,8 @@ hoje = datetime.now() - timedelta(days=1)
 hoje_str = hoje.strftime("%Y-%m-%d")
 hoje_int = int(hoje.strftime("%Y%m%d"))
 
-GRUPOS_TESTE = ['LIQUIDIFICADORES ACIMA 1001 W._110 VOLTS                               ',
-                'LIQUIDIFICADORES ACIMA 1001 W._110V                                    ',
-                'LIQUIDIFICADORES ACIMA 1001 W._220 VOLTS                               ',
-                'LIQUIDIFICADORES ACIMA 1001 W._220V                                    ']
+GRUPOS_TESTE = ['LIQUIDIFICADORES ACIMA 1001 W._110',
+                'LIQUIDIFICADORES ACIMA 1001 W._220']
 print(GRUPOS_TESTE)
 
 data_inicio = "2025-08-29"
@@ -178,7 +176,7 @@ print(inicio_janela, fim_janela)
 w_grp = Window.partitionBy("grupo_de_necessidade")
 
 df_proporcao_factual = (
-    spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
+    spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4_online')
     .filter(F.col('DtAtual') >= inicio_janela)
     .filter(F.col('DtAtual') <= fim_janela)      
     .filter(F.col("NmAgrupamentoDiretoriaSetor").isin('DIRETORIA LINHA LEVE'))
@@ -286,7 +284,7 @@ def add_smape_components(df, pred_col, real_col=COL_REAL, peso_col=COL_PESO, lab
 
 # === Lista de colunas de predição alvo ===
 pred_cols_base = list(colunas)  # ["Merecimento_Final_Media90_...", ...]
-extras = ["PercMatrizNeogrid", "PercMatrizNeogrid_median"]
+extras = ["PercMatrizNeogrid"]#, "PercMatrizNeogrid_median"]
 # mantém só as extras que existem no DF
 def existing_pred_cols(df, base_cols, maybe_cols):
     present = [c for c in maybe_cols if c in df.columns]
@@ -354,7 +352,7 @@ for categoria in categorias_teste:
     df_tmp = (
         df_base
         .withColumn("merecimento_percentual",
-                    F.col("Merecimento_Final_Media360_Qt_venda_sem_ruptura"))
+                    F.col("Merecimento_Final_Media270_Qt_venda_sem_ruptura"))
         .join(
             spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
             .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
@@ -628,3 +626,95 @@ metrics_cd_all.orderBy("categoria", "modelo").display()
 
 # Se quiser inspecionar o dataframe base já agregado no nível CD×grupo para uma categoria:
 # df_cd_comp.select("cd_vinculo","grupo_de_necessidade", COL_PESO, COL_REAL, *pred_cols).limit(20).display()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Plot bolinha para CDs
+
+# COMMAND ----------
+
+# === Bubble único (hover = CdFilial) ===
+import numpy as np
+import plotly.express as px
+from pyspark.sql import functions as F
+
+COL_REAL = "Percentual_QtDemanda"
+COL_PESO = "QtDemanda"
+METRICA_Y = "Merecimento_Final_Media360_Qt_venda_sem_ruptura"  # ajuste aqui
+
+def _axis_range(arr, pad=0.04, min0=True):
+    arr = np.asarray(arr, dtype=float)
+    arr = arr[np.isfinite(arr)]
+    if arr.size == 0:
+        return [0, 1]
+    lo = float(np.nanmin(arr)); hi = float(np.nanmax(arr))
+    if min0: lo = min(0.0, lo)
+    span = max(1e-9, hi - lo)
+    return [lo - pad*span, hi + pad*span]
+
+def plot_bubble_unico(pdf_cd, y_col, categoria, y_label=None):
+    y_label = y_label or y_col
+    xr = _axis_range(pdf_cd["x_real"])
+    yr = _axis_range(pdf_cd[y_col])
+
+    fig = px.scatter(
+        pdf_cd,
+        x="x_real",
+        y=y_col,
+        size=COL_PESO,
+        color="grupo_de_necessidade",
+        size_max=28,
+        opacity=0.8,
+        hover_data={
+            "CdFilial": True,
+            "cd_vinculo": True,
+            "grupo_de_necessidade": True,
+            "x_real": ":.3f",
+            y_col: ":.3f",
+            COL_PESO: True,
+        },
+        labels={
+            "x_real": "Percentual_QtDemanda (real)",
+            y_col:   y_label,
+            "grupo_de_necessidade": "Grupo de necessidade",
+            COL_PESO: "QtDemanda",
+            "CdFilial": "Filial",
+        }
+    )
+    fig.update_layout(
+        title=dict(text=f"{y_label} vs Real — CD×Grupo ({categoria})", x=0.5, xanchor="center"),
+        paper_bgcolor="#f2f2f2",
+        plot_bgcolor="#f2f2f2",
+        margin=dict(l=40, r=40, t=60, b=40),
+        xaxis=dict(showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)", zeroline=False, range=xr),
+        yaxis=dict(showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)", zeroline=False, range=yr),
+        legend=dict(title="Grupo de necessidade", orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5),
+        width=1200,
+        height=420,
+    )
+    fig.update_traces(marker=dict(line=dict(width=0.5, color="rgba(0,0,0,0.35)")))
+    m = max(xr[1], yr[1])
+    fig.add_shape(type="line", x0=0, y0=0, x1=m, y1=m, line=dict(color="rgba(0,0,0,0.45)", width=1, dash="dash"))
+    fig.show()
+
+# ==== Executa para cada categoria ====
+for categoria in categorias_teste:
+    # aqui NÃO agregamos ao nível CD apenas — mantemos CdFilial no join
+    df_join = (
+        df_acuracia[categoria]
+        .join(de_para_filial_cd, on="CdFilial", how="left")
+    )
+
+    if METRICA_Y not in df_join.columns:
+        print(f"[{categoria}] Métrica '{METRICA_Y}' não encontrada.")
+        continue
+
+    pdf_cd = (
+        df_join
+        .withColumnRenamed(COL_REAL, "x_real")
+        .select("CdFilial", "cd_vinculo", "grupo_de_necessidade", "x_real", COL_PESO, METRICA_Y)
+        .toPandas()
+    )
+
+    plot_bubble_unico(pdf_cd, y_col=METRICA_Y, categoria=categoria, y_label=f"{METRICA_Y} (previsão)")

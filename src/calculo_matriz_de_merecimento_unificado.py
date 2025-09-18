@@ -101,21 +101,48 @@ REGRAS_AGRUPAMENTO = {
 PARAMETROS_OUTLIERS = {
     "desvios_meses_atipicos": 2,  # Desvios para meses atípicos
     "desvios_historico_cd": 3,     # Desvios para outliers históricos a nível CD
-    "desvios_historico_loja": 2,   # Desvios para outliers históricos a nível loja
-    "desvios_atacado_cd": 1.5,     # Desvios para outliers CD em lojas de atacado
+    "desvios_historico_loja": 3,   # Desvios para outliers históricos a nível loja
+    "desvios_atacado_cd": 3,     # Desvios para outliers CD em lojas de atacado
     "desvios_atacado_loja": 1.5    # Desvios para outliers loja em lojas de atacado
 }
 
-# Configuração das janelas móveis
-JANELAS_MOVEIS = [90, 180, 270, 360]
+# Configuração das janelas móveis para médias aparadas
+JANELAS_MOVEIS_APARADAS = [90, 180, 270, 360]
+
+# Configuração específica para merecimento CD (sempre 90 dias)
+JANELA_CD_MERECIMENTO = 90
 
 # Configuração das médias aparadas (percentual de corte)
-PERCENTUAL_CORTE_MEDIAS_APARADAS = 0.01  # 2% de corte superior e inferior
+PERCENTUAL_CORTE_MEDIAS_APARADAS = 0.01  # 1% de corte superior e inferior
+
+FILIAIS_ATACADO = [
+    1671,     # Petrolina - PE
+    17,       # Norte Shopping
+    1778,     # Shop Tacaruna - PE
+    293,      # Varginha - MG
+    1003,     # Shop Guarulhos - SP
+    1949,     # São Mateus - ES
+    1717,     # Fortaleza - CE
+    2383,     # Sobral - CE
+    590,      # Contagem - MG
+    1485,     # Sorocaba - SP
+    2103,     # Caruaru - PE
+    2059,     # Arcoverde - PE
+    520,      # Shop Bangu - RJ
+    4000,     # Berrini - SP
+    1157,     # Feira de Santana - BA
+    1764,     # Shop Moxuara - ES
+    1158,     # Catete - RJ
+    376,      # Ponte Nova - MG
+    242,      # Montes Claros - MG
+]
 
 print("✅ Configurações carregadas:")
 print(f"  • Categorias suportadas: {list(REGRAS_AGRUPAMENTO.keys())}")
-print(f"  • Janelas móveis: {JANELAS_MOVEIS} dias")
-print(f"  • Percentual de corte para médias aparadas: {PERCENTUAL_CORTE_MEDIAS_APARADAS*100}%")
+print(f"  • Janelas móveis aparadas: {JANELAS_MOVEIS_APARADAS} dias")
+print(f"  • Janela CD merecimento: {JANELA_CD_MERECIMENTO} dias")
+print(f"  • Percentual de corte para médias aparadas: {PERCENTUAL_CORTE_MEDIAS_APARADAS*100}% (total 2%)")
+
 
 # COMMAND ----------
 
@@ -191,8 +218,7 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-07-01") -> Data
     df_base = (
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
         .filter(F.col("NmAgrupamentoDiretoriaSetor") == categoria)
-        #####
-        .filter(F.col("NmSetorGerencial") == 'PORTATEIS')
+        .filter(F.col("NmEspecieGerencial") == 'LIQUIDIFICADORES ACIMA 1001 W.')
         .filter(F.col("DtAtual") >= data_inicio)
         .withColumn(
             "year_month",
@@ -532,7 +558,7 @@ def add_media_aparada_rolling(df, janelas, col_val="demanda_robusta", col_ord="D
 
 def calcular_medidas_centrais_com_medias_aparadas(df: DataFrame) -> DataFrame:
     """
-    Calcula todas as medidas centrais incluindo médias aparadas.
+    Calcula apenas médias aparadas (removidas médias móveis simples).
     """
     print("🔄 Calculando medidas centrais com médias aparadas...")
     
@@ -551,21 +577,11 @@ def calcular_medidas_centrais_com_medias_aparadas(df: DataFrame) -> DataFrame:
     lista = ", ".join(str(f) for f in FILIAIS_OUTLET)
     print(f"🏬 Zerando a demanda das filiais [{lista}] ⚠️ pois não são abastecidas via CD normalmente.")
     
-    janelas = {}
-    for dias in JANELAS_MOVEIS:
-        janelas[dias] = Window.partitionBy("CdSku", "CdFilial").orderBy("DtAtual").rowsBetween(-dias, 0)
-    
-    df_com_medias = df_sem_ruptura
-    for dias in JANELAS_MOVEIS:
-        df_com_medias = df_com_medias.withColumn(
-            f"Media{dias}_Qt_venda_sem_ruptura",
-            F.avg("demanda_robusta").over(janelas[dias])
-        )
-    
+     # Aplicar apenas médias aparadas
     df_com_medias_aparadas = (
         add_media_aparada_rolling(
-            df_com_medias,
-            janelas=JANELAS_MOVEIS,
+            df_sem_ruptura,
+            janelas=JANELAS_MOVEIS_APARADAS,
             col_val="demanda_robusta",
             col_ord="DtAtual",
             grupos=("CdSku","CdFilial"),
@@ -574,7 +590,7 @@ def calcular_medidas_centrais_com_medias_aparadas(df: DataFrame) -> DataFrame:
         )
     )
     
-    print("✅ Medidas centrais calculadas")
+    print("✅ Medidas centrais calculadas (apenas médias aparadas)")
     return df_com_medias_aparadas
 
 # COMMAND ----------
@@ -583,22 +599,20 @@ def consolidar_medidas(df: DataFrame) -> DataFrame:
     """
     Consolida todas as medidas calculadas em uma base única.
     """
-    print("🔄 Consolidando medidas...")
+    print("🔄 Consolidando medidas (apenas médias aparadas)...")
     
-    colunas_medias = [f"Media{dias}_Qt_venda_sem_ruptura" for dias in JANELAS_MOVEIS]
-    colunas_medias_aparadas = [f"MediaAparada{dias}_Qt_venda_sem_ruptura" for dias in JANELAS_MOVEIS]
+    colunas_medias_aparadas = [f"MediaAparada{dias}_Qt_venda_sem_ruptura" for dias in JANELAS_MOVEIS_APARADAS]
     
     df_consolidado = (
         df.select(
             "DtAtual", "CdSku", "CdFilial", "grupo_de_necessidade", "year_month",
             "QtMercadoria", "Receita", "FlagRuptura", "deltaRuptura", "tipo_agrupamento",
-            *colunas_medias,
             *colunas_medias_aparadas
         )
-        .fillna(0, subset=colunas_medias + colunas_medias_aparadas)
+        .fillna(0, subset=colunas_medias_aparadas)
     )
     
-    print("✅ Medidas consolidadas")
+    print("✅ Medidas consolidadas (apenas médias aparadas)")
     return df_consolidado
 
 # COMMAND ----------
@@ -634,10 +648,10 @@ def criar_de_para_filial_cd() -> DataFrame:
 
 def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) -> DataFrame:
     """
-    Calcula o merecimento a nível CD por grupo de necessidade.
+    Calcula o merecimento a nível CD por grupo de necessidade usando APENAS média aparada 90 dias.
     Retorna o percentual que cada CD representa dentro da Cia.
     """
-    print(f"🔄 Calculando merecimento CD para categoria: {categoria}")
+    print(f"🔄 Calculando merecimento CD para categoria: {categoria} (média aparada 90 dias)")
     
     df_data_calculo = df.filter(F.col("DtAtual") == data_calculo)
 
@@ -647,73 +661,61 @@ def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) ->
         .dropDuplicates(subset=['CdSku', 'CdFilial'])
     )
     
-    medidas_disponiveis = [
-        "Media90_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura", 
-        "Media270_Qt_venda_sem_ruptura", "Media360_Qt_venda_sem_ruptura",
-        "MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada180_Qt_venda_sem_ruptura",
-        "MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada360_Qt_venda_sem_ruptura"
-    ]
+    # Usar apenas média aparada 90 dias para merecimento CD
+    medida_cd = f"MediaAparada{JANELA_CD_MERECIMENTO}_Qt_venda_sem_ruptura"
     
     de_para_filial_cd = criar_de_para_filial_cd()
     df_com_cd = df_data_calculo.join(de_para_filial_cd, on="cdfilial", how="left")
     
-    aggs_cd = []
-    for medida in medidas_disponiveis:
-        if medida in df_com_cd.columns:
-            aggs_cd.append(F.sum(F.col(medida)).alias(f"Total_{medida}"))
-    
+    # Agregar apenas a medida específica do CD
     df_merecimento_cd = (
         df_com_cd
         .groupBy("cd_vinculo", "grupo_de_necessidade")
-        .agg(*aggs_cd)
+        .agg(F.sum(F.col(medida_cd)).alias(f"Total_{medida_cd}"))
     )
     
-    # NOVO: Calcular percentual do CD dentro da Cia
-    for medida in medidas_disponiveis:
-        coluna_total = f"Total_{medida}"
-        if coluna_total in df_merecimento_cd.columns:  # ← VERIFICAR Total_{medida}
-            w_total_cia = Window.partitionBy("grupo_de_necessidade")
-            
-            df_merecimento_cd = df_merecimento_cd.withColumn(
-                f"Total_Cia_{medida}",
-                F.sum(F.col(coluna_total)).over(w_total_cia)  # ← USAR coluna_total
-            )
-            
-            df_merecimento_cd = df_merecimento_cd.withColumn(
-                f"Merecimento_CD_{medida}",
-                F.when(F.col(f"Total_Cia_{medida}") > 0,
-                    F.col(coluna_total) / F.col(f"Total_Cia_{medida}"))  # ← USAR coluna_total
-                .otherwise(0)
-            )
+    # Calcular percentual do CD dentro da Cia
+    w_total_cia = Window.partitionBy("grupo_de_necessidade")
+    
+    df_merecimento_cd = df_merecimento_cd.withColumn(
+        f"Total_Cia_{medida_cd}",
+        F.sum(F.col(f"Total_{medida_cd}")).over(w_total_cia)
+    )
+    
+    df_merecimento_cd = df_merecimento_cd.withColumn(
+        f"Merecimento_CD_{medida_cd}",
+        F.when(F.col(f"Total_Cia_{medida_cd}") > 0,
+            F.col(f"Total_{medida_cd}") / F.col(f"Total_Cia_{medida_cd}"))
+        .otherwise(0)
+    )
 
     df_merecimento_cd = (
         df_merecimento_cd
         .orderBy('cd_vinculo', 'grupo_de_necessidade')
         .dropDuplicates(subset=['cd_vinculo', 'grupo_de_necessidade'])
     )
-    print(f"✅ Merecimento CD calculado: {df_merecimento_cd.count():,} registros")
+    print(f"✅ Merecimento CD calculado: {df_merecimento_cd.count():,} registros (média aparada 90 dias)")
     return df_merecimento_cd
+
 
 # COMMAND ----------
 
 def calcular_merecimento_interno_cd(df: DataFrame, data_calculo: str, categoria: str) -> DataFrame:
     """
     Calcula a proporção interna de cada loja dentro do CD por grupo de necessidade.
+    Usa médias aparadas de 90 a 360 dias.
     Mantém colunas: Total_<medida> e Proporcao_Interna_<medida>.
     """
-    print(f"🔄 Calculando merecimento interno CD para categoria: {categoria}")
+    print(f"🔄 Calculando merecimento interno CD para categoria: {categoria} (médias aparadas 90-360 dias)")
     
     # Filtro pela data
     df_data_calculo = df.filter(F.col("DtAtual") == data_calculo)
     
-    # Lista de medidas
-    medidas_disponiveis = [
-        "Media90_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura", 
-        "Media270_Qt_venda_sem_ruptura", "Media360_Qt_venda_sem_ruptura",
-        "MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada180_Qt_venda_sem_ruptura",
-        "MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada360_Qt_venda_sem_ruptura"
-    ]
-    medidas = [m for m in medidas_disponiveis if m in df_data_calculo.columns]
+    # Lista de medidas aparadas disponíveis
+    medidas_aparadas = [f"MediaAparada{dias}_Qt_venda_sem_ruptura" for dias in JANELAS_MOVEIS_APARADAS]
+    medidas = [m for m in medidas_aparadas if m in df_data_calculo.columns]
+    
+    print(f"  📊 Medidas disponíveis: {medidas}")
     
     # Join com de-para filial-CD
     de_para_filial_cd = criar_de_para_filial_cd()
@@ -740,8 +742,9 @@ def calcular_merecimento_interno_cd(df: DataFrame, data_calculo: str, categoria:
             )
         )
 
-    print(f"✅ Merecimento interno CD calculado: {df_out.count():,} registros")
+    print(f"✅ Merecimento interno CD calculado: {df_out.count():,} registros (médias aparadas 90-360 dias)")
     return df_out
+
 
 # COMMAND ----------
 
@@ -749,26 +752,22 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
                               df_merecimento_interno: DataFrame) -> DataFrame:
     """
     Calcula o merecimento final: Merecimento_CD × Proporcao_Interna
+    Usa apenas médias aparadas de 90 a 360 dias.
     Retorna apenas CdFilial x grupo_de_necessidade com os merecimentos finais
     """
-    print("🔄 Calculando merecimento final...")
+    print("🔄 Calculando merecimento final (médias aparadas 90-360 dias)...")
     
-    medidas_disponiveis = [
-        "Media90_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura", 
-        "Media270_Qt_venda_sem_ruptura", "Media360_Qt_venda_sem_ruptura",
-        "MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada180_Qt_venda_sem_ruptura",
-        "MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada360_Qt_venda_sem_ruptura"
-    ]
+    # Medidas disponíveis (apenas médias aparadas)
+    medidas_aparadas = [f"MediaAparada{dias}_Qt_venda_sem_ruptura" for dias in JANELAS_MOVEIS_APARADAS]
     
     # 1. Preparar dados do merecimento CD (cd_vinculo x grupo_de_necessidade)
-    colunas_cd = ["cd_vinculo", "grupo_de_necessidade"]
-    for medida in medidas_disponiveis:
-        if f"Merecimento_CD_{medida}" in df_merecimento_cd.columns:
-            colunas_cd.append(f"Merecimento_CD_{medida}")
+    # CD usa apenas média aparada 90 dias
+    medida_cd = f"MediaAparada{JANELA_CD_MERECIMENTO}_Qt_venda_sem_ruptura"
+    colunas_cd = ["cd_vinculo", "grupo_de_necessidade", f"Merecimento_CD_{medida_cd}"]
     
     df_merecimento_cd_limpo = df_merecimento_cd.select(*colunas_cd)
     
-    # 2. Adicionar cd_vinculo ao merecimento interno (especificando qual coluna usar)
+    # 2. Adicionar cd_vinculo ao merecimento interno
     de_para_filial_cd = criar_de_para_filial_cd()
     df_merecimento_interno_com_cd = (
         df_merecimento_interno
@@ -791,17 +790,17 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
     )
     
     # 4. Calcular merecimento final (multiplicação)
-    for medida in medidas_disponiveis:
-        if (f"Merecimento_CD_{medida}" in df_merecimento_final.columns and 
-            f"Proporcao_Interna_{medida}" in df_merecimento_final.columns):
+    # Para cada medida aparada, multiplicar pelo merecimento CD (90 dias)
+    for medida in medidas_aparadas:
+        if f"Proporcao_Interna_{medida}" in df_merecimento_final.columns:
             df_merecimento_final = df_merecimento_final.withColumn(
                 f"Merecimento_Final_{medida}",
-                F.col(f"Merecimento_CD_{medida}") * F.col(f"Proporcao_Interna_{medida}")
+                F.col(f"Merecimento_CD_{medida_cd}") * F.col(f"Proporcao_Interna_{medida}")
             )
     
     # 5. Selecionar apenas colunas finais: CdFilial x grupo_de_necessidade
     colunas_finais = ["CdFilial", "grupo_de_necessidade"]
-    for medida in medidas_disponiveis:
+    for medida in medidas_aparadas:
         coluna_final = f"Merecimento_Final_{medida}"
         if coluna_final in df_merecimento_final.columns:
             colunas_finais.append(coluna_final)
@@ -814,7 +813,7 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
     # VALIDAÇÃO: Verificar se a multiplicação ainda soma 100% por grupo de necessidade
     print("🔍 Validando se a multiplicação dos dois níveis ainda soma 100%...")
     
-    for medida in medidas_disponiveis:
+    for medida in medidas_aparadas:
         coluna_final = f"Merecimento_Final_{medida}"
         if coluna_final in df_merecimento_final_limpo.columns:
             print(f"  Verificando medida: {medida}")
@@ -956,7 +955,7 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         print("🔄 Aplicando remoção de outliers das séries históricas...")
         
         # Definir filiais de atacado (exemplo - ajustar conforme necessário)
-        filiais_atacado = []  # Lista de filiais consideradas de atacado
+        filiais_atacado = FILIAIS_ATACADO  # Lista de filiais consideradas de atacado
         
         df_sem_outliers = remover_outliers_series_historicas(
             df_filtrado,
@@ -1060,7 +1059,7 @@ for categoria in categorias:
             .upper()
         )
         
-        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste1809"
+        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste1809_liq"
         
         print(f"💾 Salvando matriz de merecimento para: {categoria}")
         print(f"📊 Tabela: {nome_tabela}")

@@ -30,10 +30,9 @@ hoje = datetime.now() - timedelta(days=1)
 hoje_str = hoje.strftime("%Y-%m-%d")
 hoje_int = int(hoje.strftime("%Y%m%d"))
 
-GRUPOS_TESTE = ['LIQUIDIFICADORES ACIMA 1001 W._110 VOLTS                               ',
-                'LIQUIDIFICADORES ACIMA 1001 W._110V                                    ',
-                'LIQUIDIFICADORES ACIMA 1001 W._220 VOLTS                               ',
-                'LIQUIDIFICADORES ACIMA 1001 W._220V                                    ']
+GRUPOS_TESTE = ['LIQUIDIFICADORES ACIMA 1001 W._110',
+                'LIQUIDIFICADORES ACIMA 1001 W._220']
+                
 print(GRUPOS_TESTE)
 
 data_inicio = "2025-08-29"
@@ -72,7 +71,7 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     
     for categoria in categorias:
         try:
-            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_test1609"
+            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_LINHA_LEVE_teste1809_liq"
             df_matriz = spark.table(nome_tabela)
             
             matrizes[categoria] = df_matriz
@@ -209,10 +208,10 @@ df_proporcao_factual = (
 #df_proporcao_factual.limit(1).display()
 
 colunas = [
-    "Merecimento_Final_Media90_Qt_venda_sem_ruptura",
-    "Merecimento_Final_Media180_Qt_venda_sem_ruptura",
-    "Merecimento_Final_Media270_Qt_venda_sem_ruptura",
-    "Merecimento_Final_Media360_Qt_venda_sem_ruptura",
+    # "Merecimento_Final_Media90_Qt_venda_sem_ruptura",
+    # "Merecimento_Final_Media180_Qt_venda_sem_ruptura",
+    # "Merecimento_Final_Media270_Qt_venda_sem_ruptura",
+    # "Merecimento_Final_Media360_Qt_venda_sem_ruptura",
     "Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura",
     "Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura",
     "Merecimento_Final_MediaAparada270_Qt_venda_sem_ruptura",
@@ -237,10 +236,11 @@ for categoria in categorias_teste:
 
       .fillna(0.0, subset=[
             'Percentual_QtDemanda',
-            'Merecimento_Final_Media90_Qt_venda_sem_ruptura',
-            'Merecimento_Final_Media180_Qt_venda_sem_ruptura',
-            'Merecimento_Final_Media270_Qt_venda_sem_ruptura',
-            'Merecimento_Final_Media360_Qt_venda_sem_ruptura',])
+            # 'Merecimento_Final_Media90_Qt_venda_sem_ruptura',
+            # 'Merecimento_Final_Media180_Qt_venda_sem_ruptura',
+            # 'Merecimento_Final_Media270_Qt_venda_sem_ruptura',
+            # 'Merecimento_Final_Media360_Qt_venda_sem_ruptura',
+            ])
       .select(
             "CdFilial",
             "grupo_de_necessidade",
@@ -252,9 +252,6 @@ for categoria in categorias_teste:
             "PercMatrizNeogrid_median",
       )
   )
-
-
-  
 
   df_acuracia[categoria].limit(1).display()
 
@@ -286,7 +283,7 @@ def add_smape_components(df, pred_col, real_col=COL_REAL, peso_col=COL_PESO, lab
 
 # === Lista de colunas de predição alvo ===
 pred_cols_base = list(colunas)  # ["Merecimento_Final_Media90_...", ...]
-extras = ["PercMatrizNeogrid", "PercMatrizNeogrid_median"]
+extras = ["PercMatrizNeogrid"]#, "PercMatrizNeogrid_median"]
 # mantém só as extras que existem no DF
 def existing_pred_cols(df, base_cols, maybe_cols):
     present = [c for c in maybe_cols if c in df.columns]
@@ -354,7 +351,7 @@ for categoria in categorias_teste:
     df_tmp = (
         df_base
         .withColumn("merecimento_percentual",
-                    F.col("Merecimento_Final_Media360_Qt_venda_sem_ruptura"))
+                    F.col("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura"))
         .join(
             spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
             .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
@@ -505,10 +502,10 @@ for categoria in categorias_teste:
         .agg(
             F.sum("QtDemanda").alias("QtDemanda"),
             F.sum("Percentual_QtDemanda").alias("Percentual_QtDemanda"),
-            F.sum("Merecimento_Final_Media90_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media90_Qt_venda_sem_ruptura"),
-            F.sum("Merecimento_Final_Media180_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media180_Qt_venda_sem_ruptura"),
-            F.sum("Merecimento_Final_Media270_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media270_Qt_venda_sem_ruptura"),
-            F.sum("Merecimento_Final_Media360_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media360_Qt_venda_sem_ruptura"),
+            # F.sum("Merecimento_Final_Media90_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media90_Qt_venda_sem_ruptura"),
+            # F.sum("Merecimento_Final_Media180_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media180_Qt_venda_sem_ruptura"),
+            # F.sum("Merecimento_Final_Media270_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media270_Qt_venda_sem_ruptura"),
+            # F.sum("Merecimento_Final_Media360_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media360_Qt_venda_sem_ruptura"),
             F.sum("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura"),
             F.sum("Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura"),
             F.sum("Merecimento_Final_MediaAparada270_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada270_Qt_venda_sem_ruptura"),

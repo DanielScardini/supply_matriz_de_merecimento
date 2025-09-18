@@ -71,7 +71,7 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     
     for categoria in categorias:
         try:
-            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_teste1509"
+            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_online_teste0809"
             df_matriz = spark.table(nome_tabela)
             
             matrizes[categoria] = df_matriz
@@ -161,7 +161,7 @@ print(_row["inicio"], _row["fim"])
 w_grp = Window.partitionBy("grupo_de_necessidade")
 
 df_proporcao_factual = (
-    spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
+    spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4_online')
     .filter(F.col('DtAtual').between(inicio_janela, fim_janela))
     .fillna(0, subset=['deltaRuptura', 'QtMercadoria'])
     .withColumn("QtDemanda", F.col("QtMercadoria") + F.col("deltaRuptura"))

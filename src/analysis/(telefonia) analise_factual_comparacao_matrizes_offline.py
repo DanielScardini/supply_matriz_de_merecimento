@@ -71,7 +71,7 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     
     for categoria in categorias:
         try:
-            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_teste1009"
+            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_teste1809"
             df_matriz = spark.table(nome_tabela)
             
             matrizes[categoria] = df_matriz
@@ -187,10 +187,10 @@ df_proporcao_factual = (
 #df_proporcao_factual.limit(1).display()
 
 colunas = [
-    "Merecimento_Final_Media90_Qt_venda_sem_ruptura",
-    "Merecimento_Final_Media180_Qt_venda_sem_ruptura",
-    "Merecimento_Final_Media270_Qt_venda_sem_ruptura",
-    "Merecimento_Final_Media360_Qt_venda_sem_ruptura",
+    # "Merecimento_Final_Media90_Qt_venda_sem_ruptura",
+    # "Merecimento_Final_Media180_Qt_venda_sem_ruptura",
+    # "Merecimento_Final_Media270_Qt_venda_sem_ruptura",
+    # "Merecimento_Final_Media360_Qt_venda_sem_ruptura",
     "Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura",
     "Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura",
     "Merecimento_Final_MediaAparada270_Qt_venda_sem_ruptura",
@@ -216,10 +216,10 @@ for categoria in categorias_teste:
         )
         .fillna(0.0, subset=[
             'Percentual_QtDemanda',
-            'Merecimento_Final_Media90_Qt_venda_sem_ruptura',
-            'Merecimento_Final_Media180_Qt_venda_sem_ruptura',
-            'Merecimento_Final_Media270_Qt_venda_sem_ruptura',
-            'Merecimento_Final_Media360_Qt_venda_sem_ruptura',
+            # 'Merecimento_Final_Media90_Qt_venda_sem_ruptura',
+            # 'Merecimento_Final_Media180_Qt_venda_sem_ruptura',
+            # 'Merecimento_Final_Media270_Qt_venda_sem_ruptura',
+            # 'Merecimento_Final_Media360_Qt_venda_sem_ruptura',
         ])
         .select(
             "CdFilial",

@@ -120,11 +120,34 @@ REGRAS_AGRUPAMENTO = {
 # Configuração de parâmetros para detecção de outliers
 PARAMETROS_OUTLIERS = {
     "desvios_meses_atipicos": 2,  # Desvios para meses atípicos
-    "desvios_historico_cd": 2,     # Desvios para outliers históricos a nível CD
-    "desvios_historico_loja": 2,   # Desvios para outliers históricos a nível loja
+    "desvios_historico_cd": 3,     # Desvios para outliers históricos a nível CD
+    "desvios_historico_loja": 3,   # Desvios para outliers históricos a nível loja
     "desvios_atacado_cd": 1.5,     # Desvios para outliers CD em lojas de atacado
     "desvios_atacado_loja": 1.5    # Desvios para outliers loja em lojas de atacado
 }
+
+
+FILIAIS_ATACADO = [
+    1671,     # Petrolina - PE
+    17,       # Norte Shopping
+    1778,     # Shop Tacaruna - PE
+    293,      # Varginha - MG
+    1003,     # Shop Guarulhos - SP
+    1949,     # São Mateus - ES
+    1717,     # Fortaleza - CE
+    2383,     # Sobral - CE
+    590,      # Contagem - MG
+    1485,     # Sorocaba - SP
+    2103,     # Caruaru - PE
+    2059,     # Arcoverde - PE
+    520,      # Shop Bangu - RJ
+    4000,     # Berrini - SP
+    1157,     # Feira de Santana - BA
+    1764,     # Shop Moxuara - ES
+    1158,     # Catete - RJ
+    376,      # Ponte Nova - MG
+    242,      # Montes Claros - MG
+]
 
 # Configuração das janelas móveis
 JANELAS_MOVEIS = [90, 180, 270, 360]
@@ -167,7 +190,7 @@ def determinar_grupo_necessidade(categoria: str, df: DataFrame) -> DataFrame:
         # Cria grupo de necessidade combinando NmEspecieGerencial + "_" + DsVoltagem (nulls preenchidos com "")
         df_com_grupo = df.withColumn(
             "DsVoltagem_filled",
-            F.coalesce(F.col("DsVoltagem"), F.lit(""))
+            F.substring(F.coalesce(F.col("DsVoltagem"), F.lit("")), 1, 3)
         ).withColumn(
             "grupo_de_necessidade",
             F.concat(
@@ -211,8 +234,10 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-07-01") -> Data
     print(f"🔄 Carregando dados para categoria: {categoria}")
 
     df_base = (
-        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3_online')
+        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4_online')
         .filter(F.col("NmAgrupamentoDiretoriaSetor") == categoria)
+        ###
+        .filter(F.col("NmEspecieGerencial") == 'LIQUIDIFICADORES ACIMA 1001 W.')
         .filter(F.col("DtAtual") >= data_inicio)
         .withColumn(
             "year_month",
@@ -630,7 +655,7 @@ def criar_de_para_filial_cd() -> DataFrame:
     print("🔄 Criando de-para filial → CD...")
     
     df_base = (
-        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3_online')
+        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4_online')
         .filter(F.col("DtAtual") == "2025-08-01")
         .filter(F.col("CdSku").isNotNull())
         .withColumn("cd_secundario",
@@ -899,7 +924,7 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
     # 1. Carregar todas as filiais ativas
     print("📊 Passo 1: Carregando todas as filiais ativas...")
     df_filiais = (
-        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3_online')
+        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4_online')
         .select("CdFilial")
         .distinct()
         .filter(F.col("CdFilial").isNotNull())
@@ -913,7 +938,7 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
     # 2. Carregar todos os SKUs que existem na data especificada
     print(f"📊 Passo 2: Carregando SKUs existentes em {data_calculo}...")
     df_skus_data = (
-        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v3_online')
+        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4_online')
         .filter(F.col("DtAtual") == data_calculo)
         .select("CdSku")
         .distinct()
@@ -999,7 +1024,7 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         print("🔄 Aplicando remoção de outliers das séries históricas...")
         
         # Definir filiais de atacado (exemplo - ajustar conforme necessário)
-        filiais_atacado = [1001, 1002, 1003]  # Lista de filiais consideradas de atacado
+        filiais_atacado = FILIAIS_ATACADO
         
         df_sem_outliers = remover_outliers_series_historicas(
             df_filtrado,
@@ -1103,7 +1128,7 @@ for categoria in categorias:
             .upper()
         )
         
-        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_online_teste1809"
+        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_online_teste1809_liq"
         
         print(f"💾 Salvando matriz de merecimento para: {categoria}")
         print(f"📊 Tabela: {nome_tabela}")
