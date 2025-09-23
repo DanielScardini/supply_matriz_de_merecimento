@@ -17,7 +17,7 @@ import os
 # Inicialização do Spark
 spark = SparkSession.builder.appName("salvar_matrizes_merecimento_unificadas").getOrCreate()
 
-hoje = datetime.now() - timedelta(days=1)
+hoje = datetime.now()
 hoje_str = hoje.strftime("%Y-%m-%d")
 hoje_int = int(hoje.strftime("%Y%m%d"))
 
@@ -28,11 +28,18 @@ hoje_int = int(hoje.strftime("%Y%m%d"))
 
 # COMMAND ----------
 
+# MAGIC %sql SELECT * FROM databox.bcg_comum.supply_matriz_merecimento_de_telas_teste2309
+# MAGIC
+# MAGIC WHERE CdFilial = 4000 OR CdFilial = 1000
+# MAGIC
+
+# COMMAND ----------
+
 # Configuração das tabelas por categoria e canal
 TABELAS_MATRIZ_MERECIMENTO = {
     "DIRETORIA DE TELAS": {
-        "offline": "databox.bcg_comum.supply_matriz_merecimento_telas_offline",
-        "online": "databox.bcg_comum.supply_matriz_merecimento_telas_online",
+        "offline": "databox.bcg_comum.supply_matriz_merecimento_de_telas_offline",
+        "online": "databox.bcg_comum.supply_matriz_merecimento_de_telas_online",
         "grupo_apelido": "telas"
     },
     "DIRETORIA TELEFONIA CELULAR": {
@@ -58,7 +65,7 @@ TABELAS_MATRIZ_MERECIMENTO = {
 }
 
 # Configuração da pasta de saída
-PASTA_OUTPUT = "/mnt/datalake/output/matrizes_merecimento"
+PASTA_OUTPUT = "/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/output"
 
 # Configuração da coluna de merecimento por categoria
 COLUNAS_MERECIMENTO = {
@@ -70,7 +77,16 @@ COLUNAS_MERECIMENTO = {
 }
 
 # Configuração de filtros por categoria
-FILTROS_GRUPO_NECESSIDADE = {
+FILTROS_GRUPO_NECESSIDADE_REMOCAO = {
+    "DIRETORIA DE TELAS": ["FORA DE LINHA", "SEM_GN"],
+    "DIRETORIA TELEFONIA CELULAR": ["FORA DE LINHA", "SEM_GN"],
+    "DIRETORIA LINHA BRANCA": ["FORA DE LINHA", "SEM_GN"],
+    "DIRETORIA LINHA LEVE": ["FORA DE LINHA", "SEM_GN"],
+    "DIRETORIA INFO/GAMES": ["FORA DE LINHA", "SEM_GN"]
+}
+
+# Configuração de filtros por categoria
+FILTROS_GRUPO_NECESSIDADE_SELECAO = {
     "DIRETORIA DE TELAS": ["FORA DE LINHA", "SEM_GN"],
     "DIRETORIA TELEFONIA CELULAR": ["FORA DE LINHA", "SEM_GN"],
     "DIRETORIA LINHA BRANCA": ["FORA DE LINHA", "SEM_GN"],
@@ -83,8 +99,8 @@ print(f"  • Categorias suportadas: {list(TABELAS_MATRIZ_MERECIMENTO.keys())}")
 print(f"  • Pasta de saída: {PASTA_OUTPUT}")
 print(f"  • Data de exportação: {hoje_str}")
 
-# MAGIC %md
-# MAGIC ## 2. Funções de Tratamento
+%md
+## 2. Funções de Tratamento
 
 # COMMAND ----------
 
@@ -111,7 +127,8 @@ def processar_matriz_merecimento(categoria: str, canal: str) -> DataFrame:
     # Configurações específicas
     tabela = TABELAS_MATRIZ_MERECIMENTO[categoria][canal]
     coluna_merecimento = COLUNAS_MERECIMENTO[categoria]
-    filtros_grupo = FILTROS_GRUPO_NECESSIDADE[categoria]
+    filtros_grupo_remocao = FILTROS_GRUPO_NECESSIDADE_REMOCAO[categoria]
+    filtros_grupo_selecao = FILTROS_GRUPO_NECESSIDADE_SELECAO[categoria]
     
     print(f"  • Tabela: {tabela}")
     print(f"  • Coluna merecimento: {coluna_merecimento}")
@@ -125,6 +142,7 @@ def processar_matriz_merecimento(categoria: str, canal: str) -> DataFrame:
             (100 * F.col(coluna_merecimento)).alias(f"Merecimento_Percentual_{canal}_raw")
         )
         .filter(~F.col("grupo_de_necessidade").isin(filtros_grupo))
+        
         .join(
             spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
             .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
