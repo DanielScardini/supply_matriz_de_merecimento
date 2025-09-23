@@ -11,15 +11,17 @@ Esta pasta contém o **núcleo do sistema de cálculo da matriz de merecimento**
 ```
 1. 📋 PREPARAÇÃO DE DADOS
    ↓
-2. 🔍 DETECÇÃO DE OUTLIERS
+2. 🔄 ESPELHAMENTO DE FILIAIS
    ↓
-3. 📊 CÁLCULO DE MEDIDAS CENTRAIS
+3. 🔍 DETECÇÃO DE OUTLIERS
    ↓
-4. 🏢 MEREIMENTO A NÍVEL CD
+4. 📊 CÁLCULO DE MEDIDAS CENTRAIS
    ↓
-5. 🏪 MEREIMENTO INTERNO AO CD
+5. 🏢 MEREIMENTO A NÍVEL CD
    ↓
-6. 🎯 MEREIMENTO FINAL
+6. 🏪 MEREIMENTO INTERNO AO CD
+   ↓
+7. 🎯 MEREIMENTO FINAL
 ```
 
 ### 📁 **Componentes Principais**
@@ -72,7 +74,17 @@ participacao_interna = calcular_merecimento_interno_cd(medidas)
 merecimento_final = calcular_merecimento_final(merecimento_cd, participacao_interna)
 ```
 
-### 4️⃣ **Sistema Offline** ↔ **Sistema Online**
+### 4️⃣ **Espelhamento de Filiais** → **Dados Base**
+
+```python
+# Carrega de-para de espelhamento do Excel
+df_espelhamento = carregar_de_para_espelhamento()
+
+# Aplica espelhamento nos dados base
+df_base_com_espelhamento = aplicar_espelhamento_filiais(df_base, df_espelhamento)
+```
+
+### 5️⃣ **Sistema Offline** ↔ **Sistema Online**
 
 ```python
 # OFFLINE: Processamento completo para análises
@@ -184,6 +196,26 @@ TIPOS_MEDIDAS = [
 - **Média**: Captura tendências gerais, mas sensível a outliers
 - **Mediana**: Robusta a outliers, mas pode perder informação
 - **Média Aparada**: Equilibra robustez e informação (remove extremos)
+
+### 🔄 **Espelhamento de Filiais**
+
+```python
+# Arquivo de configuração
+ARQUIVO_ESPELHAMENTO = "/mnt/datalake/governanca_supply_inputs_matriz_merecimento.xlsx"
+ABA_ESPELHAMENTO = "espelhamento_lojas"
+
+# Colunas do de-para
+COLUNAS_ESPELHAMENTO = {
+    "referencia": "CdFilial_referência",
+    "espelhada": "CdFilial_espelhada"
+}
+```
+
+**🎯 Motivo do Espelhamento**:
+- **Filiais Novas**: Não possuem histórico de vendas suficiente
+- **Espelhamento**: Copia dados de uma filial de referência similar
+- **Aplicação**: Antes do cálculo de merecimento para incluir demanda estimada
+- **Fonte**: Arquivo Excel de governança para flexibilidade de configuração
 
 ## 🔄 Modos de Operação
 

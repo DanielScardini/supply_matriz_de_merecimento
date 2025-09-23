@@ -243,6 +243,117 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-07-01") -> Data
 
 # COMMAND ----------
 
+def carregar_de_para_espelhamento() -> DataFrame:
+    """
+    Carrega o de-para de espelhamento de filiais do arquivo Excel.
+    
+    Returns:
+        DataFrame com colunas: CdFilial_referencia, CdFilial_espelhada
+    """
+    print("🔄 Carregando de-para de espelhamento de filiais...")
+    
+    try:
+        # Carrega o arquivo Excel usando pandas
+        df_pandas = pd.read_excel(
+            "/mnt/datalake/governanca_supply_inputs_matriz_merecimento.xlsx",
+            sheet_name="espelhamento_lojas"
+        )
+        
+        # Verifica se o DataFrame não está vazio
+        if df_pandas.empty:
+            print("ℹ️ Aba 'espelhamento_lojas' está vazia")
+            return spark.createDataFrame([], "CdFilial_referencia INT, CdFilial_espelhada INT")
+        
+        # Renomeia as colunas para padronizar
+        df_pandas = df_pandas.rename(columns={
+            "CdFilial_referência": "CdFilial_referencia",
+            "CdFilial_espelhada": "CdFilial_espelhada"
+        })
+        
+        # Remove linhas com valores nulos
+        df_pandas = df_pandas.dropna(subset=["CdFilial_referencia", "CdFilial_espelhada"])
+        
+        # Converte para DataFrame do Spark
+        df_espelhamento = spark.createDataFrame(df_pandas)
+        
+        print(f"✅ De-para de espelhamento carregado:")
+        print(f"  • Total de mapeamentos: {df_espelhamento.count():,}")
+        
+        if df_espelhamento.count() > 0:
+            print("  • Exemplos de espelhamento:")
+            df_espelhamento.show(5, truncate=False)
+        
+        return df_espelhamento
+        
+    except FileNotFoundError:
+        print("⚠️ Arquivo 'governanca_supply_inputs_matriz_merecimento.xlsx' não encontrado")
+        print("  • Continuando sem espelhamento...")
+        return spark.createDataFrame([], "CdFilial_referencia INT, CdFilial_espelhada INT")
+        
+    except Exception as e:
+        print(f"⚠️ Erro ao carregar de-para de espelhamento: {str(e)}")
+        print("  • Continuando sem espelhamento...")
+        return spark.createDataFrame([], "CdFilial_referencia INT, CdFilial_espelhada INT")
+
+# COMMAND ----------
+
+def aplicar_espelhamento_filiais(df_base: DataFrame, df_espelhamento: DataFrame) -> DataFrame:
+    """
+    Aplica o espelhamento de filiais nos dados base.
+    
+    Para cada filial espelhada, copia os dados da filial de referência.
+    
+    Args:
+        df_base: DataFrame com dados base
+        df_espelhamento: DataFrame com de-para de espelhamento
+        
+    Returns:
+        DataFrame com dados espelhados aplicados
+    """
+    if df_espelhamento.count() == 0:
+        print("ℹ️ Nenhum espelhamento para aplicar")
+        return df_base
+    
+    print("🔄 Aplicando espelhamento de filiais...")
+    
+    # Contar registros antes do espelhamento
+    registros_antes = df_base.count()
+    
+    # Criar dados espelhados
+    df_espelhados = (
+        df_base
+        .join(
+            df_espelhamento,
+            df_base.CdFilial == df_espelhamento.CdFilial_referencia,
+            "inner"
+        )
+        .select(
+            df_espelhamento.CdFilial_espelhada.alias("CdFilial"),
+            *[col for col in df_base.columns if col != "CdFilial"]
+        )
+    )
+    
+    # Unir dados originais com dados espelhados
+    df_com_espelhamento = df_base.union(df_espelhados)
+    
+    # Contar registros após espelhamento
+    registros_depois = df_com_espelhamento.count()
+    registros_espelhados = registros_depois - registros_antes
+    
+    print(f"✅ Espelhamento aplicado:")
+    print(f"  • Registros antes: {registros_antes:,}")
+    print(f"  • Registros após: {registros_depois:,}")
+    print(f"  • Registros espelhados: {registros_espelhados:,}")
+    
+    # Mostrar exemplos de filiais espelhadas
+    if registros_espelhados > 0:
+        print("  • Exemplos de filiais espelhadas:")
+        df_espelhados.select("CdFilial").distinct().show(5, truncate=False)
+    
+    return df_com_espelhamento
+
+# COMMAND ----------
+
 def carregar_mapeamentos_produtos(categoria: str) -> tuple:
     """
     Carrega os arquivos de mapeamento de produtos para a categoria específica.
@@ -935,15 +1046,20 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         df_base = carregar_dados_base(categoria, data_inicio)
         df_base.cache()
 
-        # 2. Carregamento dos mapeamentos
+        # 2. Carregamento e aplicação do espelhamento de filiais
+        df_espelhamento = carregar_de_para_espelhamento()
+        df_base_com_espelhamento = aplicar_espelhamento_filiais(df_base, df_espelhamento)
+        df_base_com_espelhamento.cache()
+
+        # 3. Carregamento dos mapeamentos
         de_para_modelos, de_para_gemeos = carregar_mapeamentos_produtos(categoria)  
 
-        # 3. Aplicação dos mapeamentos
+        # 4. Aplicação dos mapeamentos
         df_com_mapeamentos = aplicar_mapeamentos_produtos(
-            df_base, categoria, de_para_modelos, de_para_gemeos
+            df_base_com_espelhamento, categoria, de_para_modelos, de_para_gemeos
         )
         
-        # 4. Definição do grupo_de_necessidade
+        # 5. Definição do grupo_de_necessidade
         df_com_grupo = determinar_grupo_necessidade(categoria, df_com_mapeamentos)
         # df_com_grupo = (
         #     df_com_grupo
@@ -953,13 +1069,13 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         # )
         df_com_grupo.cache()
         
-        # 5. Detecção de outliers
+        # 6. Detecção de outliers
         df_stats, df_meses_atipicos = detectar_outliers_meses_atipicos(df_com_grupo, categoria)
         
-        # 6. Filtragem de meses atípicos
+        # 7. Filtragem de meses atípicos
         df_filtrado = filtrar_meses_atipicos(df_com_grupo, df_meses_atipicos)
         
-        # 7. Remoção de outliers das séries históricas
+        # 8. Remoção de outliers das séries históricas
         print("=" * 80)
         print("🔄 Aplicando remoção de outliers das séries históricas...")
         
@@ -974,23 +1090,23 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
             filiais_atacado=filiais_atacado
         )
         
-        # 8. Cálculo das medidas centrais
+        # 9. Cálculo das medidas centrais
         df_com_medidas = calcular_medidas_centrais_com_medias_aparadas(df_sem_outliers)
         
-        # 9. Consolidação final
+        # 10. Consolidação final
         df_final = consolidar_medidas(df_com_medidas)
         
-        # 10. Cálculo de merecimento por CD e filial
+        # 11. Cálculo de merecimento por CD e filial
         print("=" * 80)
         print("🔄 Iniciando cálculo de merecimento...")
         
-        # 10.1 Merecimento a nível CD
+        # 11.1 Merecimento a nível CD
         df_merecimento_cd = calcular_merecimento_cd(df_final, data_calculo, categoria)
         
-        # 10.2 Merecimento interno ao CD
+        # 11.2 Merecimento interno ao CD
         df_merecimento_interno = calcular_merecimento_interno_cd(df_final, data_calculo, categoria)
         
-        # 10.3 Merecimento final
+        # 11.3 Merecimento final
         df_merecimento_final = calcular_merecimento_final(df_merecimento_cd, df_merecimento_interno)
 
         # Criar o esqueleto
