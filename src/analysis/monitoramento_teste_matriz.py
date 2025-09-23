@@ -26,10 +26,10 @@ hoje_int = int(hoje.strftime("%Y%m%d"))
 GRUPOS_TESTE = ['Telef pp', 'TV 50 ALTO P', 'TV 55 ALTO P']
 print(GRUPOS_TESTE)
 
-data_inicio = "2025-08-29"
-fim_baseline = "2025-09-05"
+data_inicio = "2025-09-01"
+fim_baseline = "2025-09-08"
 
-inicio_teste = "2025-09-05"
+inicio_teste = "2025-09-08"
 
 categorias_teste = ['TELAS', 'TELEFONIA']
 
@@ -1090,10 +1090,6 @@ if dfs_porte_all:
 
 # COMMAND ----------
 
-df_estoque_loja_porte_regiao[categoria].limit(10).display()
-
-# COMMAND ----------
-
 from pyspark.sql import functions as F
 
 df_analise_porte_demanda = {}
@@ -1710,7 +1706,7 @@ create_dde_comparison_visualizations(df_estoque_loja_porte_regiao, df_comparacao
 
 # COMMAND ----------
 
-janela_factual = (datetime.now() - timedelta(days=8)).strftime("%Y-%m-%d")
+janela_factual = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
 
 print(janela_factual)
 
@@ -2400,6 +2396,18 @@ for categoria in categorias_teste:
 
 # COMMAND ----------
 
+# Dois dataframes dentro do dict
+df_telas = produtos_do_teste_offline['TELAS']
+df_telefonia = produtos_do_teste_offline['TELEFONIA']
+
+# Criar lista com todos os CdSku
+codigos = (
+    [row['CdSku'] for row in df_telas.select('CdSku').collect()] +
+    [row['CdSku'] for row in df_telefonia.select('CdSku').collect()]
+)
+
+# COMMAND ----------
+
 
 !pip install openpyxl
 
@@ -2410,14 +2418,19 @@ from pyspark.sql import Window
 # Leitura e transformações
 df_envios_manuais_TELAS_teste = (
     spark.createDataFrame(
-        pd.read_excel(
-            '/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/dados_analise/(DRP)_INDICADOR_DE_PROGRAMAÇÕES_20250916134135.xlsx',
-            skiprows=1
+        pd.read_csv(
+            '/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/dados_analise/(DRP)_INDICADOR_DE_PROGRAMAÇÕES_20250922132602.csv',
+            #skiprows=1,
+            delimiter=';'
         )
     )
-    .filter(F.col("DIR_OPERACIONAL") != 'ONLINE')
-    .filter(F.col("DATA_PROGRAMACAO") > 20250905)
-    .filter(F.col("ATIVIDADE_PRINCIPAL") == 'L')
+    # .filter(F.col("DIR_OPERACIONAL") != 'ONLINE')
+    # .filter(F.col("DATA_PROGRAMACAO") > 20250905)
+    .filter(
+        F.col("CODIGO").isin(codigos)
+        )
+    .withColumn("QUANTIDADE_PEDIDA", 
+        F.regexp_replace(F.col("QUANTIDADE_PEDIDA"), r"[^0-9\-]", ".").cast("long"))
     .groupBy("DIRETORIA", "TIPO DE PEDIDO")
     .agg(
         F.sum("QUANTIDADE_PEDIDA").alias("QtdPedida")

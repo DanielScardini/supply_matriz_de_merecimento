@@ -71,7 +71,7 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     
     for categoria in categorias:
         try:
-            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_online_teste0809"
+            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_online_teste1809_atacado"
             df_matriz = spark.table(nome_tabela)
             
             matrizes[categoria] = df_matriz
@@ -216,10 +216,10 @@ for categoria in categorias_teste:
         )
         .fillna(0.0, subset=[
             'Percentual_QtDemanda',
-            'Merecimento_Final_Media90_Qt_venda_sem_ruptura',
-            'Merecimento_Final_Media180_Qt_venda_sem_ruptura',
-            'Merecimento_Final_Media270_Qt_venda_sem_ruptura',
-            'Merecimento_Final_Media360_Qt_venda_sem_ruptura',
+            # 'Merecimento_Final_Media90_Qt_venda_sem_ruptura',
+            # 'Merecimento_Final_Media180_Qt_venda_sem_ruptura',
+            # 'Merecimento_Final_Media270_Qt_venda_sem_ruptura',
+            # 'Merecimento_Final_Media360_Qt_venda_sem_ruptura',
         ])
         .select(
             "CdFilial",

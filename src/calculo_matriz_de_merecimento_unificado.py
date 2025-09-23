@@ -123,10 +123,11 @@ FILIAIS_ATACADO = [
     1003,     # Shop Guarulhos - SP
     1949,     # São Mateus - ES
     1717,     # Fortaleza - CE
-    2383,     # Sobral - CE
+    2383,     # Pacajus - CE
+    1634,     # Shop Pantanal - MT
     590,      # Contagem - MG
     1485,     # Sorocaba - SP
-    2103,     # Caruaru - PE
+    2103,     # Caruaru 2 - PE
     2059,     # Arcoverde - PE
     520,      # Shop Bangu - RJ
     4000,     # Berrini - SP
@@ -135,6 +136,14 @@ FILIAIS_ATACADO = [
     1158,     # Catete - RJ
     376,      # Ponte Nova - MG
     242,      # Montes Claros - MG
+    2038,     # Caruarua - PE
+    1639,     # Vitoria - ES
+    445,      # Ubá - MG
+    1679,     # Fortaleza 2 - CE
+    1697,     # Mossoró - RN
+    39,       # Copacabana 4 - RJ
+    1811,     # Shop da Ilha - MA
+    461,      # Barra Shopping - RJ
 ]
 
 print("✅ Configurações carregadas:")
@@ -218,7 +227,7 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-07-01") -> Data
     df_base = (
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
         .filter(F.col("NmAgrupamentoDiretoriaSetor") == categoria)
-        .filter(F.col("NmEspecieGerencial") == 'LIQUIDIFICADORES ACIMA 1001 W.')
+        .filter(F.col("NmEspecieGerencial").isin('LIQUIDIFICADORES ACIMA 1001 W.'))
         .filter(F.col("DtAtual") >= data_inicio)
         .withColumn(
             "year_month",
@@ -1048,7 +1057,7 @@ for categoria in categorias:
         df_matriz_final = executar_calculo_matriz_merecimento_completo(
             categoria=categoria,
             data_inicio="2024-07-01",
-            data_calculo="2025-08-30"
+            data_calculo="2025-09-18"
         )
         
         # Salva em tabela específica da categoria
@@ -1059,7 +1068,7 @@ for categoria in categorias:
             .upper()
         )
         
-        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste1809_liq"
+        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste1909_liq"
         
         print(f"💾 Salvando matriz de merecimento para: {categoria}")
         print(f"📊 Tabela: {nome_tabela}")

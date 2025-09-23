@@ -122,7 +122,7 @@ PARAMETROS_OUTLIERS = {
     "desvios_meses_atipicos": 2,  # Desvios para meses atípicos
     "desvios_historico_cd": 3,     # Desvios para outliers históricos a nível CD
     "desvios_historico_loja": 3,   # Desvios para outliers históricos a nível loja
-    "desvios_atacado_cd": 1.5,     # Desvios para outliers CD em lojas de atacado
+    "desvios_atacado_cd": 3,     # Desvios para outliers CD em lojas de atacado
     "desvios_atacado_loja": 1.5    # Desvios para outliers loja em lojas de atacado
 }
 
@@ -135,10 +135,11 @@ FILIAIS_ATACADO = [
     1003,     # Shop Guarulhos - SP
     1949,     # São Mateus - ES
     1717,     # Fortaleza - CE
-    2383,     # Sobral - CE
+    2383,     # Pacajus - CE
+    1634,     # Shop Pantanal - MT
     590,      # Contagem - MG
     1485,     # Sorocaba - SP
-    2103,     # Caruaru - PE
+    2103,     # Caruaru 2 - PE
     2059,     # Arcoverde - PE
     520,      # Shop Bangu - RJ
     4000,     # Berrini - SP
@@ -147,13 +148,21 @@ FILIAIS_ATACADO = [
     1158,     # Catete - RJ
     376,      # Ponte Nova - MG
     242,      # Montes Claros - MG
+    2038,     # Caruarua - PE
+    1639,     # Vitoria - ES
+    445,      # Ubá - MG
+    1679,     # Fortaleza 2 - CE
+    1697,     # Mossoró - RN
+    39,       # Copacabana 4 - RJ
+    1811,     # Shop da Ilha - MA
+    461,      # Barra Shopping - RJ
 ]
 
 # Configuração das janelas móveis
-JANELAS_MOVEIS = [90, 180, 270, 360]
+JANELAS_MOVEIS = [30, 60, 90, 180, 360]
 
 # Configuração das médias aparadas (percentual de corte)
-PERCENTUAL_CORTE_MEDIAS_APARADAS = 0.02  # 2% de corte superior e inferior
+PERCENTUAL_CORTE_MEDIAS_APARADAS = 0.01  # 2% de corte superior e inferior
 
 print("✅ Configurações carregadas:")
 print(f"  • Categorias suportadas: {list(REGRAS_AGRUPAMENTO.keys())}")
@@ -235,9 +244,8 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-07-01") -> Data
 
     df_base = (
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4_online')
+        .filter(F.col("NmEspecieGerencial").isin('LIQUIDIFICADORES ACIMA 1001 W.'))
         .filter(F.col("NmAgrupamentoDiretoriaSetor") == categoria)
-        ###
-        .filter(F.col("NmEspecieGerencial") == 'LIQUIDIFICADORES ACIMA 1001 W.')
         .filter(F.col("DtAtual") >= data_inicio)
         .withColumn(
             "year_month",
@@ -1117,7 +1125,7 @@ for categoria in categorias:
         df_matriz_final = executar_calculo_matriz_merecimento_completo(
             categoria=categoria,
             data_inicio="2024-07-01",
-            data_calculo="2025-08-30"
+            data_calculo="2025-09-15"
         )
         
         # Salva em tabela específica da categoria
@@ -1128,7 +1136,7 @@ for categoria in categorias:
             .upper()
         )
         
-        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_online_teste1809_liq"
+        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_online_teste1909_liq"
         
         print(f"💾 Salvando matriz de merecimento para: {categoria}")
         print(f"📊 Tabela: {nome_tabela}")

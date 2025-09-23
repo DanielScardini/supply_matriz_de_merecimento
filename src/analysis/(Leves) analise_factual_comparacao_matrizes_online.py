@@ -70,7 +70,7 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     
     for categoria in categorias:
         try:
-            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_online_teste1809"
+            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_online_teste1809_liq"
             df_matriz = spark.table(nome_tabela)
             
             matrizes[categoria] = df_matriz
@@ -207,13 +207,13 @@ df_proporcao_factual = (
 #df_proporcao_factual.limit(1).display()
 
 colunas = [
-    "Merecimento_Final_Media90_Qt_venda_sem_ruptura",
-    "Merecimento_Final_Media180_Qt_venda_sem_ruptura",
-    "Merecimento_Final_Media270_Qt_venda_sem_ruptura",
-    "Merecimento_Final_Media360_Qt_venda_sem_ruptura",
+    # "Merecimento_Final_Media90_Qt_venda_sem_ruptura",
+    # "Merecimento_Final_Media180_Qt_venda_sem_ruptura",
+    # "Merecimento_Final_Media270_Qt_venda_sem_ruptura",
+    # "Merecimento_Final_Media360_Qt_venda_sem_ruptura",
     "Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura",
     "Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura",
-    "Merecimento_Final_MediaAparada270_Qt_venda_sem_ruptura",
+    # "Merecimento_Final_MediaAparada270_Qt_venda_sem_ruptura",
     "Merecimento_Final_MediaAparada360_Qt_venda_sem_ruptura",
 ]
 
@@ -235,10 +235,11 @@ for categoria in categorias_teste:
 
       .fillna(0.0, subset=[
             'Percentual_QtDemanda',
-            'Merecimento_Final_Media90_Qt_venda_sem_ruptura',
-            'Merecimento_Final_Media180_Qt_venda_sem_ruptura',
-            'Merecimento_Final_Media270_Qt_venda_sem_ruptura',
-            'Merecimento_Final_Media360_Qt_venda_sem_ruptura',])
+            # 'Merecimento_Final_Media90_Qt_venda_sem_ruptura',
+            # 'Merecimento_Final_Media180_Qt_venda_sem_ruptura',
+            # 'Merecimento_Final_Media270_Qt_venda_sem_ruptura',
+            # 'Merecimento_Final_Media360_Qt_venda_sem_ruptura',
+            ])
       .select(
             "CdFilial",
             "grupo_de_necessidade",
@@ -352,7 +353,7 @@ for categoria in categorias_teste:
     df_tmp = (
         df_base
         .withColumn("merecimento_percentual",
-                    F.col("Merecimento_Final_Media270_Qt_venda_sem_ruptura"))
+                    F.col("Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura"))
         .join(
             spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
             .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
@@ -503,13 +504,13 @@ for categoria in categorias_teste:
         .agg(
             F.sum("QtDemanda").alias("QtDemanda"),
             F.sum("Percentual_QtDemanda").alias("Percentual_QtDemanda"),
-            F.sum("Merecimento_Final_Media90_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media90_Qt_venda_sem_ruptura"),
-            F.sum("Merecimento_Final_Media180_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media180_Qt_venda_sem_ruptura"),
-            F.sum("Merecimento_Final_Media270_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media270_Qt_venda_sem_ruptura"),
-            F.sum("Merecimento_Final_Media360_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media360_Qt_venda_sem_ruptura"),
+            # F.sum("Merecimento_Final_Media90_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media90_Qt_venda_sem_ruptura"),
+            # F.sum("Merecimento_Final_Media180_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media180_Qt_venda_sem_ruptura"),
+            # F.sum("Merecimento_Final_Media270_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media270_Qt_venda_sem_ruptura"),
+            # F.sum("Merecimento_Final_Media360_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media360_Qt_venda_sem_ruptura"),
             F.sum("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura"),
             F.sum("Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura"),
-            F.sum("Merecimento_Final_MediaAparada270_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada270_Qt_venda_sem_ruptura"),
+            # F.sum("Merecimento_Final_MediaAparada270_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada270_Qt_venda_sem_ruptura"),
             F.sum("Merecimento_Final_MediaAparada360_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada360_Qt_venda_sem_ruptura"),
             F.sum("PercMatrizNeogrid").alias("PercMatrizNeogrid"),
             F.sum("PercMatrizNeogrid_median").alias("PercMatrizNeogrid_median")
@@ -641,7 +642,7 @@ from pyspark.sql import functions as F
 
 COL_REAL = "Percentual_QtDemanda"
 COL_PESO = "QtDemanda"
-METRICA_Y = "Merecimento_Final_Media360_Qt_venda_sem_ruptura"  # ajuste aqui
+METRICA_Y = "Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura"  # ajuste aqui
 
 def _axis_range(arr, pad=0.04, min0=True):
     arr = np.asarray(arr, dtype=float)

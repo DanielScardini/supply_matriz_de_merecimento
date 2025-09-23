@@ -71,7 +71,7 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     
     for categoria in categorias:
         try:
-            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_LINHA_LEVE_teste1809_liq"
+            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_LINHA_LEVE_teste1909_liq"
             df_matriz = spark.table(nome_tabela)
             
             matrizes[categoria] = df_matriz
@@ -259,6 +259,103 @@ for categoria in categorias_teste:
 
 # MAGIC %md
 # MAGIC ## Cálculo de sMAPE e wsMAPE
+
+# COMMAND ----------
+
+from pyspark.sql import functions as F
+from functools import reduce
+
+pdf = pd.read_csv(
+    "/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/dados_analise/matriz_merecimento_leves_liq1000w+_teste1809_offline (1).csv",
+    delimiter=";",
+    encoding="latin1",
+    decimal=",",     # vírgula -> ponto decimal
+    thousands="."    # remove separador de milhar
+)
+
+# renomeia para evitar espaço no nome
+pdf = pdf.rename(columns={"Calculo supply": "Calculo_supply"})
+
+df_dados_felipe = (
+    spark.createDataFrame(pdf[["grupo_de_necessidade",
+                               "CdFilial",
+                               "Merecimento_Percentual_offline",
+                               "Calculo_supply"]])
+    .distinct()
+)
+
+df_acuracia['LINHA_LEVE'] = (
+    df_acuracia['LINHA_LEVE'] 
+    .join(
+        df_dados_felipe,
+        on=["grupo_de_necessidade", "CdFilial"],
+        how="left"
+    )
+)
+
+
+# === Constantes ===
+COL_REAL = "Percentual_QtDemanda"
+COL_PESO = "QtDemanda"
+
+# === Função utilitária: adiciona componentes sMAPE/WSMAPE para uma coluna de predição ===
+def add_smape_components(df, pred_col, real_col=COL_REAL, peso_col=COL_PESO, label=None):
+    label = label or pred_col
+    denom = F.abs(F.col(pred_col)) + F.abs(F.col(real_col))
+    smape_comp = F.when(denom == 0, F.lit(0.0)) \
+                  .otherwise(200.0 * F.abs(F.col(pred_col) - F.col(real_col)) / denom)
+    return (
+        df
+        .withColumn(f"sMAPE_comp_{label}", smape_comp)
+        .withColumn(f"WSMAPE_comp_{label}", smape_comp * F.col(peso_col))
+    )
+
+# === Lista de colunas de predição alvo ===
+pred_cols_base = ['Merecimento_Percentual_offline', 'Calculo_supply']
+extras = ["PercMatrizNeogrid"]#, "PercMatrizNeogrid_median"]
+# mantém só as extras que existem no DF
+def existing_pred_cols(df, base_cols, maybe_cols):
+    present = [c for c in maybe_cols if c in df.columns]
+    return base_cols + present
+
+# === Calcula e agrega métricas por categoria e modelo ===
+metrics_all = None  # DataFrame final com métricas
+
+for categoria in categorias_teste:
+    df_cat = df_acuracia[categoria]
+
+    pred_cols = existing_pred_cols(df_cat, pred_cols_base, extras)
+
+    # Adiciona componentes sMAPE/WSMAPE para todas as colunas de previsão
+    df_with_comps = reduce(
+        lambda acc, c: add_smape_components(acc, c, label=c),
+        pred_cols,
+        df_cat
+    )
+
+    # Agrega métricas por modelo: sMAPE médio e WSMAPE ponderado por QtDemanda
+    # sMAPE = média dos componentes; WSMAPE = sum(WSMAPE_comp)/sum(peso)
+    aggs = []
+    for c in pred_cols:
+        smape_col = f"sMAPE_comp_{c}"
+        wsmape_col = f"WSMAPE_comp_{c}"
+        aggs.append(
+            F.struct(
+                F.lit(categoria).alias("categoria"),
+                F.lit(c).alias("modelo"),
+                F.round(F.avg(F.col(smape_col)), 4).alias("sMAPE"),
+                F.round(F.sum(F.col(wsmape_col)) / F.sum(F.col(COL_PESO)), 4).alias("WSMAPE")
+            ).alias(c)  # nome temporário
+        )
+
+    # Converte a lista de structs em linhas
+    metrics_cat = df_with_comps.select(*aggs)
+    # explode para linhas: uma por modelo
+    metrics_cat = metrics_cat.select(F.explode(F.array(*metrics_cat.columns)).alias("m")).select("m.*")
+
+    metrics_all = metrics_cat if metrics_all is None else metrics_all.unionByName(metrics_cat)
+# Mostrar as métricas agregadas por categoria e modelo
+metrics_all.orderBy("categoria", "modelo").display()
 
 # COMMAND ----------
 
