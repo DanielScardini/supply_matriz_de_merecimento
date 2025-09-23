@@ -227,7 +227,7 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-07-01") -> Data
     df_base = (
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
         .filter(F.col("NmAgrupamentoDiretoriaSetor") == categoria)
-        .filter(F.col("NmEspecieGerencial").isin('LIQUIDIFICADORES ACIMA 1001 W.'))
+        #.filter(F.col("NmEspecieGerencial").isin('LIQUIDIFICADORES ACIMA 1001 W.'))
         .filter(F.col("DtAtual") >= data_inicio)
         .withColumn(
             "year_month",
@@ -251,11 +251,13 @@ def carregar_de_para_espelhamento() -> DataFrame:
         DataFrame com colunas: CdFilial_referencia, CdFilial_espelhada
     """
     print("🔄 Carregando de-para de espelhamento de filiais...")
+
+    !pip install openpyxl
     
     try:
         # Carrega o arquivo Excel usando pandas
         df_pandas = pd.read_excel(
-            "/mnt/datalake/governanca_supply_inputs_matriz_merecimento.xlsx",
+            "/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/planilha_governanca/governanca_supply_inputs_matriz_merecimento.xlsx",
             sheet_name="espelhamento_lojas"
         )
         
@@ -1064,7 +1066,12 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         # df_com_grupo = (
         #     df_com_grupo
         #     .filter(
-        #         F.col("grupo_de_necessidade").isin('Telef pp', 'TV 50 ALTO P', 'TV 55 ALTO P')
+        #         F.col("grupo_de_necessidade").isin
+        (
+            #'Telef pp', 
+            #'TV 50 ALTO P', 
+            'TV 55 ALTO P'
+            )
         #     )
         # )
         df_com_grupo.cache()
@@ -1155,10 +1162,10 @@ print("=" * 80)
 
 # Lista de todas as categorias disponíveis
 categorias = [
-    #"DIRETORIA DE TELAS",
+    "DIRETORIA DE TELAS",
     #"DIRETORIA TELEFONIA CELULAR", 
     #"DIRETORIA DE LINHA BRANCA",
-    "DIRETORIA LINHA LEVE",
+    #"DIRETORIA LINHA LEVE",
     # "DIRETORIA INFO/PERIFERICOS"
 ]
 
@@ -1173,7 +1180,7 @@ for categoria in categorias:
         df_matriz_final = executar_calculo_matriz_merecimento_completo(
             categoria=categoria,
             data_inicio="2024-07-01",
-            data_calculo="2025-09-18"
+            data_calculo="2025-09-21"
         )
         
         # Salva em tabela específica da categoria
@@ -1184,7 +1191,7 @@ for categoria in categorias:
             .upper()
         )
         
-        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste1909_liq"
+        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste2309"
         
         print(f"💾 Salvando matriz de merecimento para: {categoria}")
         print(f"📊 Tabela: {nome_tabela}")
