@@ -129,30 +129,40 @@ def processar_matriz_merecimento(categoria: str, canal: str) -> DataFrame:
     # Configurações específicas
     tabela = TABELAS_MATRIZ_MERECIMENTO[categoria][canal]
     coluna_merecimento = COLUNAS_MERECIMENTO[categoria]
+    flag_tipo = FLAG_SELECAO_REMOCAO.get(categoria, "REMOÇÃO")  # Padrão é remoção
     filtros_grupo_remocao = FILTROS_GRUPO_NECESSIDADE_REMOCAO[categoria]
     filtros_grupo_selecao = FILTROS_GRUPO_NECESSIDADE_SELECAO[categoria]
     
     print(f"  • Tabela: {tabela}")
     print(f"  • Coluna merecimento: {coluna_merecimento}")
+    print(f"  • Tipo de filtro: {flag_tipo}")
     print(f"  • Filtros grupo para remoção: {filtros_grupo_remocao}")
     print(f"  • Filtros grupo para seleção: {filtros_grupo_selecao}")
-
     
-    # Carregamento dos dados
-    df_raw = (
+    # Carregamento dos dados base
+    df_base = (
         spark.table(tabela)
         .select(
             "CdFilial", "CdSku", "grupo_de_necessidade",
             (100 * F.col(coluna_merecimento)).alias(f"Merecimento_Percentual_{canal}_raw")
         )
-        .filter(~F.col("grupo_de_necessidade").isin(filtros_grupo_remocao))
-        .filter(F.col("grupo_de_necessidade").isin(filtros_grupo_selecao))
-
-        .join(
-            spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
-            .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
-            on="CdFilial", how="left"
-        )
+    )
+    
+    # Aplicar filtro baseado no flag
+    if flag_tipo == "SELEÇÃO":
+        # SELEÇÃO: manter apenas os grupos da lista de seleção
+        df_raw = df_base.filter(F.col("grupo_de_necessidade").isin(filtros_grupo_selecao))
+        print(f"  • Aplicado filtro de SELEÇÃO: mantendo apenas {filtros_grupo_selecao}")
+    else:
+        # REMOÇÃO: remover os grupos da lista de remoção
+        df_raw = df_base.filter(~F.col("grupo_de_necessidade").isin(filtros_grupo_remocao))
+        print(f"  • Aplicado filtro de REMOÇÃO: removendo {filtros_grupo_remocao}")
+    
+    # Join com dados de filiais
+    df_raw = df_raw.join(
+        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+        .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
+        on="CdFilial", how="left"
     )
     
     # Normalização por SKU
