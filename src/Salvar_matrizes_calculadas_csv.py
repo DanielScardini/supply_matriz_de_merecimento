@@ -28,40 +28,33 @@ hoje_int = int(hoje.strftime("%Y%m%d"))
 
 # COMMAND ----------
 
-# MAGIC %sql SELECT * FROM databox.bcg_comum.supply_matriz_merecimento_de_telas_teste2309
-# MAGIC
-# MAGIC WHERE CdFilial = 4000 OR CdFilial = 1000
-# MAGIC
-
-# COMMAND ----------
-
 # Configuração das tabelas por categoria e canal
 TABELAS_MATRIZ_MERECIMENTO = {
     "DIRETORIA DE TELAS": {
-        "offline": "databox.bcg_comum.supply_matriz_merecimento_de_telas_offline",
-        "online": "databox.bcg_comum.supply_matriz_merecimento_de_telas_online",
+        "offline": "databox.bcg_comum.supply_matriz_merecimento_de_telas_teste1009",
+        "online": "databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste0809",
         "grupo_apelido": "telas"
     },
     "DIRETORIA TELEFONIA CELULAR": {
-        "offline": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_offline",
-        "online": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online",
+        "offline": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste1009",
+        "online": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste0809",
         "grupo_apelido": "telefonia"
     },
-    "DIRETORIA LINHA BRANCA": {
-        "offline": "databox.bcg_comum.supply_matriz_merecimento_linha_branca_offline",
-        "online": "databox.bcg_comum.supply_matriz_merecimento_linha_branca_online",
-        "grupo_apelido": "linha_branca"
-    },
+    # "DIRETORIA LINHA BRANCA": {
+    #     "offline": "databox.bcg_comum.supply_matriz_merecimento_linha_branca_offline",
+    #     "online": "databox.bcg_comum.supply_matriz_merecimento_linha_branca_online",
+    #     "grupo_apelido": "linha_branca"
+    # },
     "DIRETORIA LINHA LEVE": {
-        "offline": "databox.bcg_comum.supply_matriz_merecimento_linha_leve_offline",
-        "online": "databox.bcg_comum.supply_matriz_merecimento_linha_leve_online",
-        "grupo_apelido": "linha_leve"
+        "offline": "databox.bcg_comum.supply_matriz_merecimento_LINHA_LEVE_teste1909_liq",
+        "online": "databox.bcg_comum.supply_matriz_merecimento_LINHA_LEVE_teste1909_liq",
+        "grupo_apelido": "liquidificador"
     },
-    "DIRETORIA INFO/GAMES": {
-        "offline": "databox.bcg_comum.supply_matriz_merecimento_info_games_offline",
-        "online": "databox.bcg_comum.supply_matriz_merecimento_info_games_online",
-        "grupo_apelido": "info_games"
-    }
+    # "DIRETORIA INFO/GAMES": {
+    #     "offline": "databox.bcg_comum.supply_matriz_merecimento_info_games_offline",
+    #     "online": "databox.bcg_comum.supply_matriz_merecimento_info_games_online",
+    #     "grupo_apelido": "info_games"
+    # }
 }
 
 # Configuração da pasta de saída
@@ -86,6 +79,12 @@ FILTROS_GRUPO_NECESSIDADE_REMOCAO = {
 }
 
 # Configuração de filtros por categoria
+FLAG_SELECAO_REMOCAO = {
+    "DIRETORIA DE TELAS": "SELEÇÃO",
+    "DIRETORIA TELEFONIA CELULAR": "SELEÇÃO",
+    "DIRETORIA LINHA LEVE":  "SELEÇÃO",
+}
+
 FILTROS_GRUPO_NECESSIDADE_SELECAO = {
     "DIRETORIA DE TELAS": ["FORA DE LINHA", "SEM_GN"],
     "DIRETORIA TELEFONIA CELULAR": ["FORA DE LINHA", "SEM_GN"],
@@ -99,8 +98,11 @@ print(f"  • Categorias suportadas: {list(TABELAS_MATRIZ_MERECIMENTO.keys())}")
 print(f"  • Pasta de saída: {PASTA_OUTPUT}")
 print(f"  • Data de exportação: {hoje_str}")
 
-%md
-## 2. Funções de Tratamento
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 2. Funções de Tratamento
 
 # COMMAND ----------
 
@@ -132,7 +134,9 @@ def processar_matriz_merecimento(categoria: str, canal: str) -> DataFrame:
     
     print(f"  • Tabela: {tabela}")
     print(f"  • Coluna merecimento: {coluna_merecimento}")
-    print(f"  • Filtros grupo: {filtros_grupo}")
+    print(f"  • Filtros grupo para remoção: {filtros_grupo_remocao}")
+    print(f"  • Filtros grupo para seleção: {filtros_grupo_selecao}")
+
     
     # Carregamento dos dados
     df_raw = (
@@ -141,8 +145,9 @@ def processar_matriz_merecimento(categoria: str, canal: str) -> DataFrame:
             "CdFilial", "CdSku", "grupo_de_necessidade",
             (100 * F.col(coluna_merecimento)).alias(f"Merecimento_Percentual_{canal}_raw")
         )
-        .filter(~F.col("grupo_de_necessidade").isin(filtros_grupo))
-        
+        .filter(~F.col("grupo_de_necessidade").isin(filtros_grupo_remocao))
+        .filter(F.col("grupo_de_necessidade").isin(filtros_grupo_selecao))
+
         .join(
             spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
             .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
@@ -322,4 +327,4 @@ def exportar_todas_categorias(data_exportacao: str = None) -> Dict[str, Dict[str
 # COMMAND ----------
 
 # Descomente para executar exportação para todas as categorias
-# resultados = exportar_todas_categorias()
+resultados = exportar_todas_categorias()
