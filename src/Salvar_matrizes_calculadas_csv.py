@@ -1,9 +1,18 @@
 # Databricks notebook source
+# MAGIC %md
+# MAGIC # Salvamento de Matrizes de Merecimento - Sistema Unificado
+# MAGIC
+# MAGIC Este notebook implementa o salvamento unificado de matrizes de merecimento para todas as categorias,
+# MAGIC com tratamento automático para canais offline e online.
+
+# COMMAND ----------
+
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F, Window as W
 from datetime import datetime, timedelta, date
 import pandas as pd
 from typing import List, Optional, Dict, Any
+import os
 
 # Inicialização do Spark
 spark = SparkSession.builder.appName("salvar_matrizes_merecimento_unificadas").getOrCreate()
@@ -12,220 +21,287 @@ hoje = datetime.now() - timedelta(days=1)
 hoje_str = hoje.strftime("%Y-%m-%d")
 hoje_int = int(hoje.strftime("%Y%m%d"))
 
-categorias_list = [
-    "DIRETORIA DE TELAS",
-    "DIRETORIA TELEFONIA CELULAR", 
-    #...
-    ]
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 1. Configuração das Tabelas por Categoria
 
 # COMMAND ----------
 
-# from pyspark.sql import functions as F, Window as W
+# Configuração das tabelas por categoria e canal
+TABELAS_MATRIZ_MERECIMENTO = {
+    "DIRETORIA DE TELAS": {
+        "offline": "databox.bcg_comum.supply_matriz_merecimento_telas_offline",
+        "online": "databox.bcg_comum.supply_matriz_merecimento_telas_online",
+        "grupo_apelido": "telas"
+    },
+    "DIRETORIA TELEFONIA CELULAR": {
+        "offline": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_offline",
+        "online": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online",
+        "grupo_apelido": "telefonia"
+    },
+    "DIRETORIA LINHA BRANCA": {
+        "offline": "databox.bcg_comum.supply_matriz_merecimento_linha_branca_offline",
+        "online": "databox.bcg_comum.supply_matriz_merecimento_linha_branca_online",
+        "grupo_apelido": "linha_branca"
+    },
+    "DIRETORIA LINHA LEVE": {
+        "offline": "databox.bcg_comum.supply_matriz_merecimento_linha_leve_offline",
+        "online": "databox.bcg_comum.supply_matriz_merecimento_linha_leve_online",
+        "grupo_apelido": "linha_leve"
+    },
+    "DIRETORIA INFO/GAMES": {
+        "offline": "databox.bcg_comum.supply_matriz_merecimento_info_games_offline",
+        "online": "databox.bcg_comum.supply_matriz_merecimento_info_games_online",
+        "grupo_apelido": "info_games"
+    }
+}
 
-# ---------- OFFLINE ----------
-df_offline = (
-    spark.table('databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste1009')
-    .select(
-        "CdFilial","NmPorteLoja","NmRegiaoGeografica","CdSku","grupo_de_necessidade",
-        (100*F.col("Merecimento_Final_Media90_Qt_venda_sem_ruptura")).alias("Merecimento_Percentual_offline_raw")
-    )
-    #.filter(F.col("CdSku")==5286301)
-    .filter(F.col("grupo_de_necessidade")!="FORA DE LINHA")
-    .filter(F.col("grupo_de_necessidade")!="SEM_GN")
-    .join(
-        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
-        .select("CdFilial","NmFilial"),
-        on="CdFilial", how="left"
-    )
-)
+# Configuração da pasta de saída
+PASTA_OUTPUT = "/mnt/datalake/output/matrizes_merecimento"
 
-win_off = W.partitionBy("CdSku")
-tot_off = F.sum("Merecimento_Percentual_offline_raw").over(win_off)
+# Configuração da coluna de merecimento por categoria
+COLUNAS_MERECIMENTO = {
+    "DIRETORIA DE TELAS": "Merecimento_Final_Media90_Qt_venda_sem_ruptura",
+    "DIRETORIA TELEFONIA CELULAR": "Merecimento_Final_Media90_Qt_venda_sem_ruptura",
+    "DIRETORIA LINHA BRANCA": "Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura",
+    "DIRETORIA LINHA LEVE": "Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura",
+    "DIRETORIA INFO/GAMES": "Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura"
+}
 
-df_offline_norm = (
-    df_offline
-    .withColumn(
-        "Merecimento_Percentual_offline",
-        F.round(F.when(tot_off>0, F.col("Merecimento_Percentual_offline_raw")*(100.0/tot_off)).otherwise(0.0), 3)
-    )
-)
+# Configuração de filtros por categoria
+FILTROS_GRUPO_NECESSIDADE = {
+    "DIRETORIA DE TELAS": ["FORA DE LINHA", "SEM_GN"],
+    "DIRETORIA TELEFONIA CELULAR": ["FORA DE LINHA", "SEM_GN"],
+    "DIRETORIA LINHA BRANCA": ["FORA DE LINHA", "SEM_GN"],
+    "DIRETORIA LINHA LEVE": ["FORA DE LINHA", "SEM_GN"],
+    "DIRETORIA INFO/GAMES": ["FORA DE LINHA", "SEM_GN"]
+}
 
-# linhas normalizadas
-df_offline_norm.drop("Merecimento_Percentual_offline_raw").display()
+print("✅ Configurações carregadas:")
+print(f"  • Categorias suportadas: {list(TABELAS_MATRIZ_MERECIMENTO.keys())}")
+print(f"  • Pasta de saída: {PASTA_OUTPUT}")
+print(f"  • Data de exportação: {hoje_str}")
 
-# # conferência raw vs normalizada
-# (
-#     df_offline_norm.groupBy("CdSku")
-#     .agg(
-#         F.round(F.sum("Merecimento_Percentual_offline_raw"),2).alias("Soma_Raw"),
-#         F.round(F.sum("Merecimento_Percentual_offline"),2).alias("Soma_Normalizada")
-#     )
-# ).display()
-
-
-
-# COMMAND ----------
-
-
-# ---------- ONLINE ----------
-df_online = (
-    spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste0809')
-    .select(
-        "CdFilial","CdSku","grupo_de_necessidade",
-        (100*F.col("Merecimento_Final_Media90_Qt_venda_sem_ruptura")).alias("Merecimento_Percentual_online_raw")
-    )
-    .filter(F.col("grupo_de_necessidade")!="FORA DE LINHA")
-    .filter(F.col("grupo_de_necessidade")!="SEM_GN")
-    .join(
-        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
-        .select("CdFilial","NmFilial","NmPorteLoja","NmRegiaoGeografica"),
-        on="CdFilial", how="left"
-    )
-)
-
-win_on = W.partitionBy("CdSku")
-tot_on = F.sum("Merecimento_Percentual_online_raw").over(win_on)
-
-df_online_norm = (
-    df_online
-    .withColumn(
-        "Merecimento_Percentual_online",
-        F.round(F.when(tot_on>0, F.col("Merecimento_Percentual_online_raw")*(100.0/tot_on)).otherwise(0.0), 3)
-    )
-)
-
-# linhas normalizadas
-df_online_norm.drop("Merecimento_Percentual_online_raw").display()
-
-# # # conferência raw vs normalizada
-# # (
-# #     df_online_norm.groupBy("CdSku")
-# #     .agg(
-# #         F.round(F.sum("Merecimento_Percentual_online_raw"),3).alias("Soma_Raw"),
-# #         F.round(F.sum("Merecimento_Percentual_online"),3).alias("Soma_Normalizada")
-# #     )
-# # ).display()
+# MAGIC %md
+# MAGIC ## 2. Funções de Tratamento
 
 # COMMAND ----------
 
-
-# ---------- ONLINE ----------
-df_online = (
-    spark.table('databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste0809')
-    .select(
-        "CdFilial","CdSku","grupo_de_necessidade",
-        (100*F.col("Merecimento_Final_Media90_Qt_venda_sem_ruptura")).alias("Merecimento_Percentual_online_raw")
+def processar_matriz_merecimento(categoria: str, canal: str) -> DataFrame:
+    """
+    Processa a matriz de merecimento para uma categoria e canal específicos.
+    
+    Args:
+        categoria: Categoria da diretoria
+        canal: Canal (offline ou online)
+        
+    Returns:
+        DataFrame processado com merecimento normalizado
+    """
+    print(f"🔄 Processando matriz para: {categoria} - {canal}")
+    
+    # Validação dos parâmetros
+    if categoria not in TABELAS_MATRIZ_MERECIMENTO:
+        raise ValueError(f"Categoria '{categoria}' não suportada. Categorias válidas: {list(TABELAS_MATRIZ_MERECIMENTO.keys())}")
+    
+    if canal not in ["offline", "online"]:
+        raise ValueError(f"Canal '{canal}' não suportado. Canais válidos: ['offline', 'online']")
+    
+    # Configurações específicas
+    tabela = TABELAS_MATRIZ_MERECIMENTO[categoria][canal]
+    coluna_merecimento = COLUNAS_MERECIMENTO[categoria]
+    filtros_grupo = FILTROS_GRUPO_NECESSIDADE[categoria]
+    
+    print(f"  • Tabela: {tabela}")
+    print(f"  • Coluna merecimento: {coluna_merecimento}")
+    print(f"  • Filtros grupo: {filtros_grupo}")
+    
+    # Carregamento dos dados
+    df_raw = (
+        spark.table(tabela)
+        .select(
+            "CdFilial", "CdSku", "grupo_de_necessidade",
+            (100 * F.col(coluna_merecimento)).alias(f"Merecimento_Percentual_{canal}_raw")
+        )
+        .filter(~F.col("grupo_de_necessidade").isin(filtros_grupo))
+        .join(
+            spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+            .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
+            on="CdFilial", how="left"
+        )
     )
-    .filter(F.col("grupo_de_necessidade")!="FORA DE LINHA")
-    .filter(F.col("grupo_de_necessidade")!="SEM_GN")
-    .join(
-        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
-        .select("CdFilial","NmFilial","NmPorteLoja","NmRegiaoGeografica"),
-        on="CdFilial", how="left"
+    
+    # Normalização por SKU
+    window_sku = W.partitionBy("CdSku")
+    total_sku = F.sum(f"Merecimento_Percentual_{canal}_raw").over(window_sku)
+    
+    df_normalizado = (
+        df_raw
+        .withColumn(
+            f"Merecimento_Percentual_{canal}",
+            F.round(
+                F.when(total_sku > 0, F.col(f"Merecimento_Percentual_{canal}_raw") * (100.0 / total_sku))
+                .otherwise(0.0), 
+                3
+            )
+        )
+        .drop(f"Merecimento_Percentual_{canal}_raw")
     )
-)
-
-win_on = W.partitionBy("CdSku")
-tot_on = F.sum("Merecimento_Percentual_online_raw").over(win_on)
-
-df_online_norm = (
-    df_online
-    .withColumn(
-        "Merecimento_Percentual_online",
-        F.round(F.when(tot_on>0, F.col("Merecimento_Percentual_online_raw")*(100.0/tot_on)).otherwise(0.0), 3)
-    )
-)
-
-# linhas normalizadas
-df_online_norm.drop("Merecimento_Percentual_online_raw").display()
-
-# # conferência raw vs normalizada
-# (
-#     df_online_norm.groupBy("CdSku")
-#     .agg(
-#         F.round(F.sum("Merecimento_Percentual_online_raw"),2).alias("Soma_Raw"),
-#         F.round(F.sum("Merecimento_Percentual_online"),2).alias("Soma_Normalizada")
-#     )
-# ).display()
+    
+    print(f"✅ Matriz processada:")
+    print(f"  • Total de registros: {df_normalizado.count():,}")
+    print(f"  • SKUs únicos: {df_normalizado.select('CdSku').distinct().count():,}")
+    print(f"  • Filiais únicas: {df_normalizado.select('CdFilial').distinct().count():,}")
+    
+    return df_normalizado
 
 # COMMAND ----------
 
-
-# ---------- OFFLINE ----------
-df_offline = (
-    spark.table('databox.bcg_comum.supply_matriz_merecimento_linha_leve_teste1909_liq')
-    .select(
-        "CdFilial","CdSku","grupo_de_necessidade",
-        (100*F.col("Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura")).alias("Merecimento_Percentual_offline_raw")
+def salvar_matriz_csv(df: DataFrame, categoria: str, canal: str, data_exportacao: str = None) -> str:
+    """
+    Salva a matriz de merecimento em arquivo CSV.
+    
+    Args:
+        df: DataFrame com a matriz processada
+        categoria: Categoria da diretoria
+        canal: Canal (offline ou online)
+        data_exportacao: Data de exportação (padrão: hoje)
+        
+    Returns:
+        Caminho do arquivo salvo
+    """
+    if data_exportacao is None:
+        data_exportacao = hoje_str
+    
+    # Configurações específicas
+    grupo_apelido = TABELAS_MATRIZ_MERECIMENTO[categoria]["grupo_apelido"]
+    
+    # Nome do arquivo
+    nome_arquivo = f"matriz_de_merecimento_{grupo_apelido}_{data_exportacao}_{canal}.csv"
+    caminho_completo = f"{PASTA_OUTPUT}/{nome_arquivo}"
+    
+    print(f"💾 Salvando matriz em CSV:")
+    print(f"  • Arquivo: {nome_arquivo}")
+    print(f"  • Caminho: {caminho_completo}")
+    
+    # Salvar como CSV
+    (
+        df
+        .coalesce(1)  # Força um único arquivo
+        .write
+        .mode("overwrite")
+        .option("header", "true")
+        .csv(caminho_completo)
     )
-    .filter(F.col("grupo_de_necessidade").isin('LIQUIDIFICADORES ACIMA 1001 W._110', 'LIQUIDIFICADORES ACIMA 1001 W._220'))
-    .join(
-        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
-        .select("CdFilial","NmFilial","NmPorteLoja","NmRegiaoGeografica"),
-        on="CdFilial", how="left"
-    )
-)
-
-win_on = W.partitionBy("CdSku")
-tot_on = F.sum("Merecimento_Percentual_offline_raw").over(win_on)
-
-df_offline_norm = (
-    df_offline
-    .withColumn(
-        "Merecimento_Percentual_offline",
-        F.round(F.when(tot_on>0, F.col("Merecimento_Percentual_offline_raw")*(100.0/tot_on)).otherwise(0.0), 3)
-    )
-)
-
-# linhas normalizadas
-df_offline_norm.drop("Merecimento_Percentual_offline_raw").display()
-
-# conferência raw vs normalizada
-(
-    df_offline_norm.groupBy("CdSku")
-    .agg(
-        F.round(F.sum("Merecimento_Percentual_offline_raw"),3).alias("Soma_Raw"),
-        F.round(F.sum("Merecimento_Percentual_offline"),3).alias("Soma_Normalizada")
-    )
-)#.display()
+    
+    print(f"✅ Arquivo salvo com sucesso!")
+    
+    return caminho_completo
 
 # COMMAND ----------
 
+def executar_exportacao_completa(categoria: str, data_exportacao: str = None) -> Dict[str, str]:
+    """
+    Executa a exportação completa para uma categoria (offline + online).
+    
+    Args:
+        categoria: Categoria da diretoria
+        data_exportacao: Data de exportação (padrão: hoje)
+        
+    Returns:
+        Dicionário com caminhos dos arquivos salvos
+    """
+    print(f"🚀 Iniciando exportação completa para: {categoria}")
+    print("=" * 80)
+    
+    arquivos_salvos = {}
+    
+    try:
+        # Processar canal offline
+        print("📊 Processando canal OFFLINE...")
+        df_offline = processar_matriz_merecimento(categoria, "offline")
+        caminho_offline = salvar_matriz_csv(df_offline, categoria, "offline", data_exportacao)
+        arquivos_salvos["offline"] = caminho_offline
+        
+        # Processar canal online
+        print("\n📊 Processando canal ONLINE...")
+        df_online = processar_matriz_merecimento(categoria, "online")
+        caminho_online = salvar_matriz_csv(df_online, categoria, "online", data_exportacao)
+        arquivos_salvos["online"] = caminho_online
+        
+        print("\n" + "=" * 80)
+        print("✅ Exportação completa finalizada!")
+        print(f"📁 Arquivos salvos:")
+        print(f"  • OFFLINE: {arquivos_salvos['offline']}")
+        print(f"  • ONLINE: {arquivos_salvos['online']}")
+        
+        return arquivos_salvos
+        
+    except Exception as e:
+        print(f"❌ Erro na exportação: {str(e)}")
+        raise
 
-# ---------- OFFLINE ----------
-df_online = (
-    spark.table('databox.bcg_comum.supply_matriz_merecimento_linha_leve_online_teste1809_liq')
-    .select(
-        "CdFilial","CdSku","grupo_de_necessidade",
-        (100*F.col("Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura")).alias("Merecimento_Percentual_online_raw")
-    )
-    .filter(F.col("grupo_de_necessidade").isin('LIQUIDIFICADORES ACIMA 1001 W._110', 'LIQUIDIFICADORES ACIMA 1001 W._220'))
-    .join(
-        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
-        .select("CdFilial","NmFilial","NmPorteLoja","NmRegiaoGeografica"),
-        on="CdFilial", how="left"
-    )
-)
+# COMMAND ----------
 
-win_on = W.partitionBy("CdSku")
-tot_on = F.sum("Merecimento_Percentual_online_raw").over(win_on)
+# MAGIC %md
+# MAGIC ## 3. Execução das Exportações
 
-df_online_norm = (
-    df_online
-    .withColumn(
-        "Merecimento_Percentual_online",
-        F.round(F.when(tot_on>0, F.col("Merecimento_Percentual_online_raw")*(100.0/tot_on)).otherwise(0.0), 3)
-    )
-)
+# COMMAND ----------
 
-# linhas normalizadas
-df_online_norm.drop("Merecimento_Percentual_online_raw").display()
+# Exemplo de uso para uma categoria específica
+# categoria_teste = "DIRETORIA DE TELAS"
+# arquivos = executar_exportacao_completa(categoria_teste)
 
-# conferência raw vs normalizada
-(
-    df_online_norm.groupBy("CdSku")
-    .agg(
-        F.round(F.sum("Merecimento_Percentual_online_raw"),3).alias("Soma_Raw"),
-        F.round(F.sum("Merecimento_Percentual_online"),3).alias("Soma_Normalizada")
-    )
-)#.display()
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 4. Exportação para Todas as Categorias
+
+# COMMAND ----------
+
+def exportar_todas_categorias(data_exportacao: str = None) -> Dict[str, Dict[str, str]]:
+    """
+    Exporta matrizes para todas as categorias suportadas.
+    
+    Args:
+        data_exportacao: Data de exportação (padrão: hoje)
+        
+    Returns:
+        Dicionário com arquivos salvos por categoria e canal
+    """
+    print("🚀 Iniciando exportação para TODAS as categorias")
+    print("=" * 80)
+    
+    resultados = {}
+    
+    for categoria in TABELAS_MATRIZ_MERECIMENTO.keys():
+        print(f"\n📊 Processando categoria: {categoria}")
+        print("-" * 60)
+        
+        try:
+            arquivos_categoria = executar_exportacao_completa(categoria, data_exportacao)
+            resultados[categoria] = arquivos_categoria
+            
+        except Exception as e:
+            print(f"❌ Erro ao processar {categoria}: {str(e)}")
+            resultados[categoria] = {"erro": str(e)}
+    
+    print("\n" + "=" * 80)
+    print("📋 RESUMO FINAL:")
+    print("=" * 80)
+    
+    for categoria, arquivos in resultados.items():
+        if "erro" in arquivos:
+            print(f"❌ {categoria}: ERRO - {arquivos['erro']}")
+        else:
+            print(f"✅ {categoria}:")
+            print(f"   • OFFLINE: {arquivos['offline']}")
+            print(f"   • ONLINE: {arquivos['online']}")
+    
+    return resultados
+
+# COMMAND ----------
+
+# Descomente para executar exportação para todas as categorias
+# resultados = exportar_todas_categorias()
