@@ -269,6 +269,7 @@ def carregar_de_para_espelhamento() -> DataFrame:
         DataFrame com colunas: CdFilial_referencia, CdFilial_espelhada
     """
 
+    # noqa: E999
     !pip install openpyxl
     
     print("🔄 Carregando de-para de espelhamento de filiais...")
@@ -322,7 +323,8 @@ def aplicar_espelhamento_filiais(df_base: DataFrame, df_espelhamento: DataFrame)
     """
     Aplica o espelhamento de filiais nos dados base.
     
-    Para cada filial espelhada, copia os dados da filial de referência.
+    Para cada filial espelhada, remove os dados existentes e substitui pelos dados 
+    da filial de referência.
     
     Args:
         df_base: DataFrame com dados base
@@ -340,7 +342,18 @@ def aplicar_espelhamento_filiais(df_base: DataFrame, df_espelhamento: DataFrame)
     # Contar registros antes do espelhamento
     registros_antes = df_base.count()
     
-    # Criar dados espelhados
+    # Obter lista de filiais que serão espelhadas
+    filiais_espelhadas = [row.CdFilial_espelhada for row in df_espelhamento.select("CdFilial_espelhada").distinct().collect()]
+    
+    print(f"  • Filiais que serão espelhadas: {filiais_espelhadas}")
+    
+    # Remover dados existentes das filiais que serão espelhadas
+    df_sem_espelhadas = df_base.filter(~F.col("CdFilial").isin(filiais_espelhadas))
+    
+    registros_removidos = registros_antes - df_sem_espelhadas.count()
+    print(f"  • Registros removidos das filiais espelhadas: {registros_removidos:,}")
+    
+    # Criar dados espelhados (copiando da filial de referência)
     df_espelhados = (
         df_base
         .join(
@@ -354,17 +367,18 @@ def aplicar_espelhamento_filiais(df_base: DataFrame, df_espelhamento: DataFrame)
         )
     )
     
-    # Unir dados originais com dados espelhados
-    df_com_espelhamento = df_base.union(df_espelhados)
+    # Unir dados sem as filiais espelhadas com os novos dados espelhados
+    df_com_espelhamento = df_sem_espelhadas.union(df_espelhados)
     
     # Contar registros após espelhamento
     registros_depois = df_com_espelhamento.count()
-    registros_espelhados = registros_depois - registros_antes
+    registros_espelhados = df_espelhados.count()
     
     print(f"✅ Espelhamento aplicado:")
     print(f"  • Registros antes: {registros_antes:,}")
+    print(f"  • Registros removidos: {registros_removidos:,}")
+    print(f"  • Registros espelhados adicionados: {registros_espelhados:,}")
     print(f"  • Registros após: {registros_depois:,}")
-    print(f"  • Registros espelhados: {registros_espelhados:,}")
     
     # Mostrar exemplos de filiais espelhadas
     if registros_espelhados > 0:
