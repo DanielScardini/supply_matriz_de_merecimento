@@ -1,298 +1,266 @@
-# Estrutura do Código Fonte
+# 📊 Sistema de Cálculo da Matriz de Merecimento
 
-## Visão Geral
+## 🎯 Visão Geral
 
-Este diretório contém a implementação do pipeline de matriz de merecimento, organizado em três camadas principais seguindo princípios de arquitetura limpa e separação de responsabilidades.
+Esta pasta contém o **núcleo do sistema de cálculo da matriz de merecimento**, implementando uma arquitetura unificada que processa dados de vendas históricas para calcular alocações otimizadas de produtos por loja, considerando diferentes categorias de produtos e suas especificidades.
 
-## Arquitetura do Pipeline
+## 🏗️ Arquitetura do Sistema
 
-```
-src/
-├── domain/           # Camada de dados brutos
-├── processed/        # Camada de dados processados
-├── feature/          # Camada de engenharia de features
-├── config.py         # Configurações centralizadas
-├── pipeline_orchestrator.py  # Orquestrador principal
-└── main.py           # Script de execução
-```
-
-## Camadas do Pipeline
-
-### 1. Domain Layer (`domain/`)
-
-**Responsabilidade**: Carregamento e validação de dados brutos do sistema.
-
-**Componentes**:
-- `data_loader.py`: Carregador de dados brutos (vendas, produtos, lojas, grupos de necessidade)
-- `__init__.py`: Documentação da camada
-
-**Funcionalidades**:
-- Carregamento de dados de vendas históricas
-- Validação de qualidade dos dados
-- Configuração de caminhos de dados
-- Tratamento de erros de carregamento
-
-### 2. Processed Layer (`processed/`)
-
-**Responsabilidade**: Limpeza, processamento e preparação de dados para análise.
-
-**Componentes**:
-- `data_processor.py`: Processador de dados com limpeza e agregação
-- `__init__.py`: Documentação da camada
-
-**Funcionalidades**:
-- Remoção de outliers e anomalias
-- Filtros de qualidade de dados
-- Agregação temporal (mensal, semanal)
-- Cálculo de médias móveis (3M, 6M, 9M, 12M)
-- Filtros para períodos anormais (eventos)
-
-### 3. Feature Layer (`feature/`)
-
-**Responsabilidade**: Engenharia de features para o modelo de merecimento.
-
-**Componentes**:
-- `feature_engineer.py`: Criador de features temporais, de demanda e de risco
-- `__init__.py`: Documentação da camada
-
-**Funcionalidades**:
-- Features temporais (tendências, sazonalidade, volatilidade)
-- Features de demanda (média, estabilidade, consistência)
-- Features de risco (ruptura, padrões de demanda)
-- Features de loja (região, cluster, tamanho)
-- Features de produto (categoria, grupo de necessidade, preço)
-- Normalização e codificação de variáveis categóricas
-
-## Componentes Principais
-
-### PipelineOrchestrator
-
-**Arquivo**: `pipeline_orchestrator.py`
-
-**Responsabilidade**: Coordenação e execução do pipeline completo.
-
-**Funcionalidades**:
-- Orquestração das três camadas
-- Gerenciamento de configurações
-- Logging e monitoramento
-- Validação de qualidade dos dados
-- Geração de relatórios de execução
-
-### Configurações
-
-**Arquivo**: `config.py`
-
-**Responsabilidade**: Centralização de todas as configurações do pipeline.
-
-**Seções**:
-- `DataPaths`: Caminhos para dados e arquivos
-- `ProcessingParameters`: Parâmetros de processamento
-- `FeatureParameters`: Parâmetros de engenharia de features
-- `ModelParameters`: Parâmetros do modelo
-- `LoggingConfig`: Configurações de logging
-- `PipelineConfig`: Configuração geral unificada
-
-### Script Principal
-
-**Arquivo**: `main.py`
-
-**Responsabilidade**: Interface de linha de comando para execução do pipeline.
-
-**Funcionalidades**:
-- Parse de argumentos da linha de comando
-- Configuração dinâmica do pipeline
-- Execução com tratamento de erros
-- Logging configurável
-- Validação de parâmetros
-
-## Execução do Pipeline
-
-### Execução Básica
-
-```bash
-# Execução com configurações padrão
-python src/main.py
-
-# Execução com período personalizado
-python src/main.py --start-date 2023-01-01 --end-date 2023-12-31
-
-# Execução com parâmetros personalizados
-python src/main.py \
-    --start-date 2023-01-01 \
-    --end-date 2023-12-31 \
-    --outlier-threshold 2.5 \
-    --min-sales-threshold 5 \
-    --max-sales-threshold 5000 \
-    --lookback-periods 1 3 6 \
-    --normalize-features \
-    --log-level DEBUG
-```
-
-### Parâmetros Disponíveis
-
-- `--start-date`: Data de início para análise
-- `--end-date`: Data de fim para análise
-- `--group-columns`: Colunas para agrupamento (padrão: sku store_id)
-- `--outlier-threshold`: Threshold para detecção de outliers
-- `--min-sales-threshold`: Threshold mínimo de vendas
-- `--max-sales-threshold`: Threshold máximo de vendas
-- `--lookback-periods`: Períodos para lookback em meses
-- `--normalize-features`: Normalizar features (padrão: True)
-- `--log-level`: Nível de logging (DEBUG, INFO, WARNING, ERROR)
-
-## Fluxo de Dados
+### 🔄 **Fluxo Principal de Cálculo**
 
 ```
-1. Domain Layer
-   ↓ Carrega dados brutos
-   ↓ Valida qualidade
-   
-2. Processed Layer
-   ↓ Limpa e processa dados
-   ↓ Remove outliers e anomalias
-   ↓ Calcula médias móveis
-   ↓ Filtra períodos anormais
-   
-3. Feature Layer
-   ↓ Cria features temporais
-   ↓ Cria features de demanda
-   ↓ Cria features de risco
-   ↓ Cria features de loja/produto
-   ↓ Normaliza features
-   
-4. Output
-   ↓ Dataset final com features
-   ↓ Relatórios de qualidade
-   ↓ Logs de execução
+1. 📋 PREPARAÇÃO DE DADOS
+   ↓
+2. 🔍 DETECÇÃO DE OUTLIERS
+   ↓
+3. 📊 CÁLCULO DE MEDIDAS CENTRAIS
+   ↓
+4. 🏢 MEREIMENTO A NÍVEL CD
+   ↓
+5. 🏪 MEREIMENTO INTERNO AO CD
+   ↓
+6. 🎯 MEREIMENTO FINAL
 ```
 
-## Configuração de Dados
+### 📁 **Componentes Principais**
 
-### Estrutura de Diretórios
+#### **🔄 Cálculo de Merecimento**
+- **`calculo_matriz_de_merecimento_unificado.py`**: Sistema principal OFFLINE
+- **`calculo_matriz_de_merecimento_online.py`**: Sistema principal ONLINE
 
+#### **🔧 Preparação de Dados**
+- **`Preparacao_tabelas_Matriz_merecimento.py`**: Preparação OFFLINE
+- **`Preparacao_tabelas_Matriz_merecimento_online.py`**: Preparação ONLINE
+
+#### **💾 Exportação**
+- **`Salvar_matrizes_calculadas_csv.py`**: Exportação de resultados
+
+## 🔗 Interconexões no Cálculo da Matriz
+
+### 1️⃣ **Preparação de Dados** → **Cálculo de Merecimento**
+
+```python
+# Preparação cria tabelas base
+df_base = carregar_dados_base()  # Dados históricos de vendas
+df_mapeamentos = carregar_mapeamentos_produtos()  # SKU → Grupo de Necessidade
+
+# Cálculo utiliza tabelas preparadas
+df_com_mapeamentos = aplicar_mapeamentos_produtos(df_base, df_mapeamentos)
 ```
-data/
-├── raw/              # Dados brutos
-│   ├── sales.csv     # Dados de vendas
-│   ├── products.csv  # Catálogo de produtos
-│   ├── stores.csv    # Dados de lojas
-│   └── need_groups.csv # Grupos de necessidade
-├── processed/        # Dados processados
-├── features/         # Features criadas
-└── output/           # Resultados finais
 
-logs/                 # Logs de execução
+### 2️⃣ **Detecção de Outliers** → **Medidas Centrais**
+
+```python
+# Outliers são detectados por grupo de necessidade
+outliers_meses = detectar_outliers_meses_atipicos(df_com_mapeamentos)
+
+# Medidas são calculadas SEM os outliers detectados
+df_sem_outliers = filtrar_meses_atipicos(df_com_mapeamentos, outliers_meses)
+medidas = calcular_medidas_centrais_com_medias_aparadas(df_sem_outliers)
 ```
 
-### Formato dos Dados
+### 3️⃣ **Medidas Centrais** → **Merecimento em Duas Camadas**
 
-#### Dados de Vendas (`sales.csv`)
-- `sku`: Código do produto
-- `store_id`: ID da loja
-- `sales_date`: Data da venda
-- `sales_amount`: Valor da venda
-- `sales_quantity`: Quantidade vendida
+```python
+# Primeira camada: Merecimento a nível CD
+merecimento_cd = calcular_merecimento_cd(medidas)
 
-#### Catálogo de Produtos (`products.csv`)
-- `sku`: Código do produto
-- `category`: Categoria do produto
-- `need_group`: Grupo de necessidade
-- `price`: Preço do produto
+# Segunda camada: Participação interna ao CD
+participacao_interna = calcular_merecimento_interno_cd(medidas)
 
-#### Dados de Lojas (`stores.csv`)
-- `store_id`: ID da loja
-- `region`: Região da loja
-- `cluster`: Cluster da loja
-- `store_size`: Tamanho da loja
+# Cálculo final: CD × Participação Interna
+merecimento_final = calcular_merecimento_final(merecimento_cd, participacao_interna)
+```
 
-## Logging e Monitoramento
+### 4️⃣ **Sistema Offline** ↔ **Sistema Online**
 
-### Níveis de Log
+```python
+# OFFLINE: Processamento completo para análises
+df_offline = executar_calculo_matriz_merecimento(
+    categoria="DIRETORIA DE TELAS",
+    modo="offline"  # Processamento completo
+)
 
-- **DEBUG**: Informações detalhadas para desenvolvimento
-- **INFO**: Informações gerais de execução
-- **WARNING**: Avisos sobre possíveis problemas
-- **ERROR**: Erros que impedem a execução
+# ONLINE: Processamento incremental para operações
+df_online = executar_calculo_matriz_merecimento(
+    categoria="DIRETORIA DE TELAS", 
+    modo="online"   # Processamento incremental
+)
+```
 
-### Arquivos de Log
+## ⚙️ Constantes Estabelecidas e Motivos
 
-- Logs são salvos em `logs/pipeline_YYYYMMDD_HHMMSS.log`
-- Rotação automática de logs (10MB por arquivo, máximo 5 arquivos)
-- Logs também são exibidos no console
+### 🎯 **Regras de Agrupamento por Categoria**
 
-## Tratamento de Erros
+```python
+REGRAS_AGRUPAMENTO = {
+    "DIRETORIA DE TELAS": {
+        "coluna_grupo_necessidade": "gemeos",
+        "tipo_agrupamento": "gêmeos",
+        "descricao": "Agrupamento por produtos similares (gêmeos)"
+    },
+    "DIRETORIA TELEFONIA CELULAR": {
+        "coluna_grupo_necessidade": "gemeos", 
+        "tipo_agrupamento": "gêmeos",
+        "descricao": "Agrupamento por produtos similares (gêmeos)"
+    },
+    "DIRETORIA LINHA BRANCA": {
+        "coluna_grupo_necessidade": "NmEspecieGerencial",
+        "tipo_agrupamento": "espécie_gerencial",
+        "descricao": "Agrupamento por espécie gerencial + voltagem"
+    },
+    "DIRETORIA LINHA LEVE": {
+        "coluna_grupo_necessidade": "NmEspecieGerencial",
+        "tipo_agrupamento": "espécie_gerencial", 
+        "descricao": "Agrupamento por espécie gerencial + voltagem"
+    },
+    "DIRETORIA INFO/GAMES": {
+        "coluna_grupo_necessidade": "NmEspecieGerencial",
+        "tipo_agrupamento": "espécie_gerencial",
+        "descricao": "Agrupamento por espécie gerencial"
+    }
+}
+```
 
-### Validações Implementadas
+**🎯 Motivos das Regras**:
+- **TELAS/TELEFONIA**: Produtos similares (gêmeos) têm padrões de demanda correlacionados
+- **LINHA BRANCA/LEVE**: Voltagem é fator crítico para distribuição geográfica
+- **INFO/GAMES**: Espécie gerencial é suficiente para agrupamento eficaz
 
-- Verificação de dados vazios
-- Validação de qualidade dos dados
-- Tratamento de outliers e anomalias
-- Verificação de integridade dos dados
-- Validação de parâmetros de entrada
+### 📊 **Parâmetros de Detecção de Outliers**
 
-### Recuperação de Erros
+```python
+PARAMETROS_OUTLIERS = {
+    "sigma_meses_atipicos": {
+        "DIRETORIA DE TELAS": 2.0,           # Mais sensível (produtos sazonais)
+        "DIRETORIA TELEFONIA CELULAR": 2.0,  # Mais sensível (lançamentos frequentes)
+        "DIRETORIA LINHA BRANCA": 3.0,       # Menos sensível (demanda estável)
+        "DIRETORIA LINHA LEVE": 3.0,         # Menos sensível (demanda estável)
+        "DIRETORIA INFO/GAMES": 3.0          # Menos sensível (demanda estável)
+    },
+    "sigma_outliers_cd": 2.0,      # Sensibilidade para outliers a nível CD
+    "sigma_outliers_loja": 2.5,    # Sensibilidade para outliers a nível loja
+    "sigma_atacado_cd": 1.5,      # Sensibilidade para vendas atacado CD
+    "sigma_atacado_loja": 1.5     # Sensibilidade para vendas atacado loja
+}
+```
 
-- Logging detalhado de erros
-- Continuação da execução quando possível
-- Fallbacks para valores padrão
-- Notificações de problemas críticos
+**🎯 Motivos dos Parâmetros**:
+- **Sigma 2.0**: Para categorias com alta volatilidade (lançamentos, sazonalidade)
+- **Sigma 3.0**: Para categorias com demanda mais estável e previsível
+- **Sigma 1.5**: Para vendas atacado (mais sensível a outliers por volume)
 
-## Extensibilidade
+### 📅 **Janelas Móveis de Cálculo**
 
-### Adicionando Novas Features
+```python
+JANELAS_MOVEIS = [90, 180, 270, 360]  # dias
+```
 
-1. Crie novos métodos em `FeatureEngineer`
-2. Adicione configurações em `FeatureParameters`
-3. Integre no pipeline em `PipelineOrchestrator`
-4. Atualize documentação
+**🎯 Motivos das Janelas**:
+- **90 dias**: Tendência de curto prazo (3 meses)
+- **180 dias**: Tendência de médio prazo (6 meses)
+- **270 dias**: Tendência de longo prazo (9 meses)
+- **360 dias**: Tendência anual (12 meses)
 
-### Adicionando Novos Processadores
+### 🏢 **Filiais Outlet**
 
-1. Crie novos métodos em `DataProcessor`
-2. Adicione configurações em `ProcessingParameters`
-3. Integre no pipeline em `PipelineOrchestrator`
-4. Atualize documentação
+```python
+FILIAIS_OUTLET = [2528, 3604]
+```
 
-### Adicionando Novas Fontes de Dados
+**🎯 Motivo**: Filiais outlet têm padrões de demanda diferentes e devem ser tratadas separadamente.
 
-1. Crie novos métodos em `DomainDataLoader`
-2. Adicione configurações em `DataPaths`
-3. Integre no pipeline em `PipelineOrchestrator`
-4. Atualize documentação
+### 📊 **Tipos de Medidas Calculadas**
 
-## Dependências
+```python
+TIPOS_MEDIDAS = [
+    "Media",      # Média tradicional (sensível a outliers)
+    "Mediana",    # Mediana (robusta a outliers)
+    "MediaAparada" # Média aparada (equilibra robustez e informação)
+]
+```
 
-### Principais
+**🎯 Motivos dos Tipos**:
+- **Média**: Captura tendências gerais, mas sensível a outliers
+- **Mediana**: Robusta a outliers, mas pode perder informação
+- **Média Aparada**: Equilibra robustez e informação (remove extremos)
 
-- `pandas`: Manipulação de dados
-- `numpy`: Computação numérica
-- `scikit-learn`: Machine learning e pré-processamento
+## 🔄 Modos de Operação
 
-### Desenvolvimento
+### 📊 **Modo OFFLINE**
+- **Uso**: Análises históricas, validações, testes
+- **Características**:
+  - Processamento completo de dados históricos
+  - Validação de qualidade e consistência
+  - Geração de relatórios detalhados
+  - Análise de tendências e sazonalidade
 
-- `pytest`: Testes unitários
-- `black`: Formatação de código
-- `flake8`: Linting
-- `jupyter`: Desenvolvimento interativo
+### ⚡ **Modo ONLINE**
+- **Uso**: Operações diárias, atualizações incrementais
+- **Características**:
+  - Processamento incremental de dados
+  - Atualização rápida da matriz operacional
+  - Otimizado para performance
+  - Integração com sistemas de produção
 
-## Próximos Passos
+## 🎯 Resultado Final
 
-### Implementações Pendentes
+O sistema produz uma **matriz de merecimento** com:
 
-- [ ] Salvamento de resultados intermediários
-- [ ] Carregamento de configurações de arquivo
-- [ ] Validação avançada de dados
-- [ ] Testes unitários
-- [ ] Documentação Sphinx
-- [ ] Integração com Databricks
-- [ ] Sistema de alertas
-- [ ] Dashboard de monitoramento
+### 📋 **Estrutura do Resultado**
+- **Granularidade**: SKU × Loja × Grupo de Necessidade
+- **Medidas**: 12 tipos de merecimento (4 janelas × 3 tipos de medida)
+- **Camadas**: Merecimento CD + Participação Interna + Merecimento Final
 
-### Melhorias Planejadas
+### 📊 **Colunas de Saída**
+```python
+# Identificação
+['cdfilial', 'cd_primario', 'grupo_de_necessidade']
 
-- [ ] Cache de dados processados
-- [ ] Processamento paralelo
-- [ ] Métricas de performance
-- [ ] Versionamento de dados
-- [ ] Pipeline incremental
-- [ ] Integração com sistemas externos
+# Merecimento CD (4 janelas × 3 tipos)
+['Total_CD_Media90_Qt_venda_sem_ruptura', ...]
+
+# Participação Interna (4 janelas × 3 tipos)  
+['Percentual_Media90_Qt_venda_sem_ruptura', ...]
+
+# Merecimento Final (4 janelas × 3 tipos)
+['Merecimento_Final_Media90_Qt_venda_sem_ruptura', ...]
+```
+
+## 🚀 Como Usar
+
+### **Execução Básica**
+```python
+# Para qualquer categoria
+df_resultado = executar_calculo_matriz_merecimento("DIRETORIA DE TELAS")
+```
+
+### **Execução com Parâmetros**
+```python
+df_resultado = executar_calculo_matriz_merecimento(
+    categoria="DIRETORIA DE TELAS",
+    data_inicio="2024-01-01",
+    data_calculo="2025-06-30",
+    sigma_meses_atipicos=2.0
+)
+```
+
+## 🔧 Dependências
+
+- **PySpark**: Processamento distribuído de dados
+- **Pandas**: Manipulação de dados
+- **Datetime**: Manipulação de datas
+- **Databricks**: Plataforma de execução
+
+## 📚 Próximos Passos
+
+1. **Integração**: Conectar com sistemas de produção
+2. **Automação**: Implementar agendamento automático
+3. **Monitoramento**: Adicionar alertas de qualidade
+4. **Otimização**: Melhorar performance para grandes volumes
+
+---
+
+**Versão**: 1.1.0  
+**Última Atualização**: Janeiro 2025  
+**Mantenedor**: Equipe de Supply Chain Analytics
