@@ -1,0 +1,155 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Machine Learning with pandas + scikit-learn - Cursor Rules
+
+---
+
+## General Instructions
+
+You are building ML models using pandas, scikit-learn, and plotly.
+Prioritize clean, modular, function-based code that is easy to integrate into scripts like main.py and DAG tasks.
+
+---
+
+### Data Handling
+- Use pandas for all data operations.
+- Prefer method chaining for transformations.
+- Validate data early (schema checks, null handling).
+- Explicitly handle missing data (impute, drop, flag).
+- Use loc and iloc for precise selections.
+- Encode categorical features with clear, named functions.
+- Use geopandas for spatial data and GeoJSON analysis with standardized geometry operations.
+
+---
+
+### Feature Engineering
+- Create features with modular transformation functions:
+
+    def create_features(df: pd.DataFrame) -> pd.DataFrame:
+        return df.assign(
+            feature_ratio=lambda d: d["feature1"] / (d["feature2"] + 1),
+            feature_sum=lambda d: d["feature3"] + d["feature4"]
+        )
+
+- For spatial data, use geopandas functions for geometric operations:
+
+    def create_spatial_features(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+        return gdf.assign(
+            area=lambda d: d["geometry"].area,
+            distance_to_point=lambda d: d["geometry"].distance(REFERENCE_POINT),
+            buffer_zone=lambda d: d["geometry"].buffer(BUFFER_DISTANCE)
+        )
+
+- Avoid hidden feature engineering inside modeling functions.
+
+---
+
+### Modeling
+- Use scikit-learn Pipelines to connect preprocessing and modeling.
+- Define explicit train() and predict() functions:
+
+    def train_model(X: pd.DataFrame, y: pd.Series) -> Pipeline:
+        pipeline = Pipeline([
+            ("scaler", StandardScaler()),
+            ("model", Ridge())
+        ])
+        return pipeline.fit(X, y)
+
+    def predict_model(model: Pipeline, X: pd.DataFrame) -> np.ndarray:
+        return model.predict(X)
+
+- Use GridSearchCV or RandomizedSearchCV for hyperparameter tuning if needed.
+
+---
+
+### Evaluation
+- Build simple evaluation functions:
+
+    def evaluate_regression(y_true: pd.Series, y_pred: np.ndarray) -> dict:
+        return {
+            "r2": r2_score(y_true, y_pred),
+            "rmse": mean_squared_error(y_true, y_pred, squared=False)
+        }
+
+- Always report multiple metrics, not just one.
+
+---
+
+### Visualization
+- Use plotly for interactive, clear visualizations.
+- Return plotly.graph_objs.Figure from plot functions:
+
+    def plot_predictions(y_true: pd.Series, y_pred: np.ndarray) -> plotly.graph_objs.Figure:
+        return px.scatter(x=y_true, y=y_pred, labels={"x": "Actual", "y": "Predicted"}, title="Predicted vs Actual")
+
+- Label axes and add titles in all plots.
+- Use annotation and legend to leave information clear
+- Use background color "#F8F8FF" - offwhite
+- Mind the data visualization part to make the plots look very professional and consulting powerpoint ready so I can only copy and paste on my slide deck
+
+---
+
+### Outputs and Saving
+- Save results explicitly using functions:
+
+    def save_dataframe(df: pd.DataFrame, path: str) -> None:
+        df.to_csv(path, index=False)
+        
+    def save_geodataframe(gdf: gpd.GeoDataFrame, path: str) -> None:
+        gdf.to_file(path, driver="GeoJSON")
+
+- Separate data-saving logic from modeling logic.
+- Save parquet files for data and .pkl for models
+
+---
+
+### Testing
+- Write unit tests for critical functions (transformations, modeling, predictions).
+- Validate data assumptions during tests (columns exist, no NaNs after preprocessing).
+
+---
+
+### Performance Awareness
+- Use vectorized pandas/numpy operations instead of python loops whenever possible.
+- Avoid unnecessary database calls or file I/O operations within loops.
+- Be mindful of memory usage with large DataFrames; consider chunking or using dask for big data.
+- Profile performance-critical functions using `%timeit`, `cProfile`, or similar tools.
+- Consider computational complexity; prefer efficient algorithms and data structures for large datasets.
+
+---
+
+### Security
+- Always consider security implications when handling data, especially in production environments.
+- Never expose sensitive data (PII, credentials) in outputs, logs, or error messages.
+- Be careful with dynamic code execution (`eval`, `exec`) and SQL queries.
+
+---
+
+## Progress tracking and logging
+- Use tqdm to allow for progress tracking, make it look professional
+- Use explicit logging of every phase
+
+## Core Libraries
+- pandas
+- numpy
+- scikit-learn
+- plotly
+- geopandas
+- tqdm
+
+---
+
+## Key Conventions
+1. Keep code modular and functional.
+2. Validate and clean data before modeling.
+3. Use pipelines to prevent leakage.
+4. Always split data (train/test) properly.
+5. Make code easy to plug into larger systems (DAGs, CLI apps).
+6. Prefer clear, documented transformations and model behavior.
+7. Optimize for performance with vectorized operations.
+8. Follow security best practices, especially with sensitive data.
+
+---

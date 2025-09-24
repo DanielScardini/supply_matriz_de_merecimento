@@ -1,0 +1,28 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+### Approach
+ 
+- Please research the code base to make sure you understand the work that is required and which files are affected. Read any .py, .md or any other file you think are relevant and helpful.
+- Use your knowledge of the directory structure, file structure and interrelationships. Check the directory and file structure if needed.
+- Then, update the relevant part of this plan document with annotations and refine the tasks to help you successfully implement these changes later.
+  - This might include modifying or adding tasks.
+  - You can split/re-arrange tasks if appropriate
+  - If you discover errors in the tasks (e.g. work marked as complete when it is not complete, or work marked as not complete when it is complete) you can update this.
+  - It might include adding/modifying implementation notes or annotations. This includes referencing specific .md or .py files that are relevant as well as listing any relevant primitives.
+  - But DO NOT write code in this file. This is a planning file. Code writing occurs later. (You can of course describe concepts)
+  - Avoid duplication here - e.g. maintain a single source of truth for the task/status tracking.
+- The goal of this step is to increase the level of understanding before proceeding further – making things easy for the implementer
+- Do not do any implementation yet. This is a planning step. Edit the planning file to incorporate your changes, then I will review.
+- Do not attempt to update this file in a single pass. Edits that are too large will fail. Plan your edits, and then update the document in a sequence of logical steps.
+ 
+### Format
+ 
+- Do not use emoji symbols anywhere, including "✅". This is unprofessional in this context.
+- For tracking, use as appropriate:
+  - Not started: [ ]
+  - Completed: [X]
+  - Work in progress: [W]
+  - Skipped with reason: [S]

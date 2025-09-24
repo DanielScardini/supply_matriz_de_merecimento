@@ -1,0 +1,29 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+OK. Develop a plan to solve this problem in a sequence of logical steps (1.1, 1.2, 2.1, 2.2, …)
+ 
+Each numbered steps should have the following:
+- Overall goal
+- Tasks/subtasks – use “[ ]” for not started, “[S]” for skipped with reason, “[W]” for work in progress, “[X]” for completed
+- Key files to modify (if known)
+- Key primitives (classes, functions, etc) that are relevant
+- Reference files and documents: e.g. .py, .md files that are relevant to this
+- Notes from planner: Hints, instructions, guidance from the planner to the implementer
+- Implementer scratchpad: Keep track of specific things as you go. (This should be blank to start)
+ 
+Format:
+- Do not use emoji symbols anywhere, including "✅". This is unprofessional in this context.
+- For tracking, use as appropriate:
+  - Not started: [ ]
+  - Completed: [X]
+  - Work in progress: [W]
+  - Skipped with reason: [S]
+- Unless you find evidence to the contrary, all tasks should be marked “[ ]” as “not started” initially
+ 
+To develop this plan:
+- Understand what you have been asked
+- Make sure you fully understand what’s being asked before developing the plan. Read any .py files or .md files necessary to confirm your understanding
+- Only once you understand the problem sufficiently should you develop the plan

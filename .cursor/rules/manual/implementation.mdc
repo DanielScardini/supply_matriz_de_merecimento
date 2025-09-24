@@ -1,0 +1,49 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+OK, it's time to implement this. Please follow these instructions
+````
+## Implement following the plan
+ 
+Implement this following this approach:
+- Understand and use the planning and pre-work that has been done in this file.
+- Plan your implementation in a sequence of logical steps, following the plan
+- Then follow your implementation plan, progressively making changes
+ 
+Testing approach:
+- If any files you modify are covered by tests, run those tests after making changes, but consistent with the plan. Diagnose and fix any errors.
+- Implement any appropriate tests to cover gaps where appropriate
+- Do not move on from a particular step until the relevant tests pass
+ 
+### Work tracking
+ 
+- You should update the plan frequently to track progress - after every logical group of edits you make
+  - You can update the tasks or add new tasks as appropriate. You can add annotations or implementation notes if helpful.
+- Do not maintain multiple task lists across different parts of the document on the same issue - which will likely lead to conflicts. Maintain a "single source of truth" for task tracking.
+- Going too long without updating the tracking risks tracking errors. Update the tracking frequently.
+- Do not attempt to update this file in a single pass. Edits that are too large will fail. Plan your edits, and then update this document in a sequence of logical steps.
+- Similarly, do not attempt to make large changes to any .py file or .md file in a single pass. Edits that are too large will fail. Plan your edits, and then update this document in a sequence of logical steps.
+ 
+- Do not use emoji symbols anywhere. This is unprofessional in this context.
+- For tracking, use as appropriate:
+  - Not started: [ ]
+  - Completed: [X]
+  - Work in progress: [W]
+  - Skipped with reason: [S]
+ 
+### Your biases to watch out for
+- Be careful not to mark work as complete when it is work in progress or not started. You have a demonstrated bias to incorrectly marking work as complete when it is not. Be very sure here.
+- You have a bias to write tests and assume they will pass without actually checking. You must ALWAYS check that the tests pass. Never assume
+- You have a bias to only checking narrow breakages. Even if the tests for that file run, you shouldn’t assume that all tests will pass.
+ 
+ 
+### Definition of done
+ 
+- You must run tests on changed code as well as all CI tests for the codebase (`python legsysexp/tests/run_tests.py --ci`) before marking any work as complete.
+- The overall plan cannot be considered done until:
+  - You have run the CI tests on the whole codebase
+  - All tests pass OR tests do not pass and the failing tests have not been caused by the implementation
+  - You have explicitly checked for intent or scope drift compared to the original plan
+````

@@ -1,0 +1,168 @@
+---
+alwaysApply: true
+---
+# Regras para Notebooks PySpark no Databricks
+
+## Estrutura Geral
+
+- **Divida o notebook em células sequenciais e bem definidas**: cada célula deve corresponder a uma etapa clara do processo de ETL ou análise.
+- **Evite funções e abstrações**: todo o processamento deve ser feito de forma explícita, célula a célula, para facilitar a rastreabilidade e revisão por outros analistas.
+- **Nomeie cada célula com markdown descritivo** (`%md`), explicando o objetivo do bloco e sua importância para o negócio.
+
+## Documentação e Comentários
+
+- **Documente cada célula em português**, focando em explicar:
+    - O que está sendo feito
+    - Por que essa etapa é importante para o negócio
+    - Como ela se conecta ao objetivo final do notebook
+- **Evite comentários óbvios**; priorize explicações sobre decisões de negócio, filtros aplicados e transformações relevantes.
+- **Datetime**: use sempre datetime de Sao Paulo/Brasil
+
+## Manipulação de Dados
+
+- **Realize transformações explicitamente**: cada filtro, join, seleção de colunas ou agregação deve ser visível e facilmente inspecionável.
+- **Não traga para a memória nada que não seja útil para rodar**: os notebooks serão jobs schedulados, não precisa de visualização intermediária desnecessária.
+- **Use nomes de variáveis descritivos e em português**, alinhados ao contexto do negócio.
+
+## Boas Práticas
+
+- **Separe claramente as etapas**: leitura de dados, tratamento, análise e exportação.
+- **Foque em desempenho**: as tabelas são grandes, então sempre destaque etapas críticas (joins, filtros pesados) e, se possível, comente sobre possíveis gargalos.
+- **Evite mudanças transformadoras no código**: faça alterações incrementais e bem documentadas.
+- **Nunca sobrescreva dados de origem**; sempre crie novas variáveis ou tabelas intermediárias.
+
+## Exemplo de Bloco
+
+# COMMAND ----------
+# MAGIC %md
+# MAGIC ### Leitura da Tabela de Estoque
+# MAGIC 
+# MAGIC Neste bloco, realizamos a leitura da tabela de estoque das lojas para o ano vigente.
+# MAGIC Esta etapa é essencial para garantir que as análises de merecimento estejam baseadas nos dados mais recentes de disponibilidade de produtos.
+
+# COMMAND ----------
+estoque_lojas_df = (
+    spark.read.format("delta")
+    .load("/mnt/datalake/estoque_lojas/ano=2025")
+)
+
+display(estoque_lojas_df)
+
+# COMMAND ----------
+# MAGIC %md
+# MAGIC ### Filtragem de Lojas Ativas
+# MAGIC 
+# MAGIC Aqui filtramos apenas as lojas ativas, pois apenas estas participam do processo de matriz de merecimento. 
+# MAGIC Isso garante que não haja distorções nas análises causadas por lojas fechadas ou temporariamente inativas.
+
+# COMMAND ----------
+lojas_ativas_df = (
+    estoque_lojas_df
+    .filter(F.col("status_loja") == "ATIVA")
+)
+
+display(lojas_ativas_df)
+
+## Estrutura e Organização
+
+- **Divida o notebook em blocos de código claros e sequenciais** usando células separadas para cada etapa do processo (leitura, transformação, análise, exportação).
+- **Não utilize funções**: todas as manipulações devem ser explícitas e visíveis, facilitando o rastreamento de erros e o entendimento do fluxo.
+- **Nomeie cada célula com um título descritivo** (usando comentários ou comandos markdown) explicando o objetivo do bloco e sua relação com o processo de negócio.
+
+## Documentação
+
+- **Documente cada bloco em português**, explicando de forma clara:
+    - O que está sendo feito
+    - Por que essa etapa é importante para o negócio
+    - Como ela se conecta ao objetivo final do notebook
+- **Evite comentários óbvios**; foque em explicar decisões de negócio, filtros aplicados, e transformações relevantes.
+
+## Manipulação de Dados
+
+- **Realize transformações de forma explícita** (ex: filtros, joins, seleções de colunas), sempre mostrando o resultado intermediário quando relevante.
+- **Evite abstrações**: cada etapa deve ser facilmente inspecionada e modificada por outros analistas.
+
+## Boas Práticas
+
+- **Use nomes de variáveis descritivos** e em português, alinhados ao contexto do negócio.
+- **Separe claramente as etapas**: leitura de dados, tratamento, análise, e exportação.
+- **Foque em desempenho**: as tabelas são massivas e os joins gigantes, portanto sempre ajude a detectar elos fracos da manipulação e informe explicitamente
+- **Evite mudanças transformadoras no código**: faça mudanças incrementais e claras
+## Exemplo de Bloco
+
+# Exemplo de Bloco de Código PySpark no Databricks
+
+# COMMAND ----------
+# MAGIC %md
+# MAGIC ### Leitura da Tabela de Vendas
+# MAGIC 
+# MAGIC Neste bloco, realizamos a leitura da tabela de vendas brutas do período vigente. 
+# MAGIC Esta etapa é fundamental para garantir que estamos utilizando os dados mais atualizados, 
+# MAGIC servindo de base para todas as análises subsequentes da matriz de merecimento.
+
+# COMMAND ----------
+vendas_brutas_df = (
+    spark.read.format("delta")
+    .load("/mnt/datalake/vendas_brutas/ano=2025")
+)
+
+# Exibe as primeiras linhas para inspeção
+display(vendas_brutas_df)
+
+# COMMAND ----------
+# MAGIC %md
+# MAGIC ### Filtragem de Lojas Ativas
+# MAGIC 
+# MAGIC Aqui filtramos apenas as lojas ativas, pois lojas inativas não devem compor a matriz de merecimento.
+# MAGIC Esta filtragem reduz o volume de dados e evita distorções nas análises de estoque e demanda.
+
+# COMMAND ----------
+lojas_ativas_df = (
+    vendas_brutas_df
+    .filter(F.col("status_loja") == "ATIVA")
+)
+
+display(lojas_ativas_df)
+
+# COMMAND ----------
+# MAGIC %md
+# MAGIC ### Join com Tabela de Estoque
+# MAGIC 
+# MAGIC Realizamos o join entre as vendas e o estoque para obter uma visão consolidada por SKU e loja.
+# MAGIC Esta etapa é crítica para identificar rupturas e oportunidades de abastecimento.
+
+# COMMAND ----------
+estoque_df = (
+    spark.read.format("delta")
+    .load("/mnt/datalake/estoque/ano=2025")
+)
+
+vendas_estoque_df = (
+    lojas_ativas_df
+    .join(
+        estoque_df,
+        on=["id_loja", "sku"],
+        how="left"
+    )
+)
+
+display(vendas_estoque_df)
+
+# COMMAND ----------
+# MAGIC %md
+# MAGIC ### Análise de Ruptura
+# MAGIC 
+# MAGIC Neste bloco, calculamos a quantidade de SKUs em ruptura por loja.
+# MAGIC O objetivo é identificar rapidamente os pontos críticos para priorização de abastecimento.
+
+# COMMAND ----------
+ruptura_df = (
+    vendas_estoque_df
+    .filter(F.col("qtd_estoque") == 0)
+    .groupBy("id_loja")
+    .agg(F.countDistinct("sku").alias("skus_ruptura"))
+    .orderBy(F.desc("skus_ruptura"))
+)
+
+display(ruptura_df)
+

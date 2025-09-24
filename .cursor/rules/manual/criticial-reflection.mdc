@@ -1,0 +1,18 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+Please check what you have just implemented for the following:
+- Scope drift or semantic drift
+- Implementing or modifying functionality that was not intended
+- Key changes in implied or explicit intent that were not agreed with the user
+- Assumptions that were introduced on-the-fly which are major assumptions
+- Introduction of duplication (partial or complete)
+- Failure to implement tasks that were required
+- Marking tasks as complete ("X") when they are actually work in progress ("W") or not started ("[ ]")
+- Any other implementation patterns that would be of concern to the code owner
+ 
+Read any .md or .py files necessary to confirm this.
+ 
+Report back with your findings.
