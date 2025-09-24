@@ -103,7 +103,7 @@ PARAMETROS_OUTLIERS = {
     "desvios_historico_cd": 3,     # Desvios para outliers históricos a nível CD
     "desvios_historico_loja": 3,   # Desvios para outliers históricos a nível loja
     "desvios_atacado_cd": 3,     # Desvios para outliers CD em lojas de atacado
-    "desvios_atacado_loja": 2    # Desvios para outliers loja em lojas de atacado
+    "desvios_atacado_loja": 1.5    # Desvios para outliers loja em lojas de atacado
 }
 
 # Configuração das janelas móveis para médias aparadas
@@ -544,7 +544,7 @@ def remover_outliers_series_historicas(df: DataFrame,
                 F.col(coluna_valor) < F.col("threshold_inferior"),
                 F.col("threshold_inferior")
             )
-            .otherwise(F.col(coluna_valor))
+            .otherwise(F.col(f"{coluna_valor}_original"))
         )
         .withColumn(
             "flag_outlier_removido",
@@ -720,7 +720,7 @@ def calcular_medidas_centrais_com_medias_aparadas(df: DataFrame) -> DataFrame:
             janelas=JANELAS_MOVEIS_APARADAS,
             col_val="demanda_robusta",
             col_ord="DtAtual",
-            grupos=("CdSku","CdFilial"),
+            grupos=("grupo_de_necessidade","CdFilial"),
             alpha=PERCENTUAL_CORTE_MEDIAS_APARADAS,
             min_obs=10
         )
@@ -741,8 +741,8 @@ def consolidar_medidas(df: DataFrame) -> DataFrame:
     
     df_consolidado = (
         df.select(
-            "DtAtual", "CdSku", "CdFilial", "grupo_de_necessidade", "year_month",
-            "QtMercadoria", "Receita", "FlagRuptura", "deltaRuptura", "tipo_agrupamento",
+            "DtAtual", "CdFilial", "grupo_de_necessidade", "year_month",
+            "QtMercadoria",  "deltaRuptura", "tipo_agrupamento",
             *colunas_medias_aparadas
         )
         .fillna(0, subset=colunas_medias_aparadas)
@@ -793,8 +793,8 @@ def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) ->
 
     df_data_calculo = (
         df_data_calculo
-        .orderBy('CdSku', 'CdFilial')
-        .dropDuplicates(subset=['CdSku', 'CdFilial'])
+        .orderBy('CdFilial')
+        .dropDuplicates(subset=['CdFilial'])
     )
     
     # Usar apenas média aparada 90 dias para merecimento CD
@@ -1088,12 +1088,22 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         #      )
         #  )
         df_com_grupo.cache()
+
+        df_agregado = (
+            df_com_grupo
+            .groupBy("grupo_de_necessidade", "CdFilial", "DtAtual", "year_month")
+            .agg(
+                F.sum("QtMercadoria").alias("QtMercadoria"),
+                F.sum("deltaRuptura").alias("deltaRuptura"),
+                F.first("tipo_agrupamento").alias("tipo_agrupamento")
+            )
+        )
         
         # 6. Detecção de outliers
-        df_stats, df_meses_atipicos = detectar_outliers_meses_atipicos(df_com_grupo, categoria)
+        df_stats, df_meses_atipicos = detectar_outliers_meses_atipicos(df_agregado, categoria)
         
         # 7. Filtragem de meses atípicos
-        df_filtrado = filtrar_meses_atipicos(df_com_grupo, df_meses_atipicos)
+        df_filtrado = filtrar_meses_atipicos(df_agregado, df_meses_atipicos)
         
         # 8. Remoção de outliers das séries históricas
         print("=" * 80)
@@ -1161,117 +1171,6 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
     except Exception as e:
         print(f"❌ Erro durante o cálculo: {str(e)}")
         raise
-
-# COMMAND ----------
-
-categoria = 'DIRETORIA TELEFONIA CELULAR'
-data_calculo = '2025-09-21'
-
-# 1. Carregamento dos dados base
-df_base = carregar_dados_base(categoria, data_inicio)
-df_base.cache()
-
-# 2. Carregamento e aplicação do espelhamento de filiais
-df_espelhamento = carregar_de_para_espelhamento()
-df_base_com_espelhamento = aplicar_espelhamento_filiais(df_base, df_espelhamento)
-df_base_com_espelhamento.cache()
-
-# 3. Carregamento dos mapeamentos
-de_para_modelos, de_para_gemeos = carregar_mapeamentos_produtos(categoria)  
-
-# 4. Aplicação dos mapeamentos
-df_com_mapeamentos = aplicar_mapeamentos_produtos(
-    df_base_com_espelhamento, categoria, de_para_modelos, de_para_gemeos
-)
-
-# 5. Definição do grupo_de_necessidade
-df_com_grupo = determinar_grupo_necessidade(categoria, df_com_mapeamentos)
-# df_com_grupo = (
-#     df_com_grupo
-#     .filter(
-#         F.col("grupo_de_necessidade").isin(
-#     #'Telef pp', 
-#     #'TV 50 ALTO P', 
-#     'TV 55 ALTO P'
-#     )
-#      )
-#  )
-df_com_grupo.cache()
-
-df_com_grupo.orderBy(F.desc("QtMercadoria")).filter(F.col("grupo_de_necessidade") == 'Telef Medio 128GB').display()
-
-# COMMAND ----------
-
-# 6. Detecção de outliers
-df_stats, df_meses_atipicos = detectar_outliers_meses_atipicos(df_com_grupo, categoria)
-
-# 7. Filtragem de meses atípicos
-df_filtrado = filtrar_meses_atipicos(df_com_grupo, df_meses_atipicos)
-
-# 8. Remoção de outliers das séries históricas
-print("=" * 80)
-print("🔄 Aplicando remoção de outliers das séries históricas...")
-
-# Definir filiais de atacado (exemplo - ajustar conforme necessário)
-filiais_atacado = FILIAIS_ATACADO  # Lista de filiais consideradas de atacado
-
-df_sem_outliers = remover_outliers_series_historicas(
-    df_filtrado,
-    coluna_valor="QtMercadoria",
-    n_sigmas_padrao=PARAMETROS_OUTLIERS["desvios_historico_loja"],
-    n_sigmas_atacado=PARAMETROS_OUTLIERS["desvios_atacado_loja"],
-    filiais_atacado=filiais_atacado
-)
-
-# 9. Cálculo das medidas centrais
-df_com_medidas = calcular_medidas_centrais_com_medias_aparadas(df_sem_outliers)
-
-# 10. Consolidação final
-df_final = consolidar_medidas(df_com_medidas)
-
-df_final.orderBy(F.desc("QtMercadoria")).filter(F.col("grupo_de_necessidade") == 'Telef Medio 128GB').display()
-
-# COMMAND ----------
-
-# 11. Cálculo de merecimento por CD e filial
-print("=" * 80)
-print("🔄 Iniciando cálculo de merecimento...")
-
-# 11.1 Merecimento a nível CD
-df_merecimento_cd = calcular_merecimento_cd(df_final, data_calculo, categoria)
-df_merecimento_cd.cache()
-df_merecimento_cd.filter(F.col("grupo_de_necessidade") == 'Telef Medio 128GB').display()
-
-# COMMAND ----------
-
-# 11.2 Merecimento interno ao CD
-df_merecimento_interno = calcular_merecimento_interno_cd(df_final, data_calculo, categoria)
-
-# 11.3 Merecimento final
-df_merecimento_final = calcular_merecimento_final(df_merecimento_cd, df_merecimento_interno)
-
-# Criar o esqueleto
-df_esqueleto = criar_esqueleto_matriz_completa(df_com_grupo, "2025-08-31")
-
-# Primeiro, identificar todas as colunas de merecimento final
-colunas_merecimento_final = [col for col in df_merecimento_final.columns 
-                        if col.startswith('Merecimento_Final_')]
-
-
-# Criar dicionário de fillna
-fillna_dict = {col: 0.0 for col in colunas_merecimento_final}
-
-df_merecimento_sku_filial = (
-    df_esqueleto
-    .join(
-        df_merecimento_final
-        .select('grupo_de_necessidade', 'CdFilial', *colunas_merecimento_final)
-        .dropDuplicates(subset=['grupo_de_necessidade', 'CdFilial']), 
-        on=['grupo_de_necessidade', 'CdFilial'], 
-        how='left'
-    )
-    .fillna(fillna_dict)
-)
 
 # COMMAND ----------
 
