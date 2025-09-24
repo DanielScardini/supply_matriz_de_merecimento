@@ -309,6 +309,74 @@ metrics_all.orderBy("categoria", "modelo").display()
 
 # COMMAND ----------
 
+from pyspark.sql import functions as F
+from functools import reduce
+
+# === Constantes ===
+COL_REAL = "Percentual_QtDemanda"
+COL_PESO = "QtDemanda"
+GROUP_COL = "GrupoNecessidade"  # ajuste se necessário
+
+# === Util: lista de colunas de predição existentes ===
+def existing_pred_cols(df, base_cols, maybe_cols):
+    present = [c for c in maybe_cols if c in df.columns]
+    return base_cols + present
+
+# === Util: WMAPE ponderado por COL_PESO ===
+def wmape_expr(pred_col, real_col=COL_REAL, peso_col=COL_PESO):
+    num = F.sum(F.abs(F.col(pred_col) - F.col(real_col)) * F.col(peso_col))
+    den = F.sum(F.abs(F.col(real_col)) * F.col(peso_col))
+    return F.when(den == 0, F.lit(0.0)).otherwise(100.0 * num / den)
+
+# === Entrada: listas já existentes ===
+# pred_cols_base = list(colunas)
+# extras = ["PercMatrizNeogrid", "PercMatrizNeogrid_median"]
+# categorias_teste, df_acuracia: já definidos no seu ambiente
+
+# === Cálculo: WMAPE por grupo de necessidade, por categoria e modelo ===
+wmape_all = None
+
+for categoria in categorias_teste:
+    df_cat = df_acuracia[categoria]
+    pred_cols = existing_pred_cols(df_cat, pred_cols_base, extras)
+
+    # volume por grupo (QtDemanda)
+    base_group = (
+        df_cat
+        .groupBy(F.col(GROUP_COL).alias("grupo"))
+        .agg(F.sum(F.col(COL_PESO)).alias("Volume"))
+    )
+
+    # agrega WMAPE por modelo dentro do grupo
+    aggs = []
+    for c in pred_cols:
+        aggs.append(
+            F.struct(
+                F.lit(categoria).alias("categoria"),
+                F.col(GROUP_COL).alias("grupo"),
+                F.lit(c).alias("modelo"),
+                wmape_expr(c).alias("WMAPE")
+            ).alias(c)
+        )
+
+    # gera linhas por modelo e junta com volume
+    wmape_cat = (
+        df_cat
+        .groupBy(GROUP_COL)
+        .agg(*aggs)
+        .select(F.col(GROUP_COL).alias("grupo"), F.array(*[F.col(a.alias) for a in aggs]).alias("arr"))
+        .select("grupo", F.explode("arr").alias("m"))
+        .select("m.*")  # categoria, grupo, modelo, WMAPE
+        .join(base_group, on="grupo", how="left")
+    )
+
+    wmape_all = wmape_cat if wmape_all is None else wmape_all.unionByName(wmape_cat)
+
+# === Resultado: WMAPE por grupo e volumes ===
+wmape_all.orderBy("categoria", "grupo", "modelo").display()
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Plot das bolinhas
 

@@ -71,7 +71,7 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     
     for categoria in categorias:
         try:
-            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_online_teste1809_atacado"
+            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_online_teste2309"
             df_matriz = spark.table(nome_tabela)
             
             matrizes[categoria] = df_matriz
@@ -187,13 +187,13 @@ df_proporcao_factual = (
 #df_proporcao_factual.limit(1).display()
 
 colunas = [
-    "Merecimento_Final_Media90_Qt_venda_sem_ruptura",
-    "Merecimento_Final_Media180_Qt_venda_sem_ruptura",
-    "Merecimento_Final_Media270_Qt_venda_sem_ruptura",
-    "Merecimento_Final_Media360_Qt_venda_sem_ruptura",
+    # "Merecimento_Final_Media90_Qt_venda_sem_ruptura",
+    # "Merecimento_Final_Media180_Qt_venda_sem_ruptura",
+    # "Merecimento_Final_Media270_Qt_venda_sem_ruptura",
+    # "Merecimento_Final_Media360_Qt_venda_sem_ruptura",
     "Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura",
     "Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura",
-    "Merecimento_Final_MediaAparada270_Qt_venda_sem_ruptura",
+    # "Merecimento_Final_MediaAparada270_Qt_venda_sem_ruptura",
     "Merecimento_Final_MediaAparada360_Qt_venda_sem_ruptura",
 ]
 
@@ -330,7 +330,7 @@ for categoria in categorias_teste:
     df_tmp = (
         df_base
         .withColumn("merecimento_percentual",
-                    F.col("Merecimento_Final_Media270_Qt_venda_sem_ruptura"))
+                    F.col("Merecimento_Final_Media1800_Qt_venda_sem_ruptura"))
         .join(
             spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
             .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),

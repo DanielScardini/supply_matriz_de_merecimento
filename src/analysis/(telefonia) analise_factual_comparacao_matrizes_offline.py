@@ -34,6 +34,7 @@ hoje_int = int(hoje.strftime("%Y%m%d"))
 GRUPOS_TESTE = ['Telef pp', 'TV 50 ALTO P', 'TV 55 ALTO P']
 print(GRUPOS_TESTE)
 
+GRUPOS_REMOVER = ['Chip', 'FORA DE LINHA']
 
 data_inicio = "2025-08-29"
 fim_baseline = "2025-09-05"
@@ -71,7 +72,7 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     
     for categoria in categorias:
         try:
-            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_teste1809_atacado"
+            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_teste2309"
             df_matriz = spark.table(nome_tabela)
             
             matrizes[categoria] = df_matriz
@@ -170,7 +171,8 @@ df_proporcao_factual = (
         how="inner",
         on="CdSku"
     )
-    .filter(F.col("grupo_de_necessidade").isin(GRUPOS_TESTE))
+    #.filter(F.col("grupo_de_necessidade").isin(GRUPOS_TESTE))
+    .filter(~F.col("grupo_de_necessidade").isin(GRUPOS_REMOVER))
     .dropna(subset='grupo_de_necessidade')
     .groupBy('CdFilial', 'grupo_de_necessidade')
     .agg(F.round(F.sum('QtDemanda'), 0).alias('QtDemanda'))
@@ -214,12 +216,15 @@ for categoria in categorias_teste:
             on=['CdFilial', 'grupo_de_necessidade'],
             how="left"
         )
+        .filter(~F.col("grupo_de_necessidade").isin(GRUPOS_REMOVER))
+
         .fillna(0.0, subset=[
             'Percentual_QtDemanda',
-            # 'Merecimento_Final_Media90_Qt_venda_sem_ruptura',
-            # 'Merecimento_Final_Media180_Qt_venda_sem_ruptura',
-            # 'Merecimento_Final_Media270_Qt_venda_sem_ruptura',
-            # 'Merecimento_Final_Media360_Qt_venda_sem_ruptura',
+            'Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura',
+            'Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura',
+            'Merecimento_Final_MediaAparada360_Qt_venda_sem_ruptura',
+             "PercMatrizNeogrid",
+            "PercMatrizNeogrid_median",
         ])
         .select(
             "CdFilial",
@@ -233,26 +238,6 @@ for categoria in categorias_teste:
     )
 
     df_acuracia[categoria].limit(1).display()
-
-# COMMAND ----------
-
-for categoria in categorias_teste:
-    (
-        df_acuracia[categoria]
-        .join(
-            spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
-            .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
-            how="left",
-            on="CdFilial"
-        )
-        .groupBy("NmRegiaoGeografica")
-        .agg(
-            F.round(F.sum("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura"),1).alias("merecimento_final"),
-            F.round(F.sum("PercMatrizNeogrid_median"),1).alias("PercMatrizNeogrid_median"),
-            #F.countDistinct("grupo_de_necessidade").alias("grupo_de_necessidade")
-        )
-        .display()
-    )
 
 # COMMAND ----------
 
@@ -326,6 +311,90 @@ for categoria in categorias_teste:
     metrics_all = metrics_cat if metrics_all is None else metrics_all.unionByName(metrics_cat)
 # Mostrar as métricas agregadas por categoria e modelo
 metrics_all.orderBy("categoria", "modelo").display()
+
+# COMMAND ----------
+
+from pyspark.sql import functions as F, Window as W
+
+# === Constantes ===
+COL_REAL = "Percentual_QtDemanda"
+COL_PESO = "QtDemanda"
+GROUP_COL = "grupo_de_necessidade"
+
+def existing_pred_cols(df, base_cols, maybe_cols):
+    present = [c for c in maybe_cols if c in df.columns]
+    return base_cols + present
+
+def wmape_expr(pred_col, real_col=COL_REAL, peso_col=COL_PESO):
+    yhat = F.coalesce(F.col(pred_col).cast("double"), F.lit(0.0))
+    y    = F.coalesce(F.col(real_col).cast("double"), F.lit(0.0))
+    w    = F.coalesce(F.col(peso_col).cast("double"), F.lit(0.0))
+    num = F.sum(F.abs(yhat - y) * w)
+    den = F.sum(F.abs(y) * w)
+    return F.when(den == 0, F.lit(0.0)).otherwise(100.0 * num / den)
+
+# pred_cols_base = list(colunas)
+# extras = ["PercMatrizNeogrid", "PercMatrizNeogrid_median"]
+# categorias_teste, df_acuracia: já definidos
+
+wmape_all = None
+
+for categoria in categorias_teste:
+    df_cat = df_acuracia[categoria]
+    pred_cols = existing_pred_cols(df_cat, pred_cols_base, extras)
+
+    # Volume por grupo via Window
+    w_grp = W.partitionBy(GROUP_COL)
+    df_aug = df_cat.withColumn("Volume", F.sum(F.col(COL_PESO)).over(w_grp))
+
+    # Aggregations por modelo em structs nomeados
+    aggs, agg_names = [], []
+    for c in pred_cols:
+        name = f"agg_{c}"
+        agg_names.append(name)
+        aggs.append(
+            F.struct(
+                F.lit(categoria).alias("categoria"),
+                F.col(GROUP_COL).alias("grupo"),
+                F.lit(c).alias("modelo"),
+                F.round(wmape_expr(c), 4).alias("WMAPE")
+            ).alias(name)
+        )
+
+    wmape_cat = (
+        df_aug
+        .groupBy(GROUP_COL)
+        .agg(*aggs, F.max("Volume").alias("Volume"))
+        .select(
+            F.col(GROUP_COL).alias("grupo"),
+            "Volume",
+            F.array(*[F.col(n) for n in agg_names]).alias("arr")
+        )
+        .select("grupo", "Volume", F.explode("arr").alias("m"))
+        .select(
+            F.lit(categoria).alias("categoria"),
+            "grupo",
+            F.col("m.modelo").alias("modelo"),
+            F.col("m.WMAPE").alias("WMAPE"),
+            "Volume"
+        )
+    )
+
+    # Volume total da categoria para share (sem criar totais)
+    vol_tot_cat = (
+        df_cat
+        .agg(F.sum(F.col(COL_PESO)).alias("Volume_total_categoria"))
+        .withColumn("categoria", F.lit(categoria))
+    )
+
+    wmape_cat = wmape_cat.join(vol_tot_cat, on="categoria", how="left") \
+                         .withColumn("ShareVolumeCategoria",
+                                     F.round(F.col("Volume") / F.col("Volume_total_categoria"), 6))
+
+    wmape_all = wmape_cat if wmape_all is None else wmape_all.unionByName(wmape_cat)
+
+# Apenas grupos existentes, sem linhas de TOTAL
+wmape_all.orderBy("categoria", "grupo", "modelo").display()
 
 # COMMAND ----------
 
