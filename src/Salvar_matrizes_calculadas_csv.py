@@ -62,20 +62,16 @@ PASTA_OUTPUT = "/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/
 
 # Configuração da coluna de merecimento por categoria
 COLUNAS_MERECIMENTO = {
-    "DIRETORIA DE TELAS": "Merecimento_Final_Media90_Qt_venda_sem_ruptura",
-    "DIRETORIA TELEFONIA CELULAR": "Merecimento_Final_Media90_Qt_venda_sem_ruptura",
-    "DIRETORIA LINHA BRANCA": "Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura",
+    "DIRETORIA DE TELAS": "Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura",
+    "DIRETORIA TELEFONIA CELULAR": "Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura",
     "DIRETORIA LINHA LEVE": "Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura",
-    "DIRETORIA INFO/GAMES": "Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura"
 }
 
 # Configuração de filtros por categoria
 FILTROS_GRUPO_NECESSIDADE_REMOCAO = {
     "DIRETORIA DE TELAS": ["FORA DE LINHA", "SEM_GN"],
     "DIRETORIA TELEFONIA CELULAR": ["FORA DE LINHA", "SEM_GN"],
-    "DIRETORIA LINHA BRANCA": ["FORA DE LINHA", "SEM_GN"],
     "DIRETORIA LINHA LEVE": ["FORA DE LINHA", "SEM_GN"],
-    "DIRETORIA INFO/GAMES": ["FORA DE LINHA", "SEM_GN"]
 }
 
 # Configuração de filtros por categoria
@@ -86,8 +82,8 @@ FLAG_SELECAO_REMOCAO = {
 }
 
 FILTROS_GRUPO_NECESSIDADE_SELECAO = {
-    "DIRETORIA DE TELAS": ["FORA DE LINHA", "SEM_GN"],
-    "DIRETORIA TELEFONIA CELULAR": ["FORA DE LINHA", "SEM_GN"],
+    "DIRETORIA DE TELAS": ["TV 50 ALTO P", "TV 55 ALTO P"],
+    "DIRETORIA TELEFONIA CELULAR": ["Telef pp"],
     "DIRETORIA LINHA BRANCA": ["FORA DE LINHA", "SEM_GN"],
     "DIRETORIA LINHA LEVE": ["FORA DE LINHA", "SEM_GN"],
     "DIRETORIA INFO/GAMES": ["FORA DE LINHA", "SEM_GN"]
