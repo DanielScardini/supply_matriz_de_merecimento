@@ -1083,9 +1083,12 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
             'Telef pp', 
             'TV 50 ALTO P', 
             'TV 55 ALTO P',
+            'TV 43 PP',
+            'TV 75 PP',
+            'TV 75 ALTO P',
             'Telef Medio 256GB',
             'Telef Medio 128GB',
-            'Telef Alto'
+            'Telef Alto',
             )
         )
     )
@@ -1187,8 +1190,8 @@ print("=" * 80)
 
 # Lista de todas as categorias disponíveis
 categorias = [
-    #"DIRETORIA DE TELAS",
-    "DIRETORIA TELEFONIA CELULAR", 
+    "DIRETORIA DE TELAS",
+    #"DIRETORIA TELEFONIA CELULAR", 
     #"DIRETORIA DE LINHA BRANCA",
     #"DIRETORIA LINHA LEVE",
     # "DIRETORIA INFO/PERIFERICOS"
@@ -1216,7 +1219,7 @@ for categoria in categorias:
             .upper()
         )
         
-        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste2409"
+        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste2509"
         
         print(f"💾 Salvando matriz de merecimento para: {categoria}")
         print(f"📊 Tabela: {nome_tabela}")

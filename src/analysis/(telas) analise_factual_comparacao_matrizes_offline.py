@@ -31,7 +31,12 @@ hoje_str = hoje.strftime("%Y-%m-%d")
 hoje_int = int(hoje.strftime("%Y%m%d"))
 
 
-GRUPOS_TESTE = ['Telef pp', 'TV 50 ALTO P', 'TV 55 ALTO P']
+GRUPOS_TESTE = [
+    #'TV 50 ALTO P', 
+    #'TV 55 ALTO P',
+     'TV 43 PP'
+     'TV 75 PP',
+     'TV 75 ALTO P']
 print(GRUPOS_TESTE)
 
 
@@ -71,7 +76,7 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     
     for categoria in categorias:
         try:
-            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_teste1809_atacado"
+            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_teste2509"
             df_matriz = spark.table(nome_tabela)
             
             matrizes[categoria] = df_matriz
@@ -87,7 +92,9 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
 df_merecimento_offline = {}
 df_merecimento_offline['DE_TELAS'] = carregar_matrizes_merecimento_calculadas()['DE_TELAS']
 
+  
 df_merecimento_offline['DE_TELAS'].limit(1).display()
+
 
 # COMMAND ----------
 
@@ -330,7 +337,7 @@ for categoria in categorias_teste:
     df_tmp = (
         df_base
         .withColumn("merecimento_percentual",
-                    F.col("Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura"))
+                    F.col("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura"))
         .join(
             spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
             .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
@@ -346,7 +353,7 @@ for categoria in categorias_teste:
     ]
     # agrega também neogrid se existir
     if has_neogrid:
-        agg_exprs.append(F.avg("PercMatrizNeogrid_median").alias("y_neogrid"))
+        agg_exprs.append(F.avg("PercMatrizNeogrid").alias("y_neogrid"))
 
     df_filial_mean[categoria] = (
         df_tmp

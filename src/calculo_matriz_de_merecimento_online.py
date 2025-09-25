@@ -740,7 +740,7 @@ def calcular_medidas_centrais_com_medias_aparadas(df: DataFrame) -> DataFrame:
 
     janelas = {}
     for dias in JANELAS_MOVEIS:
-        janelas[dias] = Window.partitionBy("CdSku", "CdFilial").orderBy("DtAtual").rowsBetween(-dias, 0)
+        janelas[dias] = Window.partitionBy("grupo_de_necessidade", "CdFilial").orderBy("DtAtual").rowsBetween(-dias, 0)
     
     df_com_medias = df_sem_ruptura
     for dias in JANELAS_MOVEIS:
@@ -755,7 +755,7 @@ def calcular_medidas_centrais_com_medias_aparadas(df: DataFrame) -> DataFrame:
             janelas=JANELAS_MOVEIS,
             col_val="QtMercadoria",
             col_ord="DtAtual",
-            grupos=("CdSku","CdFilial"),
+            grupos=("grupo_de_necessidade","CdFilial"),
             alpha=PERCENTUAL_CORTE_MEDIAS_APARADAS,
             min_obs=10
         )
@@ -777,7 +777,7 @@ def consolidar_medidas(df: DataFrame) -> DataFrame:
     
     df_consolidado = (
         df.select(
-            "DtAtual", "CdSku", "CdFilial", "grupo_de_necessidade", "year_month",
+            "DtAtual", "CdFilial", "grupo_de_necessidade", "year_month",
             "QtMercadoria", "Receita", "FlagRuptura", "deltaRuptura", "tipo_agrupamento",
             *colunas_medias,
             *colunas_medias_aparadas

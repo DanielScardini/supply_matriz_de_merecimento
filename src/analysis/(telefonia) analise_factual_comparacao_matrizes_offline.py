@@ -72,7 +72,7 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     
     for categoria in categorias:
         try:
-            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_teste2409"
+            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_teste2509"
             df_matriz = spark.table(nome_tabela)
             
             matrizes[categoria] = df_matriz
@@ -435,7 +435,7 @@ for categoria in categorias_teste:
     ]
     # agrega também neogrid se existir
     if has_neogrid:
-        agg_exprs.append(F.avg("PercMatrizNeogrid_median").alias("y_neogrid"))
+        agg_exprs.append(F.avg("PercMatrizNeogrid").alias("y_neogrid"))
 
     df_filial_mean[categoria] = (
         df_tmp
