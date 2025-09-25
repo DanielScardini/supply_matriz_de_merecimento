@@ -99,7 +99,7 @@ REGRAS_AGRUPAMENTO = {
 
 # Configuração de parâmetros para detecção de outliers
 PARAMETROS_OUTLIERS = {
-    "desvios_meses_atipicos": 2,  # Desvios para meses atípicos
+    "desvios_meses_atipicos": 3,  # Desvios para meses atípicos
     "desvios_historico_cd": 3,     # Desvios para outliers históricos a nível CD
     "desvios_historico_loja": 3,   # Desvios para outliers históricos a nível loja
     "desvios_atacado_cd": 3,     # Desvios para outliers CD em lojas de atacado
@@ -227,7 +227,6 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-07-01") -> Data
     df_base = (
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
         .filter(F.col("NmAgrupamentoDiretoriaSetor") == categoria)
-        #.filter(F.col("NmEspecieGerencial").isin('LIQUIDIFICADORES ACIMA 1001 W.'))
         .filter(F.col("DtAtual") >= data_inicio)
         .withColumn(
             "year_month",
@@ -1077,16 +1076,19 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         
         # 5. Definição do grupo_de_necessidade
         df_com_grupo = determinar_grupo_necessidade(categoria, df_com_mapeamentos)
-        # df_com_grupo = (
-        #     df_com_grupo
-        #     .filter(
-        #         F.col("grupo_de_necessidade").isin(
-        #     #'Telef pp', 
-        #     #'TV 50 ALTO P', 
-        #     'TV 55 ALTO P'
-        #     )
-        #      )
-        #  )
+        df_com_grupo = (
+            df_com_grupo
+            .filter(
+                F.col("grupo_de_necessidade").isin(
+            'Telef pp', 
+            'TV 50 ALTO P', 
+            'TV 55 ALTO P',
+            'Telef Medio 256GB',
+            'Telef Medio 128GB',
+            'Telef Alto'
+            )
+        )
+    )
         df_com_grupo.cache()
 
         df_agregado = (
@@ -1288,9 +1290,3 @@ print("=" * 80)
 # MAGIC - Identificação de distorções
 # MAGIC
 # MAGIC **Este script está completo e finalizado!** 🎉
-
-# COMMAND ----------
-
-# MAGIC %sql SELECT * FROM databox.bcg_comum.supply_matriz_merecimento_TELEFONIA_CELULAR_teste2309
-# MAGIC
-# MAGIC WHERE grupo_de_necessidade = 'Telef Medio 128GB'
