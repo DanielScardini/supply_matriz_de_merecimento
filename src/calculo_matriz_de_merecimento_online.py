@@ -126,6 +126,12 @@ PARAMETROS_OUTLIERS = {
     "desvios_atacado_loja": 1.5    # Desvios para outliers loja em lojas de atacado
 }
 
+# Configuração das janelas móveis para médias aparadas
+JANELAS_MOVEIS_APARADAS = [90, 180, 270, 360]
+
+# Configuração específica para merecimento CD (sempre 90 dias)
+JANELA_CD_MERECIMENTO = 90
+
 
 FILIAIS_ATACADO = [
     1671,     # Petrolina - PE
