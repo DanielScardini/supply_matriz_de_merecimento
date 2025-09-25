@@ -563,7 +563,7 @@ def remover_outliers_series_historicas(df: DataFrame,
                 F.col(coluna_valor) < F.col("threshold_inferior"),
                 F.col("threshold_inferior")
             )
-            .otherwise(F.col(coluna_valor))
+            .otherwise(F.col(f"{coluna_valor}_original"))
         )
         .withColumn(
             "flag_outlier_removido",
@@ -836,55 +836,44 @@ def criar_de_para_filial_cd() -> DataFrame:
 
 def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) -> DataFrame:
     """
-    Calcula o merecimento a nível CD por grupo de necessidade.
+    Calcula o merecimento a nível CD por grupo de necessidade usando APENAS média aparada 90 dias.
     Retorna o percentual que cada CD representa dentro da Cia.
     """
-    print(f"🔄 Calculando merecimento CD para categoria: {categoria}")
+    print(f"🔄 Calculando merecimento CD para categoria: {categoria} (média aparada 90 dias)")
     
     df_data_calculo = df.filter(F.col("DtAtual") == data_calculo)
 
     df_data_calculo = (
         df_data_calculo
-        .orderBy('CdSku', 'CdFilial')
-        .dropDuplicates(subset=['CdSku', 'CdFilial'])
+        .orderBy('CdFilial')
+        .dropDuplicates(subset=['CdFilial'])
     )
     
-    medidas_disponiveis = [
-        "Media90_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura", 
-        "Media270_Qt_venda_sem_ruptura", "Media360_Qt_venda_sem_ruptura",
-        "MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada180_Qt_venda_sem_ruptura",
-        "MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada360_Qt_venda_sem_ruptura"
-    ]
+    # Usar apenas média aparada 90 dias para merecimento CD
+    medida_cd = f"MediaAparada{JANELA_CD_MERECIMENTO}_Qt_venda_sem_ruptura"
     
     de_para_filial_cd = criar_de_para_filial_cd()
     df_com_cd = df_data_calculo.join(de_para_filial_cd, on="cdfilial", how="left")
     
-    aggs_cd = []
-    for medida in medidas_disponiveis:
-        if medida in df_com_cd.columns:
-            aggs_cd.append(F.sum(F.col(medida)).alias(f"Total_{medida}"))
-    
+    # Agregar apenas a medida específica do CD
     df_merecimento_cd = (
         df_com_cd
         .groupBy("cd_vinculo", "grupo_de_necessidade")
-        .agg(*aggs_cd)
+        .agg(F.sum(F.col(medida_cd)).alias(f"Total_{medida_cd}"))
     )
     
-    # NOVO: Calcular percentual do CD dentro da Cia
-    for medida in medidas_disponiveis:
-        coluna_total = f"Total_{medida}"
-        if coluna_total in df_merecimento_cd.columns:  # ← VERIFICAR Total_{medida}
-            w_total_cia = Window.partitionBy("grupo_de_necessidade")
-            
-            df_merecimento_cd = df_merecimento_cd.withColumn(
-                f"Total_Cia_{medida}",
-                F.sum(F.col(coluna_total)).over(w_total_cia)  # ← USAR coluna_total
-            )
-            
-            df_merecimento_cd = df_merecimento_cd.withColumn(
-                f"Merecimento_CD_{medida}",
-                F.when(F.col(f"Total_Cia_{medida}") > 0,
-                    F.col(coluna_total) / F.col(f"Total_Cia_{medida}"))  # ← USAR coluna_total
+    # Calcular percentual do CD dentro da Cia
+    w_total_cia = Window.partitionBy("grupo_de_necessidade")
+    
+    df_merecimento_cd = df_merecimento_cd.withColumn(
+        f"Total_Cia_{medida_cd}",
+        F.sum(F.col(f"Total_{medida_cd}")).over(w_total_cia)
+    )
+    
+    df_merecimento_cd = df_merecimento_cd.withColumn(
+        f"Merecimento_CD_{medida_cd}",
+        F.when(F.col(f"Total_Cia_{medida_cd}") > 0,
+                    F.col(f"Total_{medida_cd}") / F.col(f"Total_Cia_{medida_cd}"))
                 .otherwise(0)
             )
 
@@ -1157,12 +1146,23 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         #     )
         # )
         df_com_grupo.cache()
+
+        # 5.1. Agregação por grupo_de_necessidade (somando SKUs)
+        df_agregado = (
+            df_com_grupo
+            .groupBy("grupo_de_necessidade", "CdFilial", "DtAtual", "year_month")
+            .agg(
+                F.sum("QtMercadoria").alias("QtMercadoria"),
+                F.sum("deltaRuptura").alias("deltaRuptura"),
+                F.first("tipo_agrupamento").alias("tipo_agrupamento")
+            )
+        )
         
         # 6. Detecção de outliers
-        df_stats, df_meses_atipicos = detectar_outliers_meses_atipicos(df_com_grupo, categoria)
+        df_stats, df_meses_atipicos = detectar_outliers_meses_atipicos(df_agregado, categoria)
         
         # 7. Filtragem de meses atípicos
-        df_filtrado = filtrar_meses_atipicos(df_com_grupo, df_meses_atipicos)
+        df_filtrado = filtrar_meses_atipicos(df_agregado, df_meses_atipicos)
         
         # 8. Remoção de outliers das séries históricas
         print("=" * 80)
