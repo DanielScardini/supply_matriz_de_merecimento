@@ -950,22 +950,18 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
                               df_merecimento_interno: DataFrame) -> DataFrame:
     """
     Calcula o merecimento final: Merecimento_CD × Proporcao_Interna
+    Usa apenas médias aparadas de 90 a 360 dias.
     Retorna apenas CdFilial x grupo_de_necessidade com os merecimentos finais
     """
-    print("🔄 Calculando merecimento final...")
+    print("🔄 Calculando merecimento final (médias aparadas 90-360 dias)...")
     
-    medidas_disponiveis = [
-        "Media90_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura", 
-        "Media270_Qt_venda_sem_ruptura", "Media360_Qt_venda_sem_ruptura",
-        "MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada180_Qt_venda_sem_ruptura",
-        "MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada360_Qt_venda_sem_ruptura"
-    ]
+    # Medidas disponíveis (apenas médias aparadas)
+    medidas_aparadas = [f"MediaAparada{dias}_Qt_venda_sem_ruptura" for dias in JANELAS_MOVEIS_APARADAS]
     
-    # 1. Preparar dados do merecimento CD (cd_primario x grupo_de_necessidade)
-    colunas_cd = ["cd_vinculo", "grupo_de_necessidade"]
-    for medida in medidas_disponiveis:
-        if f"Merecimento_CD_{medida}" in df_merecimento_cd.columns:
-            colunas_cd.append(f"Merecimento_CD_{medida}")
+    # 1. Preparar dados do merecimento CD (cd_vinculo x grupo_de_necessidade)
+    # CD usa apenas média aparada 90 dias
+    medida_cd = f"MediaAparada{JANELA_CD_MERECIMENTO}_Qt_venda_sem_ruptura"
+    colunas_cd = ["cd_vinculo", "grupo_de_necessidade", f"Merecimento_CD_{medida_cd}"]
     
     df_merecimento_cd_limpo = df_merecimento_cd.select(*colunas_cd)
 
@@ -994,17 +990,17 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
     )
     
     # 4. Calcular merecimento final (multiplicação)
-    for medida in medidas_disponiveis:
-        if (f"Merecimento_CD_{medida}" in df_merecimento_final.columns and 
-            f"Proporcao_Interna_{medida}" in df_merecimento_final.columns):
+    # Para cada medida aparada, multiplicar pelo merecimento CD (90 dias)
+    for medida in medidas_aparadas:
+        if f"Proporcao_Interna_{medida}" in df_merecimento_final.columns:
             df_merecimento_final = df_merecimento_final.withColumn(
                 f"Merecimento_Final_{medida}",
-                F.col(f"Merecimento_CD_{medida}") * F.col(f"Proporcao_Interna_{medida}")
+                F.col(f"Merecimento_CD_{medida_cd}") * F.col(f"Proporcao_Interna_{medida}")
             )
     
     # 5. Selecionar apenas colunas finais: CdFilial x grupo_de_necessidade
     colunas_finais = ["CdFilial", "grupo_de_necessidade"]
-    for medida in medidas_disponiveis:
+    for medida in medidas_aparadas:
         coluna_final = f"Merecimento_Final_{medida}"
         if coluna_final in df_merecimento_final.columns:
             colunas_finais.append(coluna_final)
@@ -1017,7 +1013,7 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
     # VALIDAÇÃO: Verificar se a multiplicação ainda soma 100% por grupo de necessidade
     print("🔍 Validando se a multiplicação dos dois níveis ainda soma 100%...")
     
-    for medida in medidas_disponiveis:
+    for medida in medidas_aparadas:
         coluna_final = f"Merecimento_Final_{medida}"
         if coluna_final in df_merecimento_final_limpo.columns:
             print(f"  Verificando medida: {medida}")
