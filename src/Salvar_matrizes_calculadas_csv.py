@@ -11,10 +11,8 @@
 # MAGIC ```
 # MAGIC PASTA_OUTPUT/
 # MAGIC └── YYYY-MM-DD/
-# MAGIC     ├── matriz_offline/
-# MAGIC     │   └── matriz_de_merecimento_{categoria}_{data}_offline.xlsx
-# MAGIC     └── matriz_online/
-# MAGIC         └── matriz_de_merecimento_{categoria}_{data}_online.xlsx
+# MAGIC     ├── matriz_de_merecimento_{categoria}_{data}_offline.xlsx
+# MAGIC     └── matriz_de_merecimento_{categoria}_{data}_online.xlsx
 # MAGIC ```
 
 # COMMAND ----------
@@ -202,7 +200,7 @@ def processar_matriz_merecimento(categoria: str, canal: str) -> DataFrame:
 def salvar_matriz_excel(df: DataFrame, categoria: str, canal: str, data_exportacao: str = None) -> str:
     """
     Salva a matriz de merecimento em arquivo Excel usando pandas.
-    Cria estrutura de pastas: PASTA_OUTPUT/data_exportacao/matriz_{canal}/
+    Cria estrutura de pastas: PASTA_OUTPUT/data_exportacao/
     
     Args:
         df: DataFrame com a matriz processada
@@ -219,21 +217,19 @@ def salvar_matriz_excel(df: DataFrame, categoria: str, canal: str, data_exportac
     # Configurações específicas
     grupo_apelido = TABELAS_MATRIZ_MERECIMENTO[categoria]["grupo_apelido"]
     
-    # Criar estrutura de pastas: PASTA_OUTPUT/data_exportacao/matriz_{canal}/
+    # Criar estrutura de pastas: PASTA_OUTPUT/data_exportacao/
     pasta_data = f"{PASTA_OUTPUT}/{data_exportacao}"
-    pasta_canal = f"{pasta_data}/matriz_{canal}"
     
-    # Criar pastas se não existirem
-    os.makedirs(pasta_canal, exist_ok=True)
+    # Criar pasta se não existir
+    os.makedirs(pasta_data, exist_ok=True)
     
     # Nome do arquivo
     nome_arquivo = f"matriz_de_merecimento_{grupo_apelido}_{data_exportacao}_{canal}.xlsx"
-    caminho_completo = f"{pasta_canal}/{nome_arquivo}"
+    caminho_completo = f"{pasta_data}/{nome_arquivo}"
     
     print(f"💾 Salvando matriz em Excel:")
     print(f"  • Arquivo: {nome_arquivo}")
     print(f"  • Pasta data: {pasta_data}")
-    print(f"  • Pasta canal: {pasta_canal}")
     print(f"  • Caminho completo: {caminho_completo}")
     
     # Converter DataFrame do Spark para pandas
