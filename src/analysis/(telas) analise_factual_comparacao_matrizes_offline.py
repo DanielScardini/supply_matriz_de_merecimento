@@ -32,11 +32,12 @@ hoje_int = int(hoje.strftime("%Y%m%d"))
 
 
 GRUPOS_TESTE = [
-    #'TV 50 ALTO P', 
-    #'TV 55 ALTO P',
-     'TV 43 PP'
+    'TV 50 ALTO P', 
+    'TV 55 ALTO P',
+     'TV 43 PP',
      'TV 75 PP',
-     'TV 75 ALTO P']
+     'TV 75 ALTO P'
+     ]
 print(GRUPOS_TESTE)
 
 

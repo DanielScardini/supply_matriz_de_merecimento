@@ -419,7 +419,7 @@ for categoria in categorias_teste:
     df_tmp = (
         df_base
         .withColumn("merecimento_percentual",
-                    F.col("Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura"))
+                    F.col("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura"))
         .join(
             spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
             .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
@@ -521,6 +521,13 @@ for categoria in categorias_teste:
         fig_neogrid.show()
     else:
         print(f"[{categoria}] Coluna PercMatrizNeogrid não disponível para plot.")
+
+# COMMAND ----------
+
+(
+    spark.table('databox.bcg_comum.supply_de_para_modelos_gemeos_tecnologia')
+    
+    .display()
 
 # COMMAND ----------
 

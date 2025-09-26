@@ -778,7 +778,11 @@ def consolidar_medidas(df: DataFrame) -> DataFrame:
     df_consolidado = (
         df.select(
             "DtAtual", "CdFilial", "grupo_de_necessidade", "year_month",
-            "QtMercadoria", "Receita", "FlagRuptura", "deltaRuptura", "tipo_agrupamento",
+            "QtMercadoria", 
+            #"Receita", 
+            #"FlagRuptura", 
+            "deltaRuptura", 
+            "tipo_agrupamento",
             *colunas_medias,
             *colunas_medias_aparadas
         )
@@ -1253,7 +1257,7 @@ categorias = [
     "DIRETORIA DE TELAS",
     "DIRETORIA TELEFONIA CELULAR", 
     #"DIRETORIA DE LINHA BRANCA",
-    "DIRETORIA LINHA LEVE",
+    #"DIRETORIA LINHA LEVE",
     # "DIRETORIA INFO/PERIFERICOS"
 ]
 
@@ -1279,7 +1283,7 @@ for categoria in categorias:
             .upper()
         )
         
-        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_online_teste2309"
+        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_online_teste2509"
         
         print(f"💾 Salvando matriz de merecimento para: {categoria}")
         print(f"📊 Tabela: {nome_tabela}")

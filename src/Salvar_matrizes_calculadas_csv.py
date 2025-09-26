@@ -31,13 +31,13 @@ hoje_int = int(hoje.strftime("%Y%m%d"))
 # Configuração das tabelas por categoria e canal
 TABELAS_MATRIZ_MERECIMENTO = {
     "DIRETORIA DE TELAS": {
-        "offline": "databox.bcg_comum.supply_matriz_merecimento_de_telas_teste1009",
-        "online": "databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste0809",
+        "offline": "databox.bcg_comum.supply_matriz_merecimento_de_telas_teste2509",
+        "online": "databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste2509",
         "grupo_apelido": "telas"
     },
     "DIRETORIA TELEFONIA CELULAR": {
-        "offline": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste1009",
-        "online": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste0809",
+        "offline": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste2509",
+        "online": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste2509",
         "grupo_apelido": "telefonia"
     },
     # "DIRETORIA LINHA BRANCA": {
