@@ -12,7 +12,7 @@
 # MAGIC - Bordas e alinhamento profissional
 # MAGIC - Informações do arquivo (canal, data, hora de geração)
 # MAGIC - Largura de colunas otimizada
-# MAGIC - Cores corporativas (azul BCG)
+# MAGIC - Cores corporativas Casas Bahia (azul e vermelho)
 # MAGIC 
 # MAGIC **Estrutura de pastas**:
 # MAGIC ```
@@ -228,9 +228,9 @@ def embelezar_excel(caminho_arquivo: str, categoria: str, canal: str, data_expor
     ws = wb.active
     ws.title = f"Matriz {categoria} - {canal.title()}"
     
-    # Definir estilos
+    # Definir estilos com cores Casas Bahia
     header_font = Font(name='Arial', size=12, bold=True, color='FFFFFF')
-    header_fill = PatternFill(start_color='366092', end_color='366092', fill_type='solid')
+    header_fill = PatternFill(start_color='003366', end_color='003366', fill_type='solid')  # Azul Casas Bahia
     data_font = Font(name='Arial', size=10)
     border = Border(
         left=Side(style='thin'),
@@ -241,7 +241,7 @@ def embelezar_excel(caminho_arquivo: str, categoria: str, canal: str, data_expor
     
     # Cabeçalho principal
     ws['A1'] = f"MATRIZ DE MERECIMENTO - {categoria.upper()}"
-    ws['A1'].font = Font(name='Arial', size=16, bold=True, color='366092')
+    ws['A1'].font = Font(name='Arial', size=16, bold=True, color='CC0000')  # Vermelho Casas Bahia
     ws['A1'].alignment = Alignment(horizontal='center')
     ws.merge_cells('A1:F1')
     
