@@ -4,6 +4,8 @@
 # MAGIC
 # MAGIC Este notebook implementa o salvamento unificado de matrizes de merecimento para todas as categorias,
 # MAGIC com tratamento automático para canais offline e online.
+# MAGIC 
+# MAGIC **Formato de saída**: Excel (.xlsx) usando pandas
 
 # COMMAND ----------
 
@@ -187,9 +189,9 @@ def processar_matriz_merecimento(categoria: str, canal: str) -> DataFrame:
 
 # COMMAND ----------
 
-def salvar_matriz_csv(df: DataFrame, categoria: str, canal: str, data_exportacao: str = None) -> str:
+def salvar_matriz_excel(df: DataFrame, categoria: str, canal: str, data_exportacao: str = None) -> str:
     """
-    Salva a matriz de merecimento em arquivo CSV.
+    Salva a matriz de merecimento em arquivo Excel usando pandas.
     
     Args:
         df: DataFrame com a matriz processada
@@ -207,22 +209,18 @@ def salvar_matriz_csv(df: DataFrame, categoria: str, canal: str, data_exportacao
     grupo_apelido = TABELAS_MATRIZ_MERECIMENTO[categoria]["grupo_apelido"]
     
     # Nome do arquivo
-    nome_arquivo = f"matriz_de_merecimento_{grupo_apelido}_{data_exportacao}_{canal}.csv"
+    nome_arquivo = f"matriz_de_merecimento_{grupo_apelido}_{data_exportacao}_{canal}.xlsx"
     caminho_completo = f"{PASTA_OUTPUT}/{nome_arquivo}"
     
-    print(f"💾 Salvando matriz em CSV:")
+    print(f"💾 Salvando matriz em Excel:")
     print(f"  • Arquivo: {nome_arquivo}")
     print(f"  • Caminho: {caminho_completo}")
     
-    # Salvar como CSV
-    (
-        df
-        .coalesce(1)  # Força um único arquivo
-        .write
-        .mode("overwrite")
-        .option("header", True)
-        .csv(caminho_completo)
-    )
+    # Converter DataFrame do Spark para pandas
+    df_pandas = df.toPandas()
+    
+    # Salvar como Excel usando pandas
+    df_pandas.to_excel(caminho_completo, index=False, engine='openpyxl')
     
     print(f"✅ Arquivo salvo com sucesso!")
     
@@ -250,13 +248,13 @@ def executar_exportacao_completa(categoria: str, data_exportacao: str = None) ->
         # Processar canal offline
         print("📊 Processando canal OFFLINE...")
         df_offline = processar_matriz_merecimento(categoria, "offline")
-        caminho_offline = salvar_matriz_csv(df_offline, categoria, "offline", data_exportacao)
+        caminho_offline = salvar_matriz_excel(df_offline, categoria, "offline", data_exportacao)
         arquivos_salvos["offline"] = caminho_offline
         
         # Processar canal online
         print("\n📊 Processando canal ONLINE...")
         df_online = processar_matriz_merecimento(categoria, "online")
-        caminho_online = salvar_matriz_csv(df_online, categoria, "online", data_exportacao)
+        caminho_online = salvar_matriz_excel(df_online, categoria, "online", data_exportacao)
         arquivos_salvos["online"] = caminho_online
         
         print("\n" + "=" * 80)
