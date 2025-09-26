@@ -220,7 +220,7 @@ def salvar_matriz_csv(df: DataFrame, categoria: str, canal: str, data_exportacao
         .coalesce(1)  # Força um único arquivo
         .write
         .mode("overwrite")
-        .option("header", "true")
+        .option("header", True)
         .csv(caminho_completo)
     )
     
