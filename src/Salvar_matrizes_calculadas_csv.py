@@ -4,16 +4,9 @@
 # MAGIC
 # MAGIC Este notebook implementa o salvamento unificado de matrizes de merecimento para todas as categorias,
 # MAGIC com tratamento automático para canais offline e online.
-# MAGIC 
-# MAGIC **Formato de saída**: Excel (.xlsx) usando pandas com formatação profissional
-# MAGIC 
-# MAGIC **Recursos de embelezamento**:
-# MAGIC - Cabeçalhos coloridos e formatados
-# MAGIC - Bordas e alinhamento profissional
-# MAGIC - Informações do arquivo (canal, data, hora de geração)
-# MAGIC - Largura de colunas otimizada
-# MAGIC - Cores corporativas Casas Bahia (azul e vermelho)
-# MAGIC 
+# MAGIC
+# MAGIC **Formato de saída**: Excel (.xlsx) usando pandas
+# MAGIC
 # MAGIC **Estrutura de pastas**:
 # MAGIC ```
 # MAGIC PASTA_OUTPUT/
@@ -30,10 +23,6 @@ from datetime import datetime, timedelta, date
 import pandas as pd
 from typing import List, Optional, Dict, Any
 import os
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils.dataframe import dataframe_to_rows
-from openpyxl.drawing.image import Image
 
 # Inicialização do Spark
 spark = SparkSession.builder.appName("salvar_matrizes_merecimento_unificadas").getOrCreate()
@@ -53,12 +42,12 @@ hoje_int = int(hoje.strftime("%Y%m%d"))
 TABELAS_MATRIZ_MERECIMENTO = {
     "DIRETORIA DE TELAS": {
         "offline": "databox.bcg_comum.supply_matriz_merecimento_de_telas_teste2509",
-        "online": "databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste2509",
+        "online": "databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste2609",
         "grupo_apelido": "telas"
     },
     "DIRETORIA TELEFONIA CELULAR": {
         "offline": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste2509",
-        "online": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste2509",
+        "online": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste2609",
         "grupo_apelido": "telefonia"
     },
     # "DIRETORIA LINHA BRANCA": {
@@ -103,8 +92,20 @@ FLAG_SELECAO_REMOCAO = {
 }
 
 FILTROS_GRUPO_NECESSIDADE_SELECAO = {
-    "DIRETORIA DE TELAS": ["TV 50 ALTO P", "TV 55 ALTO P"],
-    "DIRETORIA TELEFONIA CELULAR": ["Telef pp"],
+    "DIRETORIA DE TELAS": [
+        # "TV 50 ALTO P", 
+        # "TV 55 ALTO P", 
+        "TV 43 PP", 
+        # "TV 75 PP",
+        # "TV 75 ALTO P"
+        ],
+    "DIRETORIA TELEFONIA CELULAR": [
+        #"Telef pp", 
+        "Telef Medio 128GB", 
+        "Telef Medio 256GB", 
+        "Telef Alto", 
+        "LINHA PREMIUM"
+        ],
     "DIRETORIA LINHA BRANCA": ["FORA DE LINHA", "SEM_GN"],
     "DIRETORIA LINHA LEVE": ["FORA DE LINHA", "SEM_GN"],
     "DIRETORIA INFO/GAMES": ["FORA DE LINHA", "SEM_GN"]
@@ -208,80 +209,6 @@ def processar_matriz_merecimento(categoria: str, canal: str) -> DataFrame:
 
 # COMMAND ----------
 
-def embelezar_excel(caminho_arquivo: str, categoria: str, canal: str, data_exportacao: str) -> str:
-    """
-    Embeleza o arquivo Excel com cores, formatação e possivelmente imagens.
-    
-    Args:
-        caminho_arquivo: Caminho do arquivo Excel
-        categoria: Categoria da diretoria
-        canal: Canal (offline ou online)
-        data_exportacao: Data de exportação
-        
-    Returns:
-        Caminho do arquivo embelezado
-    """
-    print(f"🎨 Embelezando arquivo Excel...")
-    
-    # Carregar o workbook
-    wb = Workbook()
-    ws = wb.active
-    ws.title = f"Matriz {categoria} - {canal.title()}"
-    
-    # Definir estilos com cores Casas Bahia
-    header_font = Font(name='Arial', size=12, bold=True, color='FFFFFF')
-    header_fill = PatternFill(start_color='003366', end_color='003366', fill_type='solid')  # Azul Casas Bahia
-    data_font = Font(name='Arial', size=10)
-    border = Border(
-        left=Side(style='thin'),
-        right=Side(style='thin'),
-        top=Side(style='thin'),
-        bottom=Side(style='thin')
-    )
-    
-    # Cabeçalho principal
-    ws['A1'] = f"MATRIZ DE MERECIMENTO - {categoria.upper()}"
-    ws['A1'].font = Font(name='Arial', size=16, bold=True, color='CC0000')  # Vermelho Casas Bahia
-    ws['A1'].alignment = Alignment(horizontal='center')
-    ws.merge_cells('A1:F1')
-    
-    # Informações do arquivo
-    ws['A2'] = f"Canal: {canal.title()}"
-    ws['B2'] = f"Data: {data_exportacao}"
-    ws['C2'] = f"Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
-    
-    # Estilizar informações
-    for cell in ['A2', 'B2', 'C2']:
-        ws[cell].font = Font(name='Arial', size=10, italic=True)
-        ws[cell].fill = PatternFill(start_color='E7E6E6', end_color='E7E6E6', fill_type='solid')
-    
-    # Espaçamento
-    ws.row_dimensions[3].height = 20
-    
-    # Cabeçalhos das colunas (começando na linha 4)
-    headers = ['CdFilial', 'CdSku', 'Grupo de Necessidade', 'Merecimento (%)', 'Nome da Filial', 'Região']
-    for col, header in enumerate(headers, 1):
-        cell = ws.cell(row=4, column=col, value=header)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = Alignment(horizontal='center', vertical='center')
-        cell.border = border
-    
-    # Ajustar largura das colunas
-    column_widths = [12, 15, 25, 15, 30, 20]
-    for i, width in enumerate(column_widths, 1):
-        ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = width
-    
-    # Salvar o arquivo embelezado
-    caminho_embelezado = caminho_arquivo.replace('.xlsx', '_embelezado.xlsx')
-    wb.save(caminho_embelezado)
-    
-    print(f"✅ Arquivo embelezado salvo: {caminho_embelezado}")
-    
-    return caminho_embelezado
-
-# COMMAND ----------
-
 def salvar_matriz_excel(df: DataFrame, categoria: str, canal: str, data_exportacao: str = None) -> str:
     """
     Salva a matriz de merecimento em arquivo Excel usando pandas.
@@ -320,15 +247,12 @@ def salvar_matriz_excel(df: DataFrame, categoria: str, canal: str, data_exportac
     # Converter DataFrame do Spark para pandas
     df_pandas = df.toPandas()
     
-    # Salvar como Excel usando pandas (arquivo básico)
+    # Salvar como Excel usando pandas
     df_pandas.to_excel(caminho_completo, index=False, engine='openpyxl')
     
-    print(f"✅ Arquivo básico salvo com sucesso!")
+    print(f"✅ Arquivo salvo com sucesso!")
     
-    # Embelezar o arquivo Excel
-    caminho_embelezado = embelezar_excel(caminho_completo, categoria, canal, data_exportacao)
-    
-    return caminho_embelezado
+    return caminho_completo
 
 # COMMAND ----------
 
@@ -391,6 +315,8 @@ def executar_exportacao_completa(categoria: str, data_exportacao: str = None) ->
 
 # COMMAND ----------
 
+!pip install openpyxl
+
 def exportar_todas_categorias(data_exportacao: str = None) -> Dict[str, Dict[str, str]]:
     """
     Exporta matrizes para todas as categorias suportadas.
@@ -436,3 +362,18 @@ def exportar_todas_categorias(data_exportacao: str = None) -> Dict[str, Dict[str
 
 # Descomente para executar exportação para todas as categorias
 resultados = exportar_todas_categorias()
+
+# COMMAND ----------
+
+from pyspark.sql.functions import regexp_replace, col
+
+df = (
+    processar_matriz_merecimento(categoria='DIRETORIA TELEFONIA CELULAR', canal='online')
+    .withColumn(
+        "Merecimento_Percentual_online",
+        regexp_replace(col("Merecimento_Percentual_online").cast("string"), r"\.", ",")
+    )
+)
+
+df.display()
+

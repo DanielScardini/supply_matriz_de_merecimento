@@ -31,7 +31,7 @@ hoje_str = hoje.strftime("%Y-%m-%d")
 hoje_int = int(hoje.strftime("%Y%m%d"))
 
 
-GRUPOS_TESTE = ['Telef pp', 'TV 50 ALTO P', 'TV 55 ALTO P']
+GRUPOS_TESTE = ['Telef pp', 'Telef Medio 128GB', 'Telef Medio 256GB', 'Telef Alto', 'LINHA PREMIUM']
 print(GRUPOS_TESTE)
 
 
@@ -71,7 +71,7 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     
     for categoria in categorias:
         try:
-            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste0809"
+            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste2609"
             df_matriz = spark.table(nome_tabela)
             
             matrizes[categoria] = df_matriz
@@ -144,8 +144,8 @@ from pyspark.sql import functions as F
 from pyspark.sql import Window
 
 # === Janela dinâmica: últimos 30 dias até ontem ===
-fim_janela = F.date_sub(F.current_date(), 1)
-inicio_janela = F.date_sub(fim_janela, 29)
+fim_janela = F.date_sub(F.current_date(), 10)
+inicio_janela = F.date_sub(fim_janela, 59)
 
 # Log das datas (yyyy-MM-dd)
 _row = (
@@ -187,14 +187,14 @@ df_proporcao_factual = (
 #df_proporcao_factual.limit(1).display()
 
 colunas = [
-    "Merecimento_Final_Media90_Qt_venda_sem_ruptura",
-    "Merecimento_Final_Media180_Qt_venda_sem_ruptura",
-    "Merecimento_Final_Media270_Qt_venda_sem_ruptura",
-    "Merecimento_Final_Media360_Qt_venda_sem_ruptura",
+    # "Merecimento_Final_Media90_Qt_venda_sem_ruptura",
+    # "Merecimento_Final_Media180_Qt_venda_sem_ruptura",
+    # "Merecimento_Final_Media270_Qt_venda_sem_ruptura",
+    # "Merecimento_Final_Media360_Qt_venda_sem_ruptura",
     "Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura",
-    "Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura",
-    "Merecimento_Final_MediaAparada270_Qt_venda_sem_ruptura",
-    "Merecimento_Final_MediaAparada360_Qt_venda_sem_ruptura",
+    # "Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura",
+    # "Merecimento_Final_MediaAparada270_Qt_venda_sem_ruptura",
+    # "Merecimento_Final_MediaAparada360_Qt_venda_sem_ruptura",
 ]
 
 df_acuracia = {}
@@ -216,10 +216,10 @@ for categoria in categorias_teste:
         )
         .fillna(0.0, subset=[
             'Percentual_QtDemanda',
-            'Merecimento_Final_Media90_Qt_venda_sem_ruptura',
-            'Merecimento_Final_Media180_Qt_venda_sem_ruptura',
-            'Merecimento_Final_Media270_Qt_venda_sem_ruptura',
-            'Merecimento_Final_Media360_Qt_venda_sem_ruptura',
+            # 'Merecimento_Final_Media90_Qt_venda_sem_ruptura',
+            # 'Merecimento_Final_Media180_Qt_venda_sem_ruptura',
+            # 'Merecimento_Final_Media270_Qt_venda_sem_ruptura',
+            # 'Merecimento_Final_Media360_Qt_venda_sem_ruptura',
         ])
         .select(
             "CdFilial",
@@ -309,70 +309,86 @@ metrics_all.orderBy("categoria", "modelo").display()
 
 # COMMAND ----------
 
-from pyspark.sql import functions as F
-from functools import reduce
+from pyspark.sql import functions as F, Window as W
 
 # === Constantes ===
 COL_REAL = "Percentual_QtDemanda"
 COL_PESO = "QtDemanda"
-GROUP_COL = "GrupoNecessidade"  # ajuste se necessário
+GROUP_COL = "grupo_de_necessidade"
 
-# === Util: lista de colunas de predição existentes ===
 def existing_pred_cols(df, base_cols, maybe_cols):
     present = [c for c in maybe_cols if c in df.columns]
     return base_cols + present
 
-# === Util: WMAPE ponderado por COL_PESO ===
 def wmape_expr(pred_col, real_col=COL_REAL, peso_col=COL_PESO):
-    num = F.sum(F.abs(F.col(pred_col) - F.col(real_col)) * F.col(peso_col))
-    den = F.sum(F.abs(F.col(real_col)) * F.col(peso_col))
+    yhat = F.coalesce(F.col(pred_col).cast("double"), F.lit(0.0))
+    y    = F.coalesce(F.col(real_col).cast("double"), F.lit(0.0))
+    w    = F.coalesce(F.col(peso_col).cast("double"), F.lit(0.0))
+    num = F.sum(F.abs(yhat - y) * w)
+    den = F.sum(F.abs(y) * w)
     return F.when(den == 0, F.lit(0.0)).otherwise(100.0 * num / den)
 
-# === Entrada: listas já existentes ===
 # pred_cols_base = list(colunas)
 # extras = ["PercMatrizNeogrid", "PercMatrizNeogrid_median"]
-# categorias_teste, df_acuracia: já definidos no seu ambiente
+# categorias_teste, df_acuracia: já definidos
 
-# === Cálculo: WMAPE por grupo de necessidade, por categoria e modelo ===
 wmape_all = None
 
 for categoria in categorias_teste:
     df_cat = df_acuracia[categoria]
     pred_cols = existing_pred_cols(df_cat, pred_cols_base, extras)
 
-    # volume por grupo (QtDemanda)
-    base_group = (
-        df_cat
-        .groupBy(F.col(GROUP_COL).alias("grupo"))
-        .agg(F.sum(F.col(COL_PESO)).alias("Volume"))
-    )
+    # Volume por grupo via Window
+    w_grp = W.partitionBy(GROUP_COL)
+    df_aug = df_cat.withColumn("Volume", F.sum(F.col(COL_PESO)).over(w_grp))
 
-    # agrega WMAPE por modelo dentro do grupo
-    aggs = []
+    # Aggregations por modelo em structs nomeados
+    aggs, agg_names = [], []
     for c in pred_cols:
+        name = f"agg_{c}"
+        agg_names.append(name)
         aggs.append(
             F.struct(
                 F.lit(categoria).alias("categoria"),
                 F.col(GROUP_COL).alias("grupo"),
                 F.lit(c).alias("modelo"),
-                wmape_expr(c).alias("WMAPE")
-            ).alias(c)
+                F.round(wmape_expr(c), 4).alias("WMAPE")
+            ).alias(name)
         )
 
-    # gera linhas por modelo e junta com volume
     wmape_cat = (
-        df_cat
+        df_aug
         .groupBy(GROUP_COL)
-        .agg(*aggs)
-        .select(F.col(GROUP_COL).alias("grupo"), F.array(*[F.col(a.alias) for a in aggs]).alias("arr"))
-        .select("grupo", F.explode("arr").alias("m"))
-        .select("m.*")  # categoria, grupo, modelo, WMAPE
-        .join(base_group, on="grupo", how="left")
+        .agg(*aggs, F.max("Volume").alias("Volume"))
+        .select(
+            F.col(GROUP_COL).alias("grupo"),
+            "Volume",
+            F.array(*[F.col(n) for n in agg_names]).alias("arr")
+        )
+        .select("grupo", "Volume", F.explode("arr").alias("m"))
+        .select(
+            F.lit(categoria).alias("categoria"),
+            "grupo",
+            F.col("m.modelo").alias("modelo"),
+            F.col("m.WMAPE").alias("WMAPE"),
+            "Volume"
+        )
     )
+
+    # Volume total da categoria para share (sem criar totais)
+    vol_tot_cat = (
+        df_cat
+        .agg(F.sum(F.col(COL_PESO)).alias("Volume_total_categoria"))
+        .withColumn("categoria", F.lit(categoria))
+    )
+
+    wmape_cat = wmape_cat.join(vol_tot_cat, on="categoria", how="left") \
+                         .withColumn("ShareVolumeCategoria",
+                                     F.round(F.col("Volume") / F.col("Volume_total_categoria"), 6))
 
     wmape_all = wmape_cat if wmape_all is None else wmape_all.unionByName(wmape_cat)
 
-# === Resultado: WMAPE por grupo e volumes ===
+# Apenas grupos existentes, sem linhas de TOTAL
 wmape_all.orderBy("categoria", "grupo", "modelo").display()
 
 # COMMAND ----------
@@ -398,7 +414,7 @@ for categoria in categorias_teste:
     df_tmp = (
         df_base
         .withColumn("merecimento_percentual",
-                    F.col("Merecimento_Final_Media180_Qt_venda_sem_ruptura"))
+                    F.col("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura"))
         .join(
             spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
             .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
@@ -549,16 +565,16 @@ for categoria in categorias_teste:
         .agg(
             F.sum("QtDemanda").alias("QtDemanda"),
             F.sum("Percentual_QtDemanda").alias("Percentual_QtDemanda"),
-            F.sum("Merecimento_Final_Media90_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media90_Qt_venda_sem_ruptura"),
-            F.sum("Merecimento_Final_Media180_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media180_Qt_venda_sem_ruptura"),
-            F.sum("Merecimento_Final_Media270_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media270_Qt_venda_sem_ruptura"),
-            F.sum("Merecimento_Final_Media360_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media360_Qt_venda_sem_ruptura"),
             F.sum("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura"),
-            F.sum("Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura"),
-            F.sum("Merecimento_Final_MediaAparada270_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada270_Qt_venda_sem_ruptura"),
-            F.sum("Merecimento_Final_MediaAparada360_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada360_Qt_venda_sem_ruptura"),
+            # F.sum("Merecimento_Final_Media180_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media180_Qt_venda_sem_ruptura"),
+            # F.sum("Merecimento_Final_Media270_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media270_Qt_venda_sem_ruptura"),
+            # F.sum("Merecimento_Final_Media360_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media360_Qt_venda_sem_ruptura"),
+            # F.sum("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura"),
+            # F.sum("Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura"),
+            # F.sum("Merecimento_Final_MediaAparada270_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada270_Qt_venda_sem_ruptura"),
+            # F.sum("Merecimento_Final_MediaAparada360_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada360_Qt_venda_sem_ruptura"),
             F.sum("PercMatrizNeogrid").alias("PercMatrizNeogrid"),
-            F.sum("PercMatrizNeogrid_median").alias("PercMatrizNeogrid_median")
+            # F.sum("PercMatrizNeogrid_median").alias("PercMatrizNeogrid_median")
         )
 )
 
@@ -571,7 +587,7 @@ COL_PESO = "QtDemanda"
 
 # modelos base já existentes em `colunas`
 pred_cols_base = list(colunas)
-extras = ["PercMatrizNeogrid", "PercMatrizNeogrid_median"]
+extras = ["PercMatrizNeogrid"]#, "PercMatrizNeogrid_median"]
 
 def existing_pred_cols(df, base_cols, maybe_cols):
     return base_cols + [c for c in maybe_cols if c in df.columns]
