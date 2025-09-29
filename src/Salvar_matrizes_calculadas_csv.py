@@ -111,10 +111,21 @@ FILTROS_GRUPO_NECESSIDADE_SELECAO = {
     "DIRETORIA INFO/GAMES": ["FORA DE LINHA", "SEM_GN"]
 }
 
+# SKUs temporários para telefonia celular (Samsung Galaxy A07)
+SKUS_TEMPORARIOS_TELEFONIA = [
+    5358744,  # CEL.DESB. SAMSUNG GALAXY A07 4G 256GB VIOLETA
+    5358752,  # CEL.DESB. SAMSUNG GALAXY A07 4G 128GB PRETO
+    5358760,  # CEL.DESB. SAMSUNG GALAXY A07 4G 256GB VERDE
+    5358779,  # CEL.DESB. SAMSUNG GALAXY A07 4G 256GB PRETO
+    5358787,  # CEL.DESB. SAMSUNG GALAXY A07 4G 128GB VERDE
+    5358795   # CEL.DESB. SAMSUNG GALAXY A07 4G 128GB VIOLETA
+]
+
 print("✅ Configurações carregadas:")
 print(f"  • Categorias suportadas: {list(TABELAS_MATRIZ_MERECIMENTO.keys())}")
 print(f"  • Pasta de saída: {PASTA_OUTPUT}")
 print(f"  • Data de exportação: {hoje_str}")
+print(f"  • SKUs temporários telefonia: {len(SKUS_TEMPORARIOS_TELEFONIA)} SKUs")
 
 
 # COMMAND ----------
@@ -205,7 +216,79 @@ def processar_matriz_merecimento(categoria: str, canal: str) -> DataFrame:
     print(f"  • SKUs únicos: {df_normalizado.select('CdSku').distinct().count():,}")
     print(f"  • Filiais únicas: {df_normalizado.select('CdFilial').distinct().count():,}")
     
-    return df_normalizado
+    # Adicionar SKUs temporários para telefonia celular
+    df_final = adicionar_skus_temporarios_telefonia(df_normalizado, categoria, canal)
+    
+    return df_final
+
+# COMMAND ----------
+
+def adicionar_skus_temporarios_telefonia(df: DataFrame, categoria: str, canal: str) -> DataFrame:
+    """
+    Adiciona SKUs temporários da Samsung Galaxy A07 para telefonia celular.
+    Estes SKUs recebem o merecimento percentual de 'Telef pp' para todas as filiais.
+    
+    Args:
+        df: DataFrame com a matriz processada
+        categoria: Categoria da diretoria
+        canal: Canal (offline ou online)
+        
+    Returns:
+        DataFrame com SKUs temporários adicionados
+    """
+    if categoria != "DIRETORIA TELEFONIA CELULAR":
+        print(f"ℹ️ SKUs temporários não aplicados para categoria: {categoria}")
+        return df
+    
+    print(f"🔄 Adicionando SKUs temporários Samsung Galaxy A07 para {categoria} - {canal}")
+    
+    # Obter o merecimento de 'Telef pp' para cada filial
+    df_telef_pp = df.filter(F.col("grupo_de_necessidade") == "Telef pp")
+    
+    if df_telef_pp.count() == 0:
+        print("⚠️ Nenhum registro de 'Telef pp' encontrado. Pulando adição de SKUs temporários.")
+        return df
+    
+    # Obter todas as filiais únicas
+    filiais_unicas = df_telef_pp.select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica").distinct()
+    
+    # Criar registros temporários para cada SKU e filial
+    registros_temporarios = []
+    
+    for filial_row in filiais_unicas.collect():
+        for sku in SKUS_TEMPORARIOS_TELEFONIA:
+            # Obter o merecimento de 'Telef pp' para esta filial
+            merecimento_telef_pp = df_telef_pp.filter(F.col("CdFilial") == filial_row.CdFilial).select("Merecimento_Percentual_" + canal).collect()
+            
+            if merecimento_telef_pp:
+                merecimento_valor = merecimento_telef_pp[0][0]
+                
+                registros_temporarios.append({
+                    "CdFilial": filial_row.CdFilial,
+                    "CdSku": sku,
+                    "grupo_de_necessidade": "SAMSUNG_GALAXY_A07_TEMP",
+                    f"Merecimento_Percentual_{canal}": merecimento_valor,
+                    "NmFilial": filial_row.NmFilial,
+                    "NmPorteLoja": filial_row.NmPorteLoja,
+                    "NmRegiaoGeografica": filial_row.NmRegiaoGeografica
+                })
+    
+    if registros_temporarios:
+        # Criar DataFrame com registros temporários
+        df_temporarios = spark.createDataFrame(registros_temporarios)
+        
+        # Unir com o DataFrame original
+        df_com_temporarios = df.union(df_temporarios)
+        
+        print(f"✅ SKUs temporários adicionados:")
+        print(f"  • SKUs adicionados: {len(SKUS_TEMPORARIOS_TELEFONIA)}")
+        print(f"  • Filiais: {filiais_unicas.count()}")
+        print(f"  • Total de registros temporários: {len(registros_temporarios)}")
+        
+        return df_com_temporarios
+    else:
+        print("⚠️ Nenhum registro temporário criado.")
+        return df
 
 # COMMAND ----------
 
