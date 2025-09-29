@@ -111,21 +111,37 @@ FILTROS_GRUPO_NECESSIDADE_SELECAO = {
     "DIRETORIA INFO/GAMES": ["FORA DE LINHA", "SEM_GN"]
 }
 
-# SKUs temporários para telefonia celular (Samsung Galaxy A07)
-SKUS_TEMPORARIOS_TELEFONIA = [
-    5358744,  # CEL.DESB. SAMSUNG GALAXY A07 4G 256GB VIOLETA
-    5358752,  # CEL.DESB. SAMSUNG GALAXY A07 4G 128GB PRETO
-    5358760,  # CEL.DESB. SAMSUNG GALAXY A07 4G 256GB VERDE
-    5358779,  # CEL.DESB. SAMSUNG GALAXY A07 4G 256GB PRETO
-    5358787,  # CEL.DESB. SAMSUNG GALAXY A07 4G 128GB VERDE
-    5358795   # CEL.DESB. SAMSUNG GALAXY A07 4G 128GB VIOLETA
-]
+# Configuração de replicação de matrizes para novos produtos
+# Formato: {categoria: {grupo_origem: [lista_skus_novos]}}
+CONFIGURACAO_REPLICACAO_MATRIZES = {
+    "DIRETORIA TELEFONIA CELULAR": {
+        "Telef pp": [
+            5358744,  # CEL.DESB. SAMSUNG GALAXY A07 4G 256GB VIOLETA
+            5358752,  # CEL.DESB. SAMSUNG GALAXY A07 4G 128GB PRETO
+            5358760,  # CEL.DESB. SAMSUNG GALAXY A07 4G 256GB VERDE
+            5358779,  # CEL.DESB. SAMSUNG GALAXY A07 4G 256GB PRETO
+            5358787,  # CEL.DESB. SAMSUNG GALAXY A07 4G 128GB VERDE
+            5358795   # CEL.DESB. SAMSUNG GALAXY A07 4G 128GB VIOLETA
+        ]
+    }
+    # Adicione outras categorias conforme necessário:
+    # "DIRETORIA ELETRODOMESTICOS": {
+    #     "Eletro Alto": [123456, 789012],
+    #     "Eletro Medio": [345678, 901234]
+    # }
+}
 
 print("✅ Configurações carregadas:")
 print(f"  • Categorias suportadas: {list(TABELAS_MATRIZ_MERECIMENTO.keys())}")
 print(f"  • Pasta de saída: {PASTA_OUTPUT}")
 print(f"  • Data de exportação: {hoje_str}")
-print(f"  • SKUs temporários telefonia: {len(SKUS_TEMPORARIOS_TELEFONIA)} SKUs")
+
+# Contar SKUs para replicação
+total_skus_replicacao = sum(len(skus) for grupos in CONFIGURACAO_REPLICACAO_MATRIZES.values() for skus in grupos.values())
+print(f"  • SKUs para replicação: {total_skus_replicacao} SKUs")
+for categoria, grupos in CONFIGURACAO_REPLICACAO_MATRIZES.items():
+    for grupo, skus in grupos.items():
+        print(f"    - {categoria} ({grupo}): {len(skus)} SKUs")
 
 
 # COMMAND ----------
@@ -216,17 +232,17 @@ def processar_matriz_merecimento(categoria: str, canal: str) -> DataFrame:
     print(f"  • SKUs únicos: {df_normalizado.select('CdSku').distinct().count():,}")
     print(f"  • Filiais únicas: {df_normalizado.select('CdFilial').distinct().count():,}")
     
-    # Adicionar SKUs temporários para telefonia celular
-    df_final = adicionar_skus_temporarios_telefonia(df_normalizado, categoria, canal)
+    # Replicar matrizes para novos produtos baseado na configuração
+    df_final = replicar_matrizes_novos_produtos(df_normalizado, categoria, canal)
     
     return df_final
 
 # COMMAND ----------
 
-def adicionar_skus_temporarios_telefonia(df: DataFrame, categoria: str, canal: str) -> DataFrame:
+def replicar_matrizes_novos_produtos(df: DataFrame, categoria: str, canal: str) -> DataFrame:
     """
-    Adiciona SKUs temporários da Samsung Galaxy A07 para telefonia celular.
-    Estes SKUs recebem o merecimento percentual de 'Telef pp' para todas as filiais.
+    Replica matrizes de produtos existentes para novos SKUs baseado na configuração.
+    Cada novo SKU recebe o merecimento percentual do grupo de origem para todas as filiais.
     
     Args:
         df: DataFrame com a matriz processada
@@ -234,61 +250,173 @@ def adicionar_skus_temporarios_telefonia(df: DataFrame, categoria: str, canal: s
         canal: Canal (offline ou online)
         
     Returns:
-        DataFrame com SKUs temporários adicionados
+        DataFrame com SKUs replicados adicionados
     """
-    if categoria != "DIRETORIA TELEFONIA CELULAR":
-        print(f"ℹ️ SKUs temporários não aplicados para categoria: {categoria}")
+    if categoria not in CONFIGURACAO_REPLICACAO_MATRIZES:
+        print(f"ℹ️ Nenhuma configuração de replicação para categoria: {categoria}")
         return df
     
-    print(f"🔄 Adicionando SKUs temporários Samsung Galaxy A07 para {categoria} - {canal}")
+    config_categoria = CONFIGURACAO_REPLICACAO_MATRIZES[categoria]
+    print(f"🔄 Replicando matrizes para novos produtos - {categoria} - {canal}")
     
-    # Obter o merecimento de 'Telef pp' para cada filial
-    df_telef_pp = df.filter(F.col("grupo_de_necessidade") == "Telef pp")
+    registros_replicados = []
+    total_skus_replicados = 0
     
-    if df_telef_pp.count() == 0:
-        print("⚠️ Nenhum registro de 'Telef pp' encontrado. Pulando adição de SKUs temporários.")
-        return df
-    
-    # Obter todas as filiais únicas
-    filiais_unicas = df_telef_pp.select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica").distinct()
-    
-    # Criar registros temporários para cada SKU e filial
-    registros_temporarios = []
-    
-    for filial_row in filiais_unicas.collect():
-        for sku in SKUS_TEMPORARIOS_TELEFONIA:
-            # Obter o merecimento de 'Telef pp' para esta filial
-            merecimento_telef_pp = df_telef_pp.filter(F.col("CdFilial") == filial_row.CdFilial).select("Merecimento_Percentual_" + canal).collect()
+    for grupo_origem, skus_novos in config_categoria.items():
+        print(f"  📋 Processando grupo: {grupo_origem} ({len(skus_novos)} SKUs)")
+        
+        # Obter o merecimento do grupo de origem para cada filial
+        df_grupo_origem = df.filter(F.col("grupo_de_necessidade") == grupo_origem)
+        
+        if df_grupo_origem.count() == 0:
+            print(f"    ⚠️ Nenhum registro de '{grupo_origem}' encontrado. Pulando grupo.")
+            continue
+        
+        # Obter todas as filiais únicas do grupo de origem
+        filiais_unicas = df_grupo_origem.select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica").distinct()
+        
+        # Criar registros replicados para cada SKU novo e filial
+        for filial_row in filiais_unicas.collect():
+            # Obter o merecimento do grupo de origem para esta filial
+            merecimento_origem = df_grupo_origem.filter(F.col("CdFilial") == filial_row.CdFilial).select(f"Merecimento_Percentual_{canal}").collect()
             
-            if merecimento_telef_pp:
-                merecimento_valor = merecimento_telef_pp[0][0]
+            if merecimento_origem:
+                merecimento_valor = merecimento_origem[0][0]
                 
-                registros_temporarios.append({
-                    "CdFilial": filial_row.CdFilial,
-                    "CdSku": sku,
-                    "grupo_de_necessidade": "SAMSUNG_GALAXY_A07_TEMP",
-                    f"Merecimento_Percentual_{canal}": merecimento_valor,
-                    "NmFilial": filial_row.NmFilial,
-                    "NmPorteLoja": filial_row.NmPorteLoja,
-                    "NmRegiaoGeografica": filial_row.NmRegiaoGeografica
-                })
+                for sku in skus_novos:
+                    registros_replicados.append({
+                        "CdFilial": filial_row.CdFilial,
+                        "CdSku": sku,
+                        "grupo_de_necessidade": f"{grupo_origem}_REPLICADO",
+                        f"Merecimento_Percentual_{canal}": merecimento_valor,
+                        "NmFilial": filial_row.NmFilial,
+                        "NmPorteLoja": filial_row.NmPorteLoja,
+                        "NmRegiaoGeografica": filial_row.NmRegiaoGeografica
+                    })
+                    total_skus_replicados += 1
     
-    if registros_temporarios:
-        # Criar DataFrame com registros temporários
-        df_temporarios = spark.createDataFrame(registros_temporarios)
+    if registros_replicados:
+        # Criar DataFrame com registros replicados
+        df_replicados = spark.createDataFrame(registros_replicados)
         
         # Unir com o DataFrame original
-        df_com_temporarios = df.union(df_temporarios)
+        df_com_replicados = df.union(df_replicados)
         
-        print(f"✅ SKUs temporários adicionados:")
-        print(f"  • SKUs adicionados: {len(SKUS_TEMPORARIOS_TELEFONIA)}")
-        print(f"  • Filiais: {filiais_unicas.count()}")
-        print(f"  • Total de registros temporários: {len(registros_temporarios)}")
+        print(f"✅ Matrizes replicadas com sucesso:")
+        print(f"  • Total de registros replicados: {len(registros_replicados)}")
+        print(f"  • SKUs únicos replicados: {total_skus_replicados}")
+        print(f"  • Filiais cobertas: {len(set(r['CdFilial'] for r in registros_replicados))}")
         
-        return df_com_temporarios
+        return df_com_replicados
     else:
-        print("⚠️ Nenhum registro temporário criado.")
+        print("⚠️ Nenhum registro replicado criado.")
         return df
+
+# COMMAND ----------
+
+def criar_arquivo_configuracao_exemplo(caminho_arquivo: str = "configuracao_replicacao_exemplo.py") -> str:
+    """
+    Cria um arquivo de exemplo para configuração de replicação de matrizes.
+    
+    Args:
+        caminho_arquivo: Caminho onde salvar o arquivo de exemplo
+        
+    Returns:
+        Caminho do arquivo criado
+    """
+    conteudo_exemplo = '''# Configuração de Replicação de Matrizes para Novos Produtos
+# 
+# Este arquivo define quais SKUs novos devem receber matrizes replicadas
+# de grupos de merecimento existentes.
+#
+# Formato:
+# CONFIGURACAO_REPLICACAO_MATRIZES = {
+#     "CATEGORIA": {
+#         "GRUPO_ORIGEM": [lista_skus_novos]
+#     }
+# }
+
+CONFIGURACAO_REPLICACAO_MATRIZES = {
+    "DIRETORIA TELEFONIA CELULAR": {
+        "Telef pp": [
+            5358744,  # CEL.DESB. SAMSUNG GALAXY A07 4G 256GB VIOLETA
+            5358752,  # CEL.DESB. SAMSUNG GALAXY A07 4G 128GB PRETO
+            5358760,  # CEL.DESB. SAMSUNG GALAXY A07 4G 256GB VERDE
+            5358779,  # CEL.DESB. SAMSUNG GALAXY A07 4G 256GB PRETO
+            5358787,  # CEL.DESB. SAMSUNG GALAXY A07 4G 128GB VERDE
+            5358795   # CEL.DESB. SAMSUNG GALAXY A07 4G 128GB VIOLETA
+        ],
+        "Telef Medio 128GB": [
+            # Adicione SKUs que devem replicar a matriz de "Telef Medio 128GB"
+            # 123456,  # Exemplo: Novo smartphone 128GB
+            # 789012   # Exemplo: Outro smartphone 128GB
+        ]
+    },
+    
+    "DIRETORIA ELETRODOMESTICOS": {
+        "Eletro Alto": [
+            # Adicione SKUs que devem replicar a matriz de "Eletro Alto"
+            # 111111,  # Exemplo: Nova geladeira premium
+            # 222222   # Exemplo: Outro eletrodoméstico alto
+        ],
+        "Eletro Medio": [
+            # Adicione SKUs que devem replicar a matriz de "Eletro Medio"
+            # 333333,  # Exemplo: Nova geladeira média
+            # 444444   # Exemplo: Outro eletrodoméstico médio
+        ]
+    }
+    
+    # Adicione outras categorias conforme necessário...
+}
+
+# INSTRUÇÕES DE USO:
+# 1. Copie este arquivo para o seu projeto
+# 2. Modifique as listas de SKUs conforme necessário
+# 3. Importe a configuração no seu script principal:
+#    from configuracao_replicacao import CONFIGURACAO_REPLICACAO_MATRIZES
+# 4. Use a função replicar_matrizes_novos_produtos() com sua configuração
+'''
+    
+    with open(caminho_arquivo, 'w', encoding='utf-8') as f:
+        f.write(conteudo_exemplo)
+    
+    print(f"✅ Arquivo de configuração de exemplo criado: {caminho_arquivo}")
+    return caminho_arquivo
+
+# COMMAND ----------
+
+def validar_configuracao_replicacao(configuracao: dict) -> bool:
+    """
+    Valida se a configuração de replicação está correta.
+    
+    Args:
+        configuracao: Dicionário com a configuração de replicação
+        
+    Returns:
+        True se válida, False caso contrário
+    """
+    print("🔍 Validando configuração de replicação...")
+    
+    if not isinstance(configuracao, dict):
+        print("❌ Configuração deve ser um dicionário")
+        return False
+    
+    for categoria, grupos in configuracao.items():
+        if not isinstance(grupos, dict):
+            print(f"❌ Categoria '{categoria}' deve ter grupos como dicionário")
+            return False
+        
+        for grupo, skus in grupos.items():
+            if not isinstance(skus, list):
+                print(f"❌ Grupo '{grupo}' em '{categoria}' deve ter SKUs como lista")
+                return False
+            
+            if not all(isinstance(sku, int) for sku in skus):
+                print(f"❌ Todos os SKUs em '{grupo}' devem ser números inteiros")
+                return False
+    
+    print("✅ Configuração de replicação válida!")
+    return True
 
 # COMMAND ----------
 
@@ -440,6 +568,43 @@ def exportar_todas_categorias(data_exportacao: str = None) -> Dict[str, Dict[str
             print(f"   • ONLINE: {arquivos['online']}")
     
     return resultados
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 🔧 Como Usar a Replicação de Matrizes
+
+# COMMAND ----------
+
+# Exemplo de como usar a funcionalidade de replicação
+print("🔍 Validando configuração de replicação...")
+validar_configuracao_replicacao(CONFIGURACAO_REPLICACAO_MATRIZES)
+
+print("\n📝 Criando arquivo de configuração de exemplo...")
+arquivo_exemplo = criar_arquivo_configuracao_exemplo("configuracao_replicacao_exemplo.py")
+
+print(f"\n📋 INSTRUÇÕES PARA USO:")
+print("=" * 50)
+print("1. Para adicionar novos SKUs à replicação:")
+print("   - Edite a variável CONFIGURACAO_REPLICACAO_MATRIZES neste arquivo")
+print("   - Ou use o arquivo de exemplo criado: configuracao_replicacao_exemplo.py")
+print()
+print("2. Formato da configuração:")
+print("   CONFIGURACAO_REPLICACAO_MATRIZES = {")
+print("       'CATEGORIA': {")
+print("           'GRUPO_ORIGEM': [lista_skus_novos]")
+print("       }")
+print("   }")
+print()
+print("3. Exemplo prático:")
+print("   'DIRETORIA TELEFONIA CELULAR': {")
+print("       'Telef pp': [5358744, 5358752, 5358760]")
+print("   }")
+print()
+print("4. A replicação é aplicada automaticamente durante o processamento")
+print("   - Tanto para canal online quanto offline")
+print("   - SKUs replicados recebem o grupo '_REPLICADO'")
+print("   - Merecimento é copiado do grupo de origem para cada filial")
 
 # COMMAND ----------
 
