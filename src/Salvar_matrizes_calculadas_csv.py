@@ -236,6 +236,7 @@ def processar_matriz_merecimento(categoria: str, canal: str) -> DataFrame:
 def replicar_skus_samsung_galaxy_a07(df: DataFrame, categoria: str, canal: str) -> DataFrame:
     """
     Replica matrizes dos SKUs Samsung Galaxy A07 baseado no grupo 'Telef pp'.
+    VERSÃO OTIMIZADA - usa apenas operações Spark, sem collect().
     
     Args:
         df: DataFrame com a matriz processada
@@ -262,46 +263,30 @@ def replicar_skus_samsung_galaxy_a07(df: DataFrame, categoria: str, canal: str) 
         print(f"    ⚠️ Nenhum registro de '{grupo_origem}' encontrado.")
         return df
     
-    # Obter todas as filiais únicas do grupo de origem
-    filiais_unicas = df_grupo_origem.select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica").distinct()
+    # Criar DataFrame com SKUs para replicação usando operações Spark
+    df_skus_replicacao = spark.createDataFrame(
+        [(sku,) for sku in skus_novos], 
+        ["CdSku"]
+    )
     
-    registros_replicados = []
+    # Fazer cross join entre filiais do grupo origem e SKUs novos
+    df_replicados = (
+        df_grupo_origem
+        .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica", f"Merecimento_Percentual_{canal}")
+        .distinct()
+        .crossJoin(df_skus_replicacao)
+        .withColumn("grupo_de_necessidade", F.lit("SAMSUNG_GALAXY_A07_REPLICADO"))
+    )
     
-    # Criar registros replicados para cada SKU novo e filial
-    for filial_row in filiais_unicas.collect():
-        # Obter o merecimento do grupo de origem para esta filial
-        merecimento_origem = df_grupo_origem.filter(F.col("CdFilial") == filial_row.CdFilial).select(f"Merecimento_Percentual_{canal}").collect()
-        
-        if merecimento_origem:
-            merecimento_valor = merecimento_origem[0][0]
-            
-            for sku in skus_novos:
-                registros_replicados.append({
-                    "CdFilial": filial_row.CdFilial,
-                    "CdSku": sku,
-                    "grupo_de_necessidade": "SAMSUNG_GALAXY_A07_REPLICADO",
-                    f"Merecimento_Percentual_{canal}": merecimento_valor,
-                    "NmFilial": filial_row.NmFilial,
-                    "NmPorteLoja": filial_row.NmPorteLoja,
-                    "NmRegiaoGeografica": filial_row.NmRegiaoGeografica
-                })
+    # Unir com o DataFrame original
+    df_com_replicados = df.union(df_replicados)
     
-    if registros_replicados:
-        # Criar DataFrame com registros replicados
-        df_replicados = spark.createDataFrame(registros_replicados)
-        
-        # Unir com o DataFrame original
-        df_com_replicados = df.union(df_replicados)
-        
-        print(f"✅ SKUs Samsung Galaxy A07 replicados:")
-        print(f"  • Total de registros: {len(registros_replicados)}")
-        print(f"  • SKUs únicos: {len(skus_novos)}")
-        print(f"  • Filiais: {filiais_unicas.count()}")
-        
-        return df_com_replicados
-    else:
-        print("⚠️ Nenhum registro replicado criado.")
-        return df
+    print(f"✅ SKUs Samsung Galaxy A07 replicados:")
+    print(f"  • SKUs únicos: {len(skus_novos)}")
+    print(f"  • Filiais: {df_grupo_origem.select('CdFilial').distinct().count()}")
+    print(f"  • Total de registros replicados: {df_replicados.count()}")
+    
+    return df_com_replicados
 
 # COMMAND ----------
 
