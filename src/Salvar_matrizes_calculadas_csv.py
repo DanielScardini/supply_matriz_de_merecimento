@@ -203,13 +203,6 @@ def processar_matriz_merecimento(categoria: str, canal: str) -> DataFrame:
         df_raw = df_base.filter(~F.col("grupo_de_necessidade").isin(filtros_grupo_remocao))
         print(f"  • Aplicado filtro de REMOÇÃO: removendo {filtros_grupo_remocao}")
     
-    # Join com dados de filiais
-    df_raw = df_raw.join(
-        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
-        .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
-        on="CdFilial", how="left"
-    )
-    
     # Normalização por SKU
     window_sku = W.partitionBy("CdSku")
     total_sku = F.sum(f"Merecimento_Percentual_{canal}_raw").over(window_sku)
@@ -227,13 +220,28 @@ def processar_matriz_merecimento(categoria: str, canal: str) -> DataFrame:
         .drop(f"Merecimento_Percentual_{canal}_raw")
     )
     
+    # Regra especial para canal online: sobrescrever CdFilial 1401 → 14
+    if canal == "online":
+        df_normalizado = (
+            df_normalizado
+            .withColumn("CdFilial", F.when(F.col("CdFilial") == 1401, 14).otherwise(F.col("CdFilial")))
+        )
+        print("  • Aplicada regra especial: CdFilial 1401 → 14")
+    
+    # GroupBy para somar merecimentos por CdSku e CdFilial (evitar duplicatas)
+    df_agregado = (
+        df_normalizado
+        .groupBy("CdSku", "CdFilial")
+        .agg(F.sum(f"Merecimento_Percentual_{canal}").alias(f"Merecimento_Percentual_{canal}"))
+    )
+    
     print(f"✅ Matriz processada:")
-    print(f"  • Total de registros: {df_normalizado.count():,}")
-    print(f"  • SKUs únicos: {df_normalizado.select('CdSku').distinct().count():,}")
-    print(f"  • Filiais únicas: {df_normalizado.select('CdFilial').distinct().count():,}")
+    print(f"  • Total de registros: {df_agregado.count():,}")
+    print(f"  • SKUs únicos: {df_agregado.select('CdSku').distinct().count():,}")
+    print(f"  • Filiais únicas: {df_agregado.select('CdFilial').distinct().count():,}")
     
     # Replicar matrizes para novos produtos baseado na configuração
-    df_final = replicar_matrizes_novos_produtos(df_normalizado, categoria, canal)
+    df_final = replicar_matrizes_novos_produtos(df_agregado, categoria, canal)
     
     return df_final
 
@@ -242,10 +250,10 @@ def processar_matriz_merecimento(categoria: str, canal: str) -> DataFrame:
 def replicar_matrizes_novos_produtos(df: DataFrame, categoria: str, canal: str) -> DataFrame:
     """
     Replica matrizes de produtos existentes para novos SKUs baseado na configuração.
-    Cada novo SKU recebe o merecimento percentual do grupo de origem para todas as filiais.
+    Cada novo SKU recebe o merecimento percentual médio para todas as filiais.
     
     Args:
-        df: DataFrame com a matriz processada
+        df: DataFrame com a matriz processada (apenas CdSku, CdFilial, Merecimento)
         categoria: Categoria da diretoria
         canal: Canal (offline ou online)
         
@@ -259,58 +267,38 @@ def replicar_matrizes_novos_produtos(df: DataFrame, categoria: str, canal: str) 
     config_categoria = CONFIGURACAO_REPLICACAO_MATRIZES[categoria]
     print(f"🔄 Replicando matrizes para novos produtos - {categoria} - {canal}")
     
-    registros_replicados = []
-    total_skus_replicados = 0
+    # Calcular merecimento médio por filial (usando todos os dados disponíveis)
+    merecimento_medio_por_filial = (
+        df
+        .groupBy("CdFilial")
+        .agg(F.avg(f"Merecimento_Percentual_{canal}").alias("merecimento_medio"))
+    )
     
-    for grupo_origem, skus_novos in config_categoria.items():
-        print(f"  📋 Processando grupo: {grupo_origem} ({len(skus_novos)} SKUs)")
-        
-        # Obter o merecimento do grupo de origem para cada filial
-        df_grupo_origem = df.filter(F.col("grupo_de_necessidade") == grupo_origem)
-        
-        if df_grupo_origem.count() == 0:
-            print(f"    ⚠️ Nenhum registro de '{grupo_origem}' encontrado. Pulando grupo.")
-            continue
-        
-        # Obter todas as filiais únicas do grupo de origem
-        filiais_unicas = df_grupo_origem.select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica").distinct()
-        
-        # Criar registros replicados para cada SKU novo e filial
-        for filial_row in filiais_unicas.collect():
-            # Obter o merecimento do grupo de origem para esta filial
-            merecimento_origem = df_grupo_origem.filter(F.col("CdFilial") == filial_row.CdFilial).select(f"Merecimento_Percentual_{canal}").collect()
-            
-            if merecimento_origem:
-                merecimento_valor = merecimento_origem[0][0]
-                
-                for sku in skus_novos:
-                    registros_replicados.append({
-                        "CdFilial": filial_row.CdFilial,
-                        "CdSku": sku,
-                        "grupo_de_necessidade": f"{grupo_origem}_REPLICADO",
-                        f"Merecimento_Percentual_{canal}": merecimento_valor,
-                        "NmFilial": filial_row.NmFilial,
-                        "NmPorteLoja": filial_row.NmPorteLoja,
-                        "NmRegiaoGeografica": filial_row.NmRegiaoGeografica
-                    })
-                    total_skus_replicados += 1
+    # Criar registros replicados usando crossJoin para performance
+    skus_novos = config_categoria["Telef pp"]
+    df_skus_replicacao = spark.createDataFrame(
+        [(sku,) for sku in skus_novos], 
+        ["CdSku"]
+    )
     
-    if registros_replicados:
-        # Criar DataFrame com registros replicados
-        df_replicados = spark.createDataFrame(registros_replicados)
-        
-        # Unir com o DataFrame original
-        df_com_replicados = df.union(df_replicados)
-        
-        print(f"✅ Matrizes replicadas com sucesso:")
-        print(f"  • Total de registros replicados: {len(registros_replicados)}")
-        print(f"  • SKUs únicos replicados: {total_skus_replicados}")
-        print(f"  • Filiais cobertas: {len(set(r['CdFilial'] for r in registros_replicados))}")
-        
-        return df_com_replicados
-    else:
-        print("⚠️ Nenhum registro replicado criado.")
-        return df
+    df_replicados = (
+        merecimento_medio_por_filial
+        .crossJoin(df_skus_replicacao)
+        .select(
+            "CdSku",
+            "CdFilial", 
+            F.round("merecimento_medio", 3).alias(f"Merecimento_Percentual_{canal}")
+        )
+    )
+    
+    # Unir com o DataFrame original
+    df_com_replicados = df.union(df_replicados)
+    
+    print(f"✅ Matrizes replicadas com sucesso:")
+    print(f"  • SKUs replicados: {len(skus_novos)}")
+    print(f"  • Filiais cobertas: {merecimento_medio_por_filial.count()}")
+    
+    return df_com_replicados
 
 # COMMAND ----------
 
@@ -318,6 +306,7 @@ def salvar_matriz_excel(df: DataFrame, categoria: str, canal: str, data_exportac
     """
     Salva a matriz de merecimento em arquivo Excel usando pandas.
     Cria estrutura de pastas: PASTA_OUTPUT/data_exportacao/
+    Mantém apenas CdSku, CdFilial e Merecimento com formatação decimal.
     
     Args:
         df: DataFrame com a matriz processada
@@ -349,13 +338,28 @@ def salvar_matriz_excel(df: DataFrame, categoria: str, canal: str, data_exportac
     print(f"  • Pasta data: {pasta_data}")
     print(f"  • Caminho completo: {caminho_completo}")
     
+    # Selecionar apenas as colunas necessárias e formatar merecimento
+    df_otimizado = (
+        df
+        .select(
+            "CdSku",
+            "CdFilial",
+            F.regexp_replace(
+                F.col(f"Merecimento_Percentual_{canal}").cast("string"), 
+                r"\.", ","
+            ).alias("Merecimento")
+        )
+    )
+    
     # Converter DataFrame do Spark para pandas
-    df_pandas = df.toPandas()
+    df_pandas = df_otimizado.toPandas()
     
     # Salvar como Excel usando pandas
     df_pandas.to_excel(caminho_completo, index=False, engine='openpyxl')
     
     print(f"✅ Arquivo salvo com sucesso!")
+    print(f"  • Colunas exportadas: CdSku, CdFilial, Merecimento")
+    print(f"  • Formato decimal: vírgula como separador")
     
     return caminho_completo
 
@@ -420,7 +424,7 @@ def executar_exportacao_completa(categoria: str, data_exportacao: str = None) ->
 
 # COMMAND ----------
 
-!pip install openpyxl
+# pip install openpyxl
 
 def exportar_todas_categorias(data_exportacao: str = None) -> Dict[str, Dict[str, str]]:
     """
@@ -466,55 +470,9 @@ def exportar_todas_categorias(data_exportacao: str = None) -> Dict[str, Dict[str
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 🔧 Como Usar a Replicação de Matrizes
+# MAGIC ## 5. Execução das Exportações
 
 # COMMAND ----------
 
-# Exemplo de como usar a funcionalidade de replicação
-print("🔍 Validando configuração de replicação...")
-validar_configuracao_replicacao(CONFIGURACAO_REPLICACAO_MATRIZES)
-
-print("\n📝 Criando arquivo de configuração de exemplo...")
-arquivo_exemplo = criar_arquivo_configuracao_exemplo("configuracao_replicacao_exemplo.py")
-
-print(f"\n📋 INSTRUÇÕES PARA USO:")
-print("=" * 50)
-print("1. Para adicionar novos SKUs à replicação:")
-print("   - Edite a variável CONFIGURACAO_REPLICACAO_MATRIZES neste arquivo")
-print("   - Ou use o arquivo de exemplo criado: configuracao_replicacao_exemplo.py")
-print()
-print("2. Formato da configuração:")
-print("   CONFIGURACAO_REPLICACAO_MATRIZES = {")
-print("       'CATEGORIA': {")
-print("           'GRUPO_ORIGEM': [lista_skus_novos]")
-print("       }")
-print("   }")
-print()
-print("3. Exemplo prático:")
-print("   'DIRETORIA TELEFONIA CELULAR': {")
-print("       'Telef pp': [5358744, 5358752, 5358760]")
-print("   }")
-print()
-print("4. A replicação é aplicada automaticamente durante o processamento")
-print("   - Tanto para canal online quanto offline")
-print("   - SKUs replicados recebem o grupo '_REPLICADO'")
-print("   - Merecimento é copiado do grupo de origem para cada filial")
-
-# COMMAND ----------
-
-# Descomente para executar exportação para todas as categorias
+# Executar exportação para todas as categorias
 resultados = exportar_todas_categorias()
-
-# COMMAND ----------
-
-from pyspark.sql.functions import regexp_replace, col
-
-df = (
-    processar_matriz_merecimento(categoria='DIRETORIA TELEFONIA CELULAR', canal='online')
-    .withColumn(
-        "Merecimento_Percentual_online",
-        regexp_replace(col("Merecimento_Percentual_online").cast("string"), r"\.", ",")
-    )
-)
-
-df.display()
