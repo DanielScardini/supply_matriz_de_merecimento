@@ -34,9 +34,10 @@ df_vendas_robustas = (
     )
     .groupBy("grupo_de_necessidade", "CdSku")
     .agg(
-        F.round(F.sum(F.col('QtMercadoria') + F.col("deltaRuptura")),0).alias("demanda_total"),
+        F.round(F.sum(F.col('QtMercadoria') + F.col("deltaRuptura")), 3).alias("demanda_total"),
         F.countDistinct("DtAtual").alias("dias"),
-        F.round(F.col("demanda_total")/F.col("dias") ,3).alias("demanda_diarizada"),
+        F.round(F.col("dias")/7, 1).alias("n_domingos"),
+        F.round(F.col("demanda_total")/(F.col("dias") - F.col("n_domingos")) ,3).alias("demanda_diarizada"),
     )
     .filter(F.col("demanda_diarizada") > 1)
     .orderBy(F.desc("demanda_diarizada"))
@@ -50,5 +51,24 @@ df_vendas_robustas = (
     )
     .withColumn("DDV_futuro_filial",
                 F.round(F.col("demanda_diarizada") * F.col("merecimento_final"), 3)
-    )    
-).display()
+    )
+    # .agg(F.sum("DDV_futuro_filial").alias("SUM"))    
+)#.display()
+
+# COMMAND ----------
+
+import pandas as pd
+!pip install openpyxl
+
+# Converte Spark DataFrame para Pandas
+df_vendas_robustas_pd = df_vendas_robustas.toPandas()
+
+# Garante que a última coluna seja float (decimal)
+df_vendas_robustas_pd["DDV_futuro_filial"] = df_vendas_robustas_pd["DDV_futuro_filial"].astype(float)
+
+# Salva em Excel
+output_path = "/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/analysis/ddv_futuro_filial.xlsx"
+with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+    df_vendas_robustas_pd.to_excel(writer, sheet_name="dados", index=False)
+
+print(f"Arquivo salvo em: {output_path}")
