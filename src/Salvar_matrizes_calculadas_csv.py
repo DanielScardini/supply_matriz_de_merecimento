@@ -469,6 +469,54 @@ def exportar_todas_categorias(data_exportacao: str = None) -> Dict[str, Dict[str
 
 # COMMAND ----------
 
+def mostrar_apenas_replicados(categoria: str, canal: str) -> DataFrame:
+    """
+    Mostra apenas os produtos replicados (espelhados) para uma categoria e canal específicos.
+    
+    Args:
+        categoria: Categoria da diretoria
+        canal: Canal (offline ou online)
+        
+    Returns:
+        DataFrame apenas com produtos replicados
+    """
+    print(f"🔍 Mostrando apenas produtos replicados: {categoria} - {canal}")
+    
+    # Processar matriz completa
+    df_completo = processar_matriz_merecimento(categoria, canal)
+    
+    # Obter SKUs replicados da configuração
+    if categoria not in CONFIGURACAO_REPLICACAO_MATRIZES:
+        print(f"ℹ️ Nenhuma configuração de replicação para categoria: {categoria}")
+        return spark.createDataFrame([], "CdSku int, CdFilial int, Merecimento string")
+    
+    skus_replicados = CONFIGURACAO_REPLICACAO_MATRIZES[categoria]["Telef pp"]
+    
+    # Filtrar apenas os SKUs replicados
+    df_replicados = df_completo.filter(F.col("CdSku").isin(skus_replicados))
+    
+    # Formatar merecimento com vírgula
+    df_formatado = (
+        df_replicados
+        .select(
+            "CdSku",
+            "CdFilial",
+            F.regexp_replace(
+                F.col(f"Merecimento_Percentual_{canal}").cast("string"), 
+                r"\.", ","
+            ).alias("Merecimento")
+        )
+    )
+    
+    print(f"✅ Produtos replicados encontrados:")
+    print(f"  • Total de registros: {df_formatado.count():,}")
+    print(f"  • SKUs únicos: {df_formatado.select('CdSku').distinct().count():,}")
+    print(f"  • Filiais únicas: {df_formatado.select('CdFilial').distinct().count():,}")
+    
+    return df_formatado
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 5. Execução das Exportações
 
@@ -476,3 +524,24 @@ def exportar_todas_categorias(data_exportacao: str = None) -> Dict[str, Dict[str
 
 # Executar exportação para todas as categorias
 resultados = exportar_todas_categorias()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 6. Visualização dos Produtos Replicados
+
+# COMMAND ----------
+
+# Mostrar apenas os produtos replicados (Samsung Galaxy A07)
+print("📱 PRODUTOS REPLICADOS - SAMSUNG GALAXY A07")
+print("=" * 60)
+
+# Canal Online
+print("\n🌐 CANAL ONLINE:")
+df_replicados_online = mostrar_apenas_replicados("DIRETORIA TELEFONIA CELULAR", "online")
+df_replicados_online.display()
+
+# Canal Offline  
+print("\n🏪 CANAL OFFLINE:")
+df_replicados_offline = mostrar_apenas_replicados("DIRETORIA TELEFONIA CELULAR", "offline")
+df_replicados_offline.display()
