@@ -233,13 +233,30 @@ def processar_matriz_merecimento(categoria: str, canal: str) -> DataFrame:
         .drop(f"Merecimento_Percentual_{canal}_raw")
     )
     
+    # Regra especial para canal online: sobrescrever CdFilial 1401 → 14
+    if canal == "online":
+        df_normalizado = (
+            df_normalizado
+            .withColumn("CdFilial", F.when(F.col("CdFilial") == 1401, 14).otherwise(F.col("CdFilial")))
+        )
+        print("  • Aplicada regra especial: CdFilial 1401 → 14")
+    
+    # Agregação por grupo de necessidade - mesmo racional das análises factuais
+    df_agregado = (
+        df_normalizado
+        .groupBy("CdFilial", "grupo_de_necessidade")
+        .agg(
+            F.round(F.mean(f"Merecimento_Percentual_{canal}"), 3).alias(f"Merecimento_Percentual_{canal}")
+        )
+    )
+    
     print(f"✅ Matriz processada:")
-    print(f"  • Total de registros: {df_normalizado.count():,}")
-    print(f"  • SKUs únicos: {df_normalizado.select('CdSku').distinct().count():,}")
-    print(f"  • Filiais únicas: {df_normalizado.select('CdFilial').distinct().count():,}")
+    print(f"  • Total de registros: {df_agregado.count():,}")
+    print(f"  • Filiais únicas: {df_agregado.select('CdFilial').distinct().count():,}")
+    print(f"  • Grupos únicos: {df_agregado.select('grupo_de_necessidade').distinct().count():,}")
     
     # Replicar matrizes para novos produtos baseado na configuração
-    df_final = replicar_matrizes_novos_produtos(df_normalizado, categoria, canal)
+    df_final = replicar_matrizes_novos_produtos(df_agregado, categoria, canal)
     
     return df_final
 
@@ -278,28 +295,24 @@ def replicar_matrizes_novos_produtos(df: DataFrame, categoria: str, canal: str) 
             print(f"    ⚠️ Nenhum registro de '{grupo_origem}' encontrado. Pulando grupo.")
             continue
         
-        # Obter todas as filiais únicas do grupo de origem
-        filiais_unicas = df_grupo_origem.select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica").distinct()
+        # Criar registros replicados para cada SKU novo usando crossJoin para performance
+        df_skus_replicacao = spark.createDataFrame(
+            [(sku,) for sku in skus_novos], 
+            ["CdSku"]
+        )
         
-        # Criar registros replicados para cada SKU novo e filial
-        for filial_row in filiais_unicas.collect():
-            # Obter o merecimento do grupo de origem para esta filial
-            merecimento_origem = df_grupo_origem.filter(F.col("CdFilial") == filial_row.CdFilial).select(f"Merecimento_Percentual_{canal}").collect()
-            
-            if merecimento_origem:
-                merecimento_valor = merecimento_origem[0][0]
-                
-                for sku in skus_novos:
-                    registros_replicados.append({
-                        "CdFilial": filial_row.CdFilial,
-                        "CdSku": sku,
-                        "grupo_de_necessidade": f"{grupo_origem}_REPLICADO",
-                        f"Merecimento_Percentual_{canal}": merecimento_valor,
-                        "NmFilial": filial_row.NmFilial,
-                        "NmPorteLoja": filial_row.NmPorteLoja,
-                        "NmRegiaoGeografica": filial_row.NmRegiaoGeografica
-                    })
-                    total_skus_replicados += 1
+        df_replicados = (
+            df_grupo_origem
+            .select("CdFilial", f"Merecimento_Percentual_{canal}")
+            .distinct()
+            .crossJoin(df_skus_replicacao)
+            .withColumn("grupo_de_necessidade", F.lit(f"{grupo_origem}_REPLICADO"))
+            .select("CdFilial", "grupo_de_necessidade", f"Merecimento_Percentual_{canal}")
+        )
+        
+        # Converter para lista para união
+        registros_replicados.extend(df_replicados.collect())
+        total_skus_replicados += len(skus_novos)
     
     if registros_replicados:
         # Criar DataFrame com registros replicados
@@ -355,13 +368,28 @@ def salvar_matriz_excel(df: DataFrame, categoria: str, canal: str, data_exportac
     print(f"  • Pasta data: {pasta_data}")
     print(f"  • Caminho completo: {caminho_completo}")
     
+    # Selecionar apenas as colunas necessárias e formatar merecimento
+    df_otimizado = (
+        df
+        .select(
+            "CdFilial",
+            "grupo_de_necessidade",
+            F.regexp_replace(
+                F.col(f"Merecimento_Percentual_{canal}").cast("string"), 
+                r"\.", ","
+            ).alias("Merecimento")
+        )
+    )
+    
     # Converter DataFrame do Spark para pandas
-    df_pandas = df.toPandas()
+    df_pandas = df_otimizado.toPandas()
     
     # Salvar como Excel usando pandas
     df_pandas.to_excel(caminho_completo, index=False, engine='openpyxl')
     
     print(f"✅ Arquivo salvo com sucesso!")
+    print(f"  • Colunas exportadas: CdFilial, grupo_de_necessidade, Merecimento")
+    print(f"  • Formato decimal: vírgula como separador")
     
     return caminho_completo
 
