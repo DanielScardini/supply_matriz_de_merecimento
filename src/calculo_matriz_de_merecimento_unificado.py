@@ -227,6 +227,7 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-07-01") -> Data
     df_base = (
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
         .filter(F.col("NmAgrupamentoDiretoriaSetor") == categoria)
+        #.filter(F.col("NmSetorGerencial") == 'PORTATEIS')
         .filter(F.col("DtAtual") >= data_inicio)
         .withColumn(
             "year_month",
@@ -1076,22 +1077,22 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         
         # 5. Definição do grupo_de_necessidade
         df_com_grupo = determinar_grupo_necessidade(categoria, df_com_mapeamentos)
-        df_com_grupo = (
-            df_com_grupo
-            .filter(
-                F.col("grupo_de_necessidade").isin(
-            'Telef pp', 
-            'TV 50 ALTO P', 
-            'TV 55 ALTO P',
-            'TV 43 PP',
-            'TV 75 PP',
-            'TV 75 ALTO P',
-            'Telef Medio 256GB',
-            'Telef Medio 128GB',
-            'Telef Alto',
-            )
-        )
-    )
+    #     df_com_grupo = (
+    #         df_com_grupo
+    #         .filter(
+    #             F.col("grupo_de_necessidade").isin(
+    #         'Telef pp', 
+    #         'TV 50 ALTO P', 
+    #         'TV 55 ALTO P',
+    #         'TV 43 PP',
+    #         'TV 75 PP',
+    #         'TV 75 ALTO P',
+    #         'Telef Medio 256GB',
+    #         'Telef Medio 128GB',
+    #         'Telef Alto',
+    #         )
+    #     )
+    # )
         df_com_grupo.cache()
 
         df_agregado = (
@@ -1208,7 +1209,7 @@ for categoria in categorias:
         df_matriz_final = executar_calculo_matriz_merecimento_completo(
             categoria=categoria,
             data_inicio="2024-07-01",
-            data_calculo="2025-09-21"
+            data_calculo="2025-09-25"
         )
         
         # Salva em tabela específica da categoria
@@ -1219,7 +1220,7 @@ for categoria in categorias:
             .upper()
         )
         
-        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste2509"
+        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste0110"
         
         print(f"💾 Salvando matriz de merecimento para: {categoria}")
         print(f"📊 Tabela: {nome_tabela}")
