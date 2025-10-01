@@ -34,6 +34,134 @@ df_demanda_envio.limit(1).display()
 
 # COMMAND ----------
 
-df_merecimento_on = (
-  spark.table
-)
+# Configuração das tabelas de matriz
+TABELAS_MATRIZ_MERECIMENTO = {
+    "DIRETORIA DE TELAS": {
+        "offline": "databox.bcg_comum.supply_matriz_merecimento_de_telas_teste2509",
+        "online": "databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste2609"
+    }
+}
+
+# Configuração da coluna de merecimento
+COLUNAS_MERECIMENTO = {
+    "DIRETORIA DE TELAS": "Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura"
+}
+
+# Configuração de filtros
+FILTROS_GRUPO_NECESSIDADE_REMOCAO = {
+    "DIRETORIA DE TELAS": ["FORA DE LINHA", "SEM_GN"]
+}
+
+FLAG_SELECAO_REMOCAO = {
+    "DIRETORIA DE TELAS": "SELEÇÃO"
+}
+
+FILTROS_GRUPO_NECESSIDADE_SELECAO = {
+    "DIRETORIA DE TELAS": [
+        "TV 50 ALTO P", 
+        "TV 55 ALTO P",
+        "TV 43 PP", 
+        "TV 75 PP",
+        "TV 75 ALTO P"
+    ]
+}
+
+def processar_matriz_merecimento(categoria: str, canal: str) -> DataFrame:
+    """
+    Processa a matriz de merecimento para uma categoria e canal específicos.
+    Segue o mesmo racional do código de salvar matrizes.
+    
+    Args:
+        categoria: Categoria da diretoria
+        canal: Canal (offline ou online)
+        
+    Returns:
+        DataFrame processado com merecimento normalizado
+    """
+    print(f"🔄 Processando matriz para: {categoria} - {canal}")
+    
+    # Configurações específicas
+    tabela = TABELAS_MATRIZ_MERECIMENTO[categoria][canal]
+    coluna_merecimento = COLUNAS_MERECIMENTO[categoria]
+    flag_tipo = FLAG_SELECAO_REMOCAO.get(categoria, "REMOÇÃO")
+    filtros_grupo_remocao = FILTROS_GRUPO_NECESSIDADE_REMOCAO[categoria]
+    filtros_grupo_selecao = FILTROS_GRUPO_NECESSIDADE_SELECAO[categoria]
+    
+    print(f"  • Tabela: {tabela}")
+    print(f"  • Coluna merecimento: {coluna_merecimento}")
+    print(f"  • Tipo de filtro: {flag_tipo}")
+    
+    # Carregamento dos dados base
+    df_base = (
+        spark.table(tabela)
+        .select(
+            "CdFilial", "CdSku", "grupo_de_necessidade",
+            (100 * F.col(coluna_merecimento)).alias(f"Merecimento_Percentual_{canal}_raw")
+        )
+    )
+    
+    # Aplicar filtro baseado no flag
+    if flag_tipo == "SELEÇÃO":
+        df_raw = df_base.filter(F.col("grupo_de_necessidade").isin(filtros_grupo_selecao))
+        print(f"  • Aplicado filtro de SELEÇÃO: mantendo apenas {filtros_grupo_selecao}")
+    else:
+        df_raw = df_base.filter(~F.col("grupo_de_necessidade").isin(filtros_grupo_remocao))
+        print(f"  • Aplicado filtro de REMOÇÃO: removendo {filtros_grupo_remocao}")
+    
+    # Join com dados de filiais
+    df_com_filiais = df_raw.join(
+        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+        .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
+        on="CdFilial", how="left"
+    )
+    
+    # Normalização por SKU
+    window_sku = W.partitionBy("CdSku")
+    total_sku = F.sum(f"Merecimento_Percentual_{canal}_raw").over(window_sku)
+    
+    df_normalizado = (
+        df_com_filiais
+        .withColumn(
+            f"Merecimento_Percentual_{canal}",
+            F.round(
+                F.when(total_sku > 0, F.col(f"Merecimento_Percentual_{canal}_raw") * (100.0 / total_sku))
+                .otherwise(0.0), 
+                3
+            )
+        )
+        .drop(f"Merecimento_Percentual_{canal}_raw")
+    )
+    
+    # Regra especial para canal online: sobrescrever CdFilial 1401 → 14
+    if canal == "online":
+        df_normalizado = (
+            df_normalizado
+            .withColumn("CdFilial", F.when(F.col("CdFilial") == 1401, 14).otherwise(F.col("CdFilial")))
+        )
+        print("  • Aplicada regra especial: CdFilial 1401 → 14")
+    
+    # Agregação por grupo de necessidade - mesmo racional das análises factuais
+    df_agregado = (
+        df_normalizado
+        .groupBy("CdFilial", "grupo_de_necessidade")
+        .agg(
+            F.round(F.mean(f"Merecimento_Percentual_{canal}"), 3).alias(f"Merecimento_Percentual_{canal}")
+        )
+    )
+    
+    print(f"✅ Matriz processada:")
+    print(f"  • Total de registros: {df_agregado.count():,}")
+    print(f"  • Filiais únicas: {df_agregado.select('CdFilial').distinct().count():,}")
+    print(f"  • Grupos únicos: {df_agregado.select('grupo_de_necessidade').distinct().count():,}")
+    
+    return df_agregado
+
+# Processar matrizes online e offline
+df_merecimento_offline = processar_matriz_merecimento("DIRETORIA DE TELAS", "offline")
+df_merecimento_online = processar_matriz_merecimento("DIRETORIA DE TELAS", "online")
+
+print("\n📊 MATRIZES PROCESSADAS:")
+print("=" * 50)
+df_merecimento_offline.display()
+print("\n" + "=" * 50)
+df_merecimento_online.display()
