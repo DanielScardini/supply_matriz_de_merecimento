@@ -38,6 +38,15 @@ hoje_int = int(hoje.strftime("%Y%m%d"))
 
 FILIAIS_OUTLET = [2528, 3604]
 
+data_m_menos_1 = hoje - timedelta(days=30)
+data_m_menos_1 = data_m_menos_1.strftime("%Y-%m-%d")
+
+DATA_CALCULO = "2025-09-30"
+data_calculo_auto = True
+
+if data_calculo_auto:
+    DATA_CALCULO = hoje - timedelta(days=1)
+    DATA_CALCULO = DATA_CALCULO.strftime("%Y-%m-%d") 
 
 # COMMAND ----------
 
@@ -99,7 +108,7 @@ REGRAS_AGRUPAMENTO = {
 
 # Configuração de parâmetros para detecção de outliers
 PARAMETROS_OUTLIERS = {
-    "desvios_meses_atipicos": 3,  # Desvios para meses atípicos
+    "desvios_meses_atipicos": 2,  # Desvios para meses atípicos
     "desvios_historico_cd": 3,     # Desvios para outliers históricos a nível CD
     "desvios_historico_loja": 3,   # Desvios para outliers históricos a nível loja
     "desvios_atacado_cd": 3,     # Desvios para outliers CD em lojas de atacado
@@ -110,7 +119,7 @@ PARAMETROS_OUTLIERS = {
 JANELAS_MOVEIS_APARADAS = [90, 180, 270, 360]
 
 # Configuração específica para merecimento CD (sempre 90 dias)
-JANELA_CD_MERECIMENTO = 90
+JANELA_CD_MERECIMENTO = 180
 
 # Configuração das médias aparadas (percentual de corte)
 PERCENTUAL_CORTE_MEDIAS_APARADAS = 0.01  # 1% de corte superior e inferior
@@ -227,7 +236,7 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-07-01") -> Data
     df_base = (
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
         .filter(F.col("NmAgrupamentoDiretoriaSetor") == categoria)
-        #.filter(F.col("NmSetorGerencial") == 'PORTATEIS')
+        .filter(F.col("NmSetorGerencial") == 'PORTATEIS')
         .filter(F.col("DtAtual") >= data_inicio)
         .withColumn(
             "year_month",
@@ -632,15 +641,31 @@ def detectar_outliers_meses_atipicos(df: DataFrame, categoria: str) -> tuple:
 
 # COMMAND ----------
 
-def filtrar_meses_atipicos(df: DataFrame, df_meses_atipicos: DataFrame) -> DataFrame:
+def filtrar_meses_atipicos(df: DataFrame, df_meses_atipicos: DataFrame, data_calculo: str = None) -> DataFrame:
     """
     Filtra os meses atípicos do DataFrame principal.
+    PROTEGE a data_calculo de ser removida.
     """
     print("🔄 Aplicando filtro de meses atípicos...")
     
+    # Se data_calculo foi fornecida, remover ela da lista de meses atípicos
+    if data_calculo:
+        year_month_calculo = int(data_calculo.replace("-", "")[:6])  # "2025-09-25" -> 202509
+        print(f"🛡️ Protegendo year_month {year_month_calculo} da remoção (DATA_CALCULO)")
+        
+        df_meses_atipicos_filtrado = df_meses_atipicos.filter(
+            F.col("year_month") != year_month_calculo
+        )
+        
+        meses_antes = df_meses_atipicos.count()
+        meses_depois = df_meses_atipicos_filtrado.count()
+        print(f"  • Meses atípicos: {meses_antes} → {meses_depois} (removido {meses_antes - meses_depois} mês protegido)")
+    else:
+        df_meses_atipicos_filtrado = df_meses_atipicos
+    
     df_filtrado = (
         df.join(
-            df_meses_atipicos.withColumn("flag_remover", F.lit(1)),
+            df_meses_atipicos_filtrado.withColumn("flag_remover", F.lit(1)),
             on=["grupo_de_necessidade", "year_month"],
             how="left"
         )
@@ -761,9 +786,11 @@ def criar_de_para_filial_cd() -> DataFrame:
     
     df_base = (
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
-        .filter(F.col("DtAtual") == "2025-08-01")
+        .filter(F.col("DtAtual") == DATA_CALCULO)
         .filter(F.col("CdSku").isNotNull())
     )
+
+    print(f"✅ De-para filial usando registros de {DATA_CALCULO}")
     
     de_para_filial_cd = (
         df_base
@@ -1050,7 +1077,7 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
 
 def executar_calculo_matriz_merecimento_completo(categoria: str, 
                                                 data_inicio: str = "2024-07-01",
-                                                data_calculo: str = "2025-08-31") -> DataFrame:
+                                                data_calculo: str = DATA_CALCULO) -> DataFrame:
     """
     Função principal que executa todo o fluxo da matriz de merecimento.
     """
@@ -1109,7 +1136,7 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         df_stats, df_meses_atipicos = detectar_outliers_meses_atipicos(df_agregado, categoria)
         
         # 7. Filtragem de meses atípicos
-        df_filtrado = filtrar_meses_atipicos(df_agregado, df_meses_atipicos)
+        df_filtrado = filtrar_meses_atipicos(df_agregado, df_meses_atipicos, DATA_CALCULO)
         
         # 8. Remoção de outliers das séries históricas
         print("=" * 80)
@@ -1146,7 +1173,7 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         df_merecimento_final = calcular_merecimento_final(df_merecimento_cd, df_merecimento_interno)
 
         # Criar o esqueleto
-        df_esqueleto = criar_esqueleto_matriz_completa(df_com_grupo, "2025-08-31")
+        df_esqueleto = criar_esqueleto_matriz_completa(df_com_grupo, data_m_menos_1)
 
         # Primeiro, identificar todas as colunas de merecimento final
         colunas_merecimento_final = [col for col in df_merecimento_final.columns 
@@ -1191,10 +1218,10 @@ print("=" * 80)
 
 # Lista de todas as categorias disponíveis
 categorias = [
-    "DIRETORIA DE TELAS",
+    #"DIRETORIA DE TELAS",
     #"DIRETORIA TELEFONIA CELULAR", 
     #"DIRETORIA DE LINHA BRANCA",
-    #"DIRETORIA LINHA LEVE",
+    "DIRETORIA LINHA LEVE",
     # "DIRETORIA INFO/PERIFERICOS"
 ]
 
@@ -1209,7 +1236,7 @@ for categoria in categorias:
         df_matriz_final = executar_calculo_matriz_merecimento_completo(
             categoria=categoria,
             data_inicio="2024-07-01",
-            data_calculo="2025-09-25"
+            data_calculo=DATA_CALCULO
         )
         
         # Salva em tabela específica da categoria
@@ -1220,7 +1247,7 @@ for categoria in categorias:
             .upper()
         )
         
-        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste0110"
+        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste0310"
         
         print(f"💾 Salvando matriz de merecimento para: {categoria}")
         print(f"📊 Tabela: {nome_tabela}")

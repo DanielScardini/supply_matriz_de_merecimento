@@ -45,6 +45,81 @@ categorias_teste = ['LINHA_LEVE']
 
 # COMMAND ----------
 
+dt_inicio = "2025-08-01"
+dt_fim = "2025-10-01"
+
+df_demanda = (
+  spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
+  .filter(F.col("NmSetorGerencial") == "PORTATEIS")
+  .filter(F.col("DtAtual") >= dt_inicio)
+  .filter(F.col("DtAtual") < dt_fim)
+  .groupBy("NmEspecieGerencial")
+  .agg(
+    F.sum(F.col("QtMercadoria")).alias("QtDemanda"),
+    F.sum(F.col("Receita")).alias("Receita")
+  )
+
+)
+
+# calcular totais com window
+w_total = Window.rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing)
+
+# window para cumulativo
+w_cum = Window.orderBy(F.col("PercDemanda").desc()).rowsBetween(Window.unboundedPreceding, 0)
+
+df_demanda = (
+    df_demanda
+    .withColumn("TotalDemanda", F.sum("QtDemanda").over(w_total))
+    .withColumn("TotalReceita", F.sum("Receita").over(w_total))
+    .withColumn("PercDemanda", F.round((F.col("QtDemanda") / F.col("TotalDemanda")) * 100, 0))
+    .withColumn("PercReceita", F.round((F.col("Receita") / F.col("TotalReceita")) * 100, 0))
+    .drop("TotalDemanda", "TotalReceita")
+    .withColumn("PercDemandaCumulativo", F.sum("PercDemanda").over(w_cum))
+    .withColumn("PercReceitaCumulativo", F.sum("PercReceita").over(w_cum))
+
+)
+
+especies_top80 = (
+    df_demanda
+    .filter(F.col("PercDemandaCumulativo") <= 80)
+    .filter(F.col("NmEspecieGerencial") != 'SANDUICHEIRAS')
+    .select("NmEspecieGerencial")
+    .rdd.flatMap(lambda x: x)
+    .collect()
+)
+
+
+print(especies_top80)
+#print(skus_especies_top80)
+
+
+especies_boas = [
+    "LIQUIDIFICADORES 350 A 1000 W",
+    "FERROS DE PASSAR A SECO",
+    "LIQUIDIFICADORES ACIMA 1001 W.",
+    "PANELAS ELETRICAS DE ARROZ",
+    "FRITADEIRA ELETRICA (CAPSULA)",
+    "FERROS PAS. ROUPA VAPOR/SPRAY",
+    "CAFETEIRA ELETRICA (FILTRO)"
+]
+
+skus_especies_top80 = (
+    spark.table('data_engineering_prd.app_venda.mercadoria')
+    .select(
+        F.col("CdSkuLoja").alias("CdSku"),
+        F.col("NmEspecieGerencial")
+    )
+    .filter(F.col("NmEspecieGerencial").isin(especies_top80))
+    .filter(F.col("CdSku") != -1)
+    .select("CdSku")
+    .rdd.flatMap(lambda x: x)
+    .collect()
+)
+
+df_demanda.filter(F.col("NmEspecieGerencial").isin(especies_top80)).agg(F.sum("PercDemanda")).display()
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 1. Carregamento das Matrizes de Merecimento Calculadas
 
@@ -71,7 +146,7 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     
     for categoria in categorias:
         try:
-            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_LINHA_LEVE_teste1909_liq"
+            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_LINHA_LEVE_teste0310"
             df_matriz = spark.table(nome_tabela)
             
             matrizes[categoria] = df_matriz
@@ -144,6 +219,7 @@ df_matriz_neogrid_offline = (
         how="left"
     )
     .filter(F.col("grupo_de_necessidade").isNotNull())
+    .filter(F.col("CdSku").isin(skus_especies_top80))
 )
 
 df_matriz_neogrid_agg_offline = (
@@ -168,8 +244,8 @@ df_matriz_neogrid_agg_offline.limit(1).display()
 # COMMAND ----------
 
 # === Janela dinâmica: últimos 30 dias até ontem ===
-fim_janela = F.date_sub(F.current_date(), 1)
-inicio_janela = F.date_sub(fim_janela, 29)
+fim_janela = F.date_sub(F.current_date(), 31)
+inicio_janela = F.date_sub(fim_janela, 61)
 
 print(inicio_janela, fim_janela)
 
@@ -190,7 +266,8 @@ df_proporcao_factual = (
     )
     .dropna(subset='grupo_de_necessidade')
     .filter(F.col("NmSetorGerencial") == 'PORTATEIS')
-    .filter(F.col("grupo_de_necessidade").isin(GRUPOS_TESTE))
+    .filter(~F.col("grupo_de_necessidade").isin('SEM_GN', 'FORA DE LINHA'))
+    .filter(F.col("CdSku").isin(skus_especies_top80))
     .groupBy('CdFilial', 'grupo_de_necessidade')
     .agg(
         F.round(F.sum('QtDemanda'), 0).alias('QtDemanda'),
@@ -269,6 +346,9 @@ from functools import reduce
 COL_REAL = "Percentual_QtDemanda"
 COL_PESO = "QtDemanda"
 
+gdn_ruim = ['SANDUICHEIRAS_110', 'LIQUIDIFICADORES 350 A 1000 W_220', 'SANDUICHEIRAS_220', 
+            'CAFETEIRA ELETRICA (FILTRO)_220', 'PANELAS ELETRICAS DE ARROZ_220', 'FERROS DE PASSAR A SECO_220']
+
 # === Função utilitária: adiciona componentes sMAPE/WSMAPE para uma coluna de predição ===
 def add_smape_components(df, pred_col, real_col=COL_REAL, peso_col=COL_PESO, label=None):
     label = label or pred_col
@@ -283,8 +363,8 @@ def add_smape_components(df, pred_col, real_col=COL_REAL, peso_col=COL_PESO, lab
 
 # === Lista de colunas de predição alvo ===
 pred_cols_base = list(colunas)  # ["Merecimento_Final_Media90_...", ...]
-extras = ["PercMatrizNeogrid"]#, "PercMatrizNeogrid_median"]
-# mantém só as extras que existem no DF
+extras = ["PercMatrizNeogrid"]  # , "PercMatrizNeogrid_median"]
+
 def existing_pred_cols(df, base_cols, maybe_cols):
     present = [c for c in maybe_cols if c in df.columns]
     return base_cols + present
@@ -293,7 +373,7 @@ def existing_pred_cols(df, base_cols, maybe_cols):
 metrics_all = None  # DataFrame final com métricas
 
 for categoria in categorias_teste:
-    df_cat = df_acuracia[categoria]
+    df_cat = df_acuracia[categoria].filter(~F.col('grupo_de_necessidade').isin(gdn_ruim))
 
     pred_cols = existing_pred_cols(df_cat, pred_cols_base, extras)
 
@@ -304,8 +384,7 @@ for categoria in categorias_teste:
         df_cat
     )
 
-    # Agrega métricas por modelo: sMAPE médio e WSMAPE ponderado por QtDemanda
-    # sMAPE = média dos componentes; WSMAPE = sum(WSMAPE_comp)/sum(peso)
+    # Agrega métricas por modelo: sMAPE, wsMAPE e WMAPE clássico
     aggs = []
     for c in pred_cols:
         smape_col = f"sMAPE_comp_{c}"
@@ -315,7 +394,16 @@ for categoria in categorias_teste:
                 F.lit(categoria).alias("categoria"),
                 F.lit(c).alias("modelo"),
                 F.round(F.avg(F.col(smape_col)), 4).alias("sMAPE"),
-                F.round(F.sum(F.col(wsmape_col)) / F.sum(F.col(COL_PESO)), 4).alias("WSMAPE")
+                F.round(F.sum(F.col(wsmape_col)) / F.sum(F.col(COL_PESO)), 4).alias("WSMAPE"),
+                # WMAPE clássico: 100 * sum(|erro|) / sum(|real|)
+                F.round(
+                    F.when(
+                        F.sum(F.abs(F.col(COL_REAL))) == 0, F.lit(None)
+                    ).otherwise(
+                        100.0 * F.sum(F.abs(F.col(c) - F.col(COL_REAL))) / F.sum(F.abs(F.col(COL_REAL)))
+                    ),
+                    4
+                ).alias("WMAPE")
             ).alias(c)  # nome temporário
         )
 
@@ -325,8 +413,102 @@ for categoria in categorias_teste:
     metrics_cat = metrics_cat.select(F.explode(F.array(*metrics_cat.columns)).alias("m")).select("m.*")
 
     metrics_all = metrics_cat if metrics_all is None else metrics_all.unionByName(metrics_cat)
+
 # Mostrar as métricas agregadas por categoria e modelo
 metrics_all.orderBy("categoria", "modelo").display()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Análise de demanda por espécie de portáteis
+
+# COMMAND ----------
+
+from pyspark.sql import functions as F, Window as W
+
+# === Constantes ===
+COL_REAL = "Percentual_QtDemanda"
+COL_PESO = "QtDemanda"
+GROUP_COL = "grupo_de_necessidade"
+
+def existing_pred_cols(df, base_cols, maybe_cols):
+    present = [c for c in maybe_cols if c in df.columns]
+    return base_cols + present
+
+def wmape_expr(pred_col, real_col=COL_REAL, peso_col=COL_PESO):
+    yhat = F.coalesce(F.col(pred_col).cast("double"), F.lit(0.0))
+    y    = F.coalesce(F.col(real_col).cast("double"), F.lit(0.0))
+    w    = F.coalesce(F.col(peso_col).cast("double"), F.lit(0.0))
+    num = F.sum(F.abs(yhat - y) * w)
+    den = F.sum(F.abs(y) * w)
+    return F.when(den == 0, F.lit(0.0)).otherwise(100.0 * num / den)
+
+# pred_cols_base = list(colunas)
+# extras = ["PercMatrizNeogrid", "PercMatrizNeogrid_median"]
+# categorias_teste, df_acuracia: já definidos
+
+wmape_all = None
+
+for categoria in categorias_teste:
+    df_cat = df_acuracia[categoria].filter(~F.col('grupo_de_necessidade').isin(gdn_ruim))
+    pred_cols = existing_pred_cols(df_cat, pred_cols_base, extras)
+
+    # Volume por grupo via Window
+    w_grp = W.partitionBy(GROUP_COL)
+    df_aug = df_cat.withColumn("Volume", F.sum(F.col(COL_PESO)).over(w_grp))
+
+    # Aggregations por modelo em structs nomeados
+    aggs, agg_names = [], []
+    for c in pred_cols:
+        name = f"agg_{c}"
+        agg_names.append(name)
+        aggs.append(
+            F.struct(
+                F.lit(categoria).alias("categoria"),
+                F.col(GROUP_COL).alias("grupo"),
+                F.lit(c).alias("modelo"),
+                F.round(wmape_expr(c), 4).alias("WMAPE")
+            ).alias(name)
+        )
+
+    wmape_cat = (
+        df_aug
+        .groupBy(GROUP_COL)
+        .agg(*aggs, F.max("Volume").alias("Volume"))
+        .select(
+            F.col(GROUP_COL).alias("grupo"),
+            "Volume",
+            F.array(*[F.col(n) for n in agg_names]).alias("arr")
+        )
+        .select("grupo", "Volume", F.explode("arr").alias("m"))
+        .select(
+            F.lit(categoria).alias("categoria"),
+            "grupo",
+            F.col("m.modelo").alias("modelo"),
+            F.col("m.WMAPE").alias("WMAPE"),
+            "Volume"
+        )
+    )
+
+    # Volume total da categoria para share (sem criar totais)
+    vol_tot_cat = (
+        df_cat
+        .agg(F.sum(F.col(COL_PESO)).alias("Volume_total_categoria"))
+        .withColumn("categoria", F.lit(categoria))
+    )
+
+    wmape_cat = wmape_cat.join(vol_tot_cat, on="categoria", how="left") \
+                         .withColumn("ShareVolumeCategoria",
+                                     F.round(F.col("Volume") / F.col("Volume_total_categoria"), 6))
+
+    wmape_all = wmape_cat if wmape_all is None else wmape_all.unionByName(wmape_cat)
+
+# Apenas grupos existentes, sem linhas de TOTAL
+wmape_all.orderBy("categoria", "grupo", "modelo").display()
+
+# COMMAND ----------
+
+'SANDUICHEIRAS_110', 'LIQUIDIFICADORES 350 A 1000 W_220', 'SANDUICHEIRAS_220', 'CAFETEIRA ELETRICA (FILTRO)_220', 'PANELAS ELETRICAS DE ARROZ_220', 'FERROS DE PASSAR A SECO_220'
 
 # COMMAND ----------
 
@@ -343,7 +525,7 @@ df_filial_mean = {}
 pdf = {}
 
 for categoria in categorias_teste:
-    df_base = df_acuracia[categoria]
+    df_base = df_acuracia[categoria].filter(~F.col('grupo_de_necessidade').isin(gdn_ruim))
 
     # checa existência das colunas opcionais
     has_neogrid = "PercMatrizNeogrid" in df_base.columns
@@ -453,6 +635,145 @@ for categoria in categorias_teste:
         fig_neogrid.show()
     else:
         print(f"[{categoria}] Coluna PercMatrizNeogrid não disponível para plot.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC #Plot das bolinhas por GdN
+
+# COMMAND ----------
+
+# === Plotly scatters por Grupo de Necessidade ===
+import plotly.express as px
+from pyspark.sql import functions as F
+from pyspark.sql import Window
+from pyspark.sql.utils import AnalysisException
+
+# coluna do grupo (tenta alguns nomes comuns)
+GROUP_CANDIDATES = ["NmGrupoNecessidade", "GrupoNecessidade", "DsGrupoNecessidade", "grupo_de_necessidade"]
+def resolve_group_col(df):
+    for c in GROUP_CANDIDATES:
+        if c in df.columns:
+            return c
+    raise ValueError("Coluna de Grupo de Necessidade não encontrada.")
+
+df_filial_mean = {}
+pdf = {}
+
+# paleta por região (mantida)
+color_map = {
+    "Sudeste": "#0d3b66",
+    "Sul": "#5dade2",
+    "Centro Oeste": "#ff9896",
+    "Nordeste": "#1f77b4",
+    "Norte": "#d62728",
+}
+
+def make_scatter(df, y_col, y_label, categoria, grupo_nome):
+    fig = px.scatter(
+        df,
+        x="x_real",
+        y=y_col,
+        size="PorteNum",
+        color="NmRegiaoGeografica",
+        color_discrete_map=color_map,
+        size_max=12,
+        opacity=0.75,
+        labels={
+            "x_real": "Percentual_QtDemanda médio por filial (real)",
+            y_col:   y_label,
+            "NmRegiaoGeografica": "Região Geográfica",
+            "PorteNum": "Porte"
+        },
+        hover_data={
+            "CdFilial": True,
+            "NmFilial": True,
+            "NmPorteLoja": True,
+            "NmRegiaoGeografica": True,
+            "x_real": ":.3f",
+            y_col: ":.3f",
+        }
+    )
+    fig.update_layout(
+        title=dict(text=f"{y_label} vs Real – por filial | {categoria} | {grupo_nome}", x=0.5, xanchor="center"),
+        paper_bgcolor="#f2f2f2",
+        plot_bgcolor="#f2f2f2",
+        margin=dict(l=40, r=40, t=60, b=40),
+        xaxis=dict(showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)", zeroline=False, range=[0, 1.0]),
+        yaxis=dict(showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)", zeroline=False, range=[0, 2]),
+        legend=dict(title="Região Geográfica", orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5),
+        width=1200,
+        height=400,
+    )
+    fig.update_traces(marker=dict(line=dict(width=0.1, color="rgba(0,0,0,0.35)")))
+    fig.add_shape(type="line", x0=0, y0=0, x1=5, y1=5,
+                  line=dict(color="rgba(0,0,0,0.45)", width=0.2, dash="dash"))
+    return fig
+
+for categoria in categorias_teste:
+    df_base = df_acuracia[categoria]
+    group_col = resolve_group_col(df_base)
+
+    has_neogrid = "PercMatrizNeogrid" in df_base.columns
+
+    df_tmp = (
+        df_base
+        .withColumn("merecimento_percentual",
+                    F.col("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura"))
+        .join(
+            spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+            .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
+            on="CdFilial",
+            how="left"
+        )
+    )
+
+    # valores de grupos
+    grupos = [r[0] for r in df_tmp.select(group_col).distinct().collect()]
+
+    for g in grupos:
+        df_g = df_tmp.filter(F.col(group_col) == g)
+
+        agg_exprs = [
+            F.avg("Percentual_QtDemanda").alias("x_real"),
+            F.avg("merecimento_percentual").alias("y_nova"),
+        ]
+        if has_neogrid:
+            agg_exprs.append(F.avg("PercMatrizNeogrid").alias("y_neogrid"))
+
+        df_g_mean = (
+            df_g
+            .groupBy("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica")
+            .agg(*agg_exprs)
+            .withColumn("PorteNum_raw", F.regexp_replace(F.col("NmPorteLoja"), "[^0-9]", ""))
+            .withColumn("PorteNum", F.col("PorteNum_raw").cast("int"))
+            .withColumn("PorteNum", F.when(F.col("PorteNum").between(1,6), F.col("PorteNum")*1.5).otherwise(F.lit(1)))
+        )
+
+        pdf_g = df_g_mean.toPandas()
+
+        # Matriz Nova
+        fig_nova = make_scatter(
+            pdf_g,
+            "y_nova",
+            "PercMatrizNova médio por filial (previsão)",
+            categoria,
+            g
+        )
+        fig_nova.show()
+
+        # Baseline Neogrid (se existir)
+        if has_neogrid and "y_neogrid" in pdf_g.columns:
+            fig_neogrid = make_scatter(
+                pdf_g,
+                "y_neogrid",
+                "PercMatrizNeogrid médio por filial (baseline)",
+                categoria,
+                g
+            )
+            fig_neogrid.show()
+        else:
+            print(f"[{categoria} | {g}] PercMatrizNeogrid não disponível para plot.")
 
 # COMMAND ----------
 

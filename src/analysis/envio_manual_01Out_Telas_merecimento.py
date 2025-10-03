@@ -11,34 +11,13 @@ import plotly.graph_objects as go
 # Inicialização do Spark
 spark = SparkSession.builder.appName("envio_manual_lojas_telas").getOrCreate()
 
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Leitura das demandas de unidade
-
-# COMMAND ----------
-
-df_demanda_envio = (
-    spark.createDataFrame(
-        pd.read_excel('/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/dados_analise/Envio adicional Telas.xlsx', engine='openpyxl', skiprows=1)
-    )
-    .withColumnRenamed("CODIGO_ITEM", "CdSku")
-)
-
-df_demanda_envio.limit(1).display()
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Matrizes de merecimento on e off
-
-# COMMAND ----------
+PROPORCAO_OFF = 0.735
 
 # Configuração das tabelas de matriz
 TABELAS_MATRIZ_MERECIMENTO = {
     "DIRETORIA DE TELAS": {
-        "offline": "databox.bcg_comum.supply_matriz_merecimento_de_telas_teste2509",
-        "online": "databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste2609"
+        "offline": "databox.bcg_comum.supply_matriz_merecimento_de_telas_teste0110",
+        "online": "databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste0110"
     }
 }
 
@@ -53,7 +32,7 @@ FILTROS_GRUPO_NECESSIDADE_REMOCAO = {
 }
 
 FLAG_SELECAO_REMOCAO = {
-    "DIRETORIA DE TELAS": "SELEÇÃO"
+    "DIRETORIA DE TELAS": "REMOÇÃO"
 }
 
 FILTROS_GRUPO_NECESSIDADE_SELECAO = {
@@ -65,6 +44,35 @@ FILTROS_GRUPO_NECESSIDADE_SELECAO = {
         "TV 75 ALTO P"
     ]
 }
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Leitura das demandas de unidade
+
+# COMMAND ----------
+
+df_demanda_envio = (
+    spark.createDataFrame(
+        pd.read_excel('/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/dados_analise/Envio adicional Telas.xlsx', engine='openpyxl', skiprows=1)
+    )
+    .withColumnRenamed("CODIGO_ITEM", "CdSku")
+    .join(
+        spark.table(TABELAS_MATRIZ_MERECIMENTO['DIRETORIA DE TELAS']["offline"])
+                    .select("CdSku", "grupo_de_necessidade")
+                    .distinct(),
+        how="left",
+        on="CdSku")
+)
+
+df_demanda_envio.limit(1).display()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Matrizes de merecimento on e off
+
+# COMMAND ----------
 
 def processar_matriz_merecimento(categoria: str, canal: str) -> DataFrame:
     """
@@ -116,7 +124,7 @@ def processar_matriz_merecimento(categoria: str, canal: str) -> DataFrame:
     )
     
     # Normalização por SKU
-    window_sku = W.partitionBy("CdSku")
+    window_sku = Window.partitionBy("CdSku")
     total_sku = F.sum(f"Merecimento_Percentual_{canal}_raw").over(window_sku)
     
     df_normalizado = (
@@ -157,11 +165,123 @@ def processar_matriz_merecimento(categoria: str, canal: str) -> DataFrame:
     return df_agregado
 
 # Processar matrizes online e offline
-df_merecimento_offline = processar_matriz_merecimento("DIRETORIA DE TELAS", "offline")
-df_merecimento_online = processar_matriz_merecimento("DIRETORIA DE TELAS", "online")
+df_merecimento_offline = (
+    processar_matriz_merecimento("DIRETORIA DE TELAS", "offline")
+    .join(
+        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+        .select("CdFilial", "NmFilial", "NmUF", "NmPorteLoja"),
+        how="left",
+        on="CdFilial")
+    .orderBy(F.desc("Merecimento_Percentual_offline"))
+
+    )
+df_merecimento_online = (
+    processar_matriz_merecimento("DIRETORIA DE TELAS", "online")
+    .join(
+        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+        .select("CdFilial", "NmFilial", "NmUF", "NmPorteLoja"),
+        how="left",
+        on="CdFilial")
+    .orderBy(F.desc("Merecimento_Percentual_online"))
+    )
 
 print("\n📊 MATRIZES PROCESSADAS:")
 print("=" * 50)
 df_merecimento_offline.display()
 print("\n" + "=" * 50)
 df_merecimento_online.display()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Desdobramento da demanda entre ON e OFF
+
+# COMMAND ----------
+
+spark.table("data_engineering_prd.context_logistica.planoabastecimento").display()
+
+# COMMAND ----------
+
+w_cd = Window.partitionBy("CdSku", "CdFilialEntrega")
+
+df_demanda_on_off = (
+    df_merecimento_offline
+    .join(
+        df_merecimento_online,
+        on=["CdFilial", "NmFilial", "NmUF", "NmPorteLoja", "grupo_de_necessidade"],
+        how="outer")
+    .fillna(0, subset=["Merecimento_Percentual_online", "Merecimento_Percentual_offline"])
+    .join(
+        df_demanda_envio
+        .select("CdSku", "grupo_de_necessidade", "ITEM", "Envio adicional"),
+        how="inner",
+        on="grupo_de_necessidade")
+    
+    .withColumn("merecimento_percentual_propocionalizado_on_off",
+                (F.col("Merecimento_Percentual_offline") * PROPORCAO_OFF) + (F.col("Merecimento_Percentual_online") * (1-PROPORCAO_OFF))) 
+    .withColumn("proporção_demanda_off_percentual", F.round(F.lit(100*PROPORCAO_OFF), 1))
+    .withColumn("demanda_envio_on",
+                F.col("Envio adicional") * (1 - PROPORCAO_OFF) )
+    .withColumn("demanda_envio_off",
+                F.col("Envio adicional") * (PROPORCAO_OFF) )
+    .withColumn("Qtd_pecas_on",
+                F.col("demanda_envio_on")/100 * F.col("Merecimento_Percentual_online"))
+    .withColumn("Qtd_pecas_off",
+                F.col("demanda_envio_off")/100 * F.col("Merecimento_Percentual_offline"))
+    .withColumn("Qtd_pecas_total",
+                F.round(F.col("Qtd_pecas_on") + F.col("Qtd_pecas_off"), 0)
+    )
+    .join(
+        spark.table("data_engineering_prd.context_logistica.planoabastecimento")
+        .select(
+            F.col("CdFilialEntrega").cast("int").alias("CdFilialEntrega"),
+            F.col("CdLoja").cast("int").alias("CdFilial")
+        ).distinct(),
+        how="left",
+        on="CdFilial"
+    )
+    .withColumn("CdFilialEntrega",
+                F.when(F.col("CdFilialEntrega").isNull(), F.col("CdFilial"))
+                .otherwise(F.col("CdFilialEntrega")))
+    .withColumn("MerecimentoCD",
+                F.round(F.sum("merecimento_percentual_propocionalizado_on_off").over(w_cd), 3))
+)
+
+df_demanda_on_off.display()
+    
+
+# COMMAND ----------
+
+(
+    df_demanda_on_off.select("CdSku", "ITEM", "grupo_de_necessidade", "CdFilial", "NmFilial", 
+                         "NmPorteLoja", "Merecimento_Percentual_offline",
+                         "Merecimento_Percentual_online","proporção_demanda_off_percentual", 
+                         F.round(
+                             F.col("merecimento_percentual_propocionalizado_on_off"), 3).alias("merecimento_percentual_propocionalizado_on_off"),
+                         "MerecimentoCD"
+                         ).toPandas()
+).to_excel("merecimento_proporcional_on_off_envio_manual.xlsx")
+
+# COMMAND ----------
+
+(
+    df_demanda_on_off.select("CdSku", "ITEM", "grupo_de_necessidade", 
+                         "MerecimentoCD",
+                         "CdFilialEntrega"
+                         ).dropDuplicates().toPandas()
+).to_excel("merecimento_CD_on_off_envio_manual.xlsx")
+
+# COMMAND ----------
+
+df_demanda_on_off_agg = (
+    df_demanda_on_off
+    .groupBy("CdSku", "ITEM")
+    .agg(
+        F.sum("Qtd_pecas_total").alias("Qtd_pecas_total_distribuidas"),
+        F.first("Envio adicional").alias("Envio adicional")
+    )
+    .withColumn("n_itens_nao_distribuidos",
+                F.col("Envio adicional") - F.col("Qtd_pecas_total_distribuidas"))
+)
+
+df_demanda_on_off_agg.display()

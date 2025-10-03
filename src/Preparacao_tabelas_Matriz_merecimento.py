@@ -61,7 +61,7 @@ def get_data_inicio(hoje: datetime | date | None = None) -> datetime:
     else:
         hoje_d = hoje
 
-    total_meses = hoje_d.year * 12 + hoje_d.month - 0
+    total_meses = hoje_d.year * 12 + hoje_d.month - 1
     ano = total_meses // 12
     mes = total_meses % 12
     if mes == 0:
@@ -435,6 +435,14 @@ def create_analysis_with_rupture_flags(df: DataFrame) -> DataFrame:
 
 df_merecimento_base_r90 = add_rolling_90_metrics(df_merecimento_base)
 df_merecimento_base_r90 = create_analysis_with_rupture_flags(df_merecimento_base_r90)
+
+# COMMAND ----------
+
+# MAGIC %sql SELECT * FROM databox.bcg_comum.supply_base_merecimento_diario_v4
+
+# COMMAND ----------
+
+# MAGIC %sql SELECT * FROM databox.bcg_comum.supply_base_merecimento_diario_v4_online
 
 # COMMAND ----------
 

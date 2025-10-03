@@ -17,7 +17,10 @@ data_inicio = datetime.now() - timedelta(days=30)
 data_inicio_str = data_inicio.strftime("%Y-%m-%d")
 data_inicio_int = int(data_inicio.strftime("%Y%m%d"))
 
-GRUPOS_TESTE = ['TV 50 ALTO P', 'TV 55 ALTO P', 'TV 43 PP']
+GRUPOS_TESTE = ['TV 50 ALTO P', 'TV 55 ALTO P', 'TV 43 PP', 
+                'TV 43 ALTO P', 'TV 32 ALTO P', 'TV 50 MEDIO',
+                'TV 32 PP', 'TV 55 MEDIO', 'SUPORTES', 'TV 50 ALTO P',
+                'TV 55 ALTO P', 'TV 32 MEDIO']
 
 # COMMAND ----------
 
@@ -42,10 +45,10 @@ df_vendas_robustas_off = (
     #.filter(F.col("demanda_diarizada") > 1)
     .orderBy(F.desc("demanda_diarizada"))
     .join(
-        spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_teste0509')
+        spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_teste0110')
         .select(
             "CdSku", "CdFilial",
-            F.col("Merecimento_Final_Media90_Qt_venda_sem_ruptura").alias("merecimento_final")),
+            F.col("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura").alias("merecimento_final")),
         on="CdSku",
         how="inner"
     )
@@ -78,10 +81,10 @@ df_vendas_robustas_on = (
     #.filter(F.col("demanda_diarizada") > 1)
     .orderBy(F.desc("demanda_diarizada"))
     .join(
-        spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste0809')
+        spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste0110')
         .select(
             "CdSku", "CdFilial",
-            F.col("Merecimento_Final_Media90_Qt_venda_sem_ruptura").alias("merecimento_final")),
+            F.col("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura").alias("merecimento_final")),
         on="CdSku",
         how="inner"
     )
@@ -114,7 +117,7 @@ df_vendas_robustas = (
         on=["grupo_de_necessidade", "CdSku", "CdFilial"],
         how="inner"
     )
-    .withColumn("DDV_futuro_filial",
+    .withColumn("DDV_futuro_filial_merecimento",
                 F.round(F.col("DDV_futuro_filial_off") + F.col("DDV_futuro_filial_on"), 3)
     )
 )
@@ -123,21 +126,21 @@ df_vendas_robustas.display()
 
 # COMMAND ----------
 
-# MAGIC %sql SELECT * FROM data_engineering_prd.app_operacoesloja.roteirizacaocentrodistribuicao
-
-# COMMAND ----------
-
 import pandas as pd
 !pip install openpyxl
 
 # Converte Spark DataFrame para Pandas
-df_vendas_robustas_pd = df_vendas_robustas.toPandas()
+df_vendas_robustas_pd = (
+    df_vendas_robustas
+    .select("grupo_de_necessidade", "CdSku", "CdFilial", "DDV_futuro_filial_merecimento")
+    .toPandas()
+)
 
 # Garante que a última coluna seja float (decimal)
-df_vendas_robustas_pd["DDV_futuro_filial"] = df_vendas_robustas_pd["DDV_futuro_filial"].astype(float)
+df_vendas_robustas_pd["DDV_futuro_filial_merecimento"] = df_vendas_robustas_pd["DDV_futuro_filial_merecimento"].astype(float)
 
 # Salva em Excel
-output_path = "/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/analysis/ddv_futuro_filial.xlsx"
+output_path = f"/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/analysis/ddv_futuro_filial_{hoje_str}.xlsx"
 with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
     df_vendas_robustas_pd.to_excel(writer, sheet_name="dados", index=False)
 
