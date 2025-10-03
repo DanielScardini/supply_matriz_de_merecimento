@@ -685,19 +685,25 @@ def filtrar_meses_atipicos(df: DataFrame, df_meses_atipicos: DataFrame, data_cal
 def add_media_aparada_rolling(df, janelas, col_val="demanda_robusta", col_ord="DtAtual", 
                               grupos=("CdSku","CdFilial"), alpha=0.10, min_obs=10):
     """
-    Adiciona médias aparadas rolling para diferentes janelas.
+    Adiciona médias aparadas rolling com proteção completa contra NULLs.
     """
     out = df
+    
+    # ✅ JANELA DE BACKUP 360d para casos extremos
+    window_360_backup = Window.partitionBy(*grupos).orderBy(F.col(col_ord)).rowsBetween(-360, 0)
+    backup_360_mean = F.avg(F.when(F.col(col_val).isNotNull(), F.col(col_val))).over(window_360_backup)
+    
     for dias in janelas:
         w = Window.partitionBy(*grupos).orderBy(F.col(col_ord)).rowsBetween(-dias, 0)
 
+        # Percentis com proteção contra janelas vazias
         ql = F.percentile_approx(F.col(col_val), F.lit(alpha)).over(w)
         qh = F.percentile_approx(F.col(col_val), F.lit(1 - alpha)).over(w)
 
         out = (
             out
-            .withColumn(f"_ql_{dias}", ql)
-            .withColumn(f"_qh_{dias}", qh)
+            .withColumn(f"_ql_{dias}", F.coalesce(ql, F.lit(0)))  # ✅ Proteção percentis
+            .withColumn(f"_qh_{dias}", F.coalesce(qh, F.lit(float('inf'))))  # ✅ Proteção percentis
         )
 
         cnt = F.count(F.col(col_val)).over(w)
@@ -705,12 +711,29 @@ def add_media_aparada_rolling(df, janelas, col_val="demanda_robusta", col_ord="D
         sum_trim = F.sum(F.when(cond, F.col(col_val)).otherwise(F.lit(0))).over(w)
         cnt_trim = F.sum(F.when(cond, F.lit(1)).otherwise(F.lit(0))).over(w)
 
-        mean_simple = F.avg(F.col(col_val)).over(w)
-        mean_trim = sum_trim / F.when(cnt_trim > 0, cnt_trim).otherwise(F.lit(None))
+        # ✅ PROTEÇÃO: Média simples com fallback
+        mean_simple = F.coalesce(
+            F.avg(F.col(col_val)).over(w),  # Média da janela
+            backup_360_mean,  # Backup 360d
+            F.lit(0)  # Último recurso
+        )
+        
+        # ✅ PROTEÇÃO: Média aparada com fallback para média simples
+        mean_trim = F.when(
+            cnt_trim > 0, 
+            sum_trim / cnt_trim
+        ).otherwise(mean_simple)  # Fallback para média simples protegida
 
+        # ✅ PROTEÇÃO: Lógica final com múltiplos fallbacks
         out = out.withColumn(
             f"MediaAparada{dias}_Qt_venda_sem_ruptura",
-            F.when(cnt >= F.lit(min_obs), mean_trim).otherwise(mean_simple)
+            F.when(
+                cnt >= F.lit(min_obs), 
+                F.coalesce(mean_trim, mean_simple, backup_360_mean, F.lit(0))
+            )
+            .otherwise(
+                F.coalesce(mean_simple, backup_360_mean, F.lit(0))
+            )
         ).drop(f"_ql_{dias}", f"_qh_{dias}")
 
     return out
@@ -719,9 +742,9 @@ def add_media_aparada_rolling(df, janelas, col_val="demanda_robusta", col_ord="D
 
 def calcular_medidas_centrais_com_medias_aparadas(df: DataFrame) -> DataFrame:
     """
-    Calcula apenas médias aparadas (removidas médias móveis simples).
+    Calcula medidas centrais com médias aparadas e proteção completa contra NULLs.
     """
-    print("🔄 Calculando medidas centrais com médias aparadas...")
+    print("🔄 Calculando medidas centrais com médias aparadas (protegido)...")
     
     df_sem_ruptura = (
         df
@@ -733,6 +756,14 @@ def calcular_medidas_centrais_com_medias_aparadas(df: DataFrame) -> DataFrame:
                         )
                     .otherwise(F.col("demanda_robusta"))
                     )
+        # ✅ HIERARQUIA INTELIGENTE: demanda_robusta → QtMercadoria → deltaRuptura → 0
+        .withColumn("demanda_robusta", 
+                    F.coalesce(
+                        F.col("demanda_robusta"),  # Primeiro: demanda robusta calculada
+                        F.col("QtMercadoria"),     # Segundo: apenas vendas
+                        F.col("deltaRuptura"),     # Terceiro: apenas ruptura
+                        F.lit(0)                   # Último: zero
+                    ))
     )
 
     lista = ", ".join(str(f) for f in FILIAIS_OUTLET)
@@ -830,11 +861,14 @@ def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) ->
     de_para_filial_cd = criar_de_para_filial_cd()
     df_com_cd = df_data_calculo.join(de_para_filial_cd, on="cdfilial", how="left")
     
-    # Agregar apenas a medida específica do CD
+    # ✅ AGREGAÇÃO COM PROTEÇÃO DUPLA:
     df_merecimento_cd = (
         df_com_cd
         .groupBy("cd_vinculo", "grupo_de_necessidade")
-        .agg(F.sum(F.col(medida_cd)).alias(f"Total_{medida_cd}"))
+        .agg(
+            # F.sum() já ignora NULLs, mas garantimos com coalesce
+            F.sum(F.coalesce(F.col(medida_cd), F.lit(0))).alias(f"Total_{medida_cd}")
+        )
     )
     
     # Calcular percentual do CD dentro da Cia
@@ -1070,6 +1104,63 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
 
 # COMMAND ----------
 
+def garantir_integridade_dados_pre_merecimento(df: DataFrame) -> DataFrame:
+    """
+    Garante integridade dos dados ANTES de qualquer cálculo de merecimento.
+    Preenche NULLs com média 360d da própria combinação grupo+filial.
+    """
+    print("🛡️ Garantindo integridade dos dados pré-merecimento...")
+    
+    # Identificar colunas de médias aparadas
+    colunas_medias_aparadas = [col for col in df.columns 
+                              if col.startswith("MediaAparada") and col.endswith("_Qt_venda_sem_ruptura")]
+    
+    if not colunas_medias_aparadas:
+        print("  ⚠️ Nenhuma coluna de média aparada encontrada")
+        return df
+    
+    print(f"  📊 Tratando: {colunas_medias_aparadas}")
+    
+    # Janela de 360 dias para backup
+    window_360 = Window.partitionBy("grupo_de_necessidade", "CdFilial").orderBy("DtAtual").rowsBetween(-360, 0)
+    
+    df_tratado = df
+    
+    for coluna in colunas_medias_aparadas:
+        backup_col = f"{coluna}_backup360"
+        
+        # Contar NULLs antes
+        nulls_antes = df_tratado.filter(F.col(coluna).isNull()).count()
+        
+        df_tratado = (
+            df_tratado
+            # Calcular média 360d apenas de valores não-nulos da própria combinação
+            .withColumn(
+                backup_col,
+                F.avg(F.when(F.col(coluna).isNotNull(), F.col(coluna))).over(window_360)
+            )
+            # Preencher NULL APENAS se há histórico válido da própria combinação
+            .withColumn(
+                coluna,
+                F.when(
+                    F.col(coluna).isNull() & F.col(backup_col).isNotNull(), 
+                    F.col(backup_col)
+                )
+                .otherwise(F.col(coluna))  # Mantém NULL se não há histórico próprio
+            )
+            .drop(backup_col)
+        )
+        
+        # Contar NULLs depois
+        nulls_depois = df_tratado.filter(F.col(coluna).isNull()).count()
+        nulls_preenchidos = nulls_antes - nulls_depois
+        
+        print(f"    ✅ {coluna}: {nulls_preenchidos:,} NULLs preenchidos | {nulls_depois:,} restantes")
+    
+    return df_tratado
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 4. Função Principal de Execução
 
@@ -1158,6 +1249,9 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         
         # 10. Consolidação final
         df_final = consolidar_medidas(df_com_medidas)
+        
+        # ✅ 10.1 NOVO: Garantir integridade dos dados pré-merecimento
+        df_final = garantir_integridade_dados_pre_merecimento(df_final)
         
         # 11. Cálculo de merecimento por CD e filial
         print("=" * 80)
