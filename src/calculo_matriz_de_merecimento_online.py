@@ -922,23 +922,15 @@ def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) ->
     de_para_filial_cd = criar_de_para_filial_cd()
     df_com_cd = df_data_calculo.join(de_para_filial_cd, on="cdfilial", how="left")
     
-    # ✅ FILTRAR FILIAIS SEM CD PARA EVITAR DISTORÇÃO
-    filiais_sem_cd_count = df_com_cd.filter(F.col("cd_vinculo").isNull()).count()
-    if filiais_sem_cd_count > 0:
-        print(f"  ⚠️ ATENÇÃO: {filiais_sem_cd_count} filiais sem CD serão excluídas do cálculo")
-        df_com_cd = df_com_cd.filter(F.col("cd_vinculo").isNotNull())
-    
     # ✅ AGREGAÇÃO COM PROTEÇÃO DUPLA:
     df_merecimento_cd = (
         df_com_cd
-        .filter(F.col("cd_vinculo") != "SEM_CD")  # ✅ Excluir filiais sem CD válido
         .groupBy("cd_vinculo", "grupo_de_necessidade")
         .agg(
             # F.sum() já ignora NULLs, mas garantimos com coalesce
             F.sum(F.coalesce(F.col(medida_cd), F.lit(0))).alias(f"Total_{medida_cd}"),
             F.count("*").alias("qtd_filiais_cd")  # ✅ Contar filiais por CD
         )
-        .filter(F.col(f"Total_{medida_cd}") > 0)  # ✅ Excluir CDs sem demanda
     )
     
     # Calcular percentual do CD dentro da Cia
