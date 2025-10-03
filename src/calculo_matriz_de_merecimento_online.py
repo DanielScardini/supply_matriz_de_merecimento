@@ -756,8 +756,14 @@ def calcular_medidas_centrais_com_medias_aparadas(df: DataFrame) -> DataFrame:
                         )
                     .otherwise(F.col("demanda_robusta"))
                     )
-        # ✅ GARANTIR que demanda_robusta nunca é NULL
-        .withColumn("demanda_robusta", F.coalesce(F.col("demanda_robusta"), F.lit(0)))
+        # ✅ HIERARQUIA INTELIGENTE: demanda_robusta → QtMercadoria → deltaRuptura → 0
+        .withColumn("demanda_robusta", 
+                    F.coalesce(
+                        F.col("demanda_robusta"),  # Primeiro: demanda robusta calculada
+                        F.col("QtMercadoria"),     # Segundo: apenas vendas
+                        F.col("deltaRuptura"),     # Terceiro: apenas ruptura
+                        F.lit(0)                   # Último: zero
+                    ))
     )       
     
     lista = ", ".join(str(f) for f in FILIAIS_OUTLET)
