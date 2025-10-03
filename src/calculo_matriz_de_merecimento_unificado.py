@@ -914,8 +914,8 @@ def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) ->
 
     df_data_calculo = (
         df_data_calculo
-        .orderBy('CdFilial')
-        .dropDuplicates(subset=['CdFilial'])
+        .orderBy('CdFilial', 'grupo_de_necessidade')
+        .dropDuplicates(subset=['CdFilial', 'grupo_de_necessidade'])  # ✅ Manter granularidade por grupo
     )
     
     # Usar apenas média aparada 90 dias para merecimento CD
@@ -931,7 +931,7 @@ def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) ->
         .agg(
             # F.sum() já ignora NULLs, mas garantimos com coalesce
             F.sum(F.coalesce(F.col(medida_cd), F.lit(0))).alias(f"Total_{medida_cd}"),
-            F.count("*").alias("qtd_filiais_cd")  # ✅ Contar filiais por CD
+            F.count("*").alias("qtd_filiais_cd")  # ✅ Contar registros (filial + grupo)
         )
     )
     
