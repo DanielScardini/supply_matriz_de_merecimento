@@ -119,7 +119,7 @@ PARAMETROS_OUTLIERS = {
 JANELAS_MOVEIS_APARADAS = [90, 180, 270, 360]
 
 # Configuração específica para merecimento CD (sempre 90 dias)
-JANELA_CD_MERECIMENTO = 180
+JANELA_CD_MERECIMENTO = 90
 
 # Configuração das médias aparadas (percentual de corte)
 PERCENTUAL_CORTE_MEDIAS_APARADAS = 0.01  # 1% de corte superior e inferior
@@ -1247,7 +1247,7 @@ for categoria in categorias:
             .upper()
         )
         
-        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste0310"
+        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste0410"
         
         print(f"💾 Salvando matriz de merecimento para: {categoria}")
         print(f"📊 Tabela: {nome_tabela}")
