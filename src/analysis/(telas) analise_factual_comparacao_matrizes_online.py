@@ -45,6 +45,16 @@ categorias_teste = ['DE_TELAS']
 
 # COMMAND ----------
 
+(
+    spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste2309')
+    .join(
+        spark.table('databox.bcg_comum.supply_de_para_modelos_gemeos_tecnologia'),
+        how="inner",
+        on="CdSku"
+).display()
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 1. Carregamento das Matrizes de Merecimento Calculadas
 

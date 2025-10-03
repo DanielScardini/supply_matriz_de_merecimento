@@ -846,12 +846,6 @@ def criar_de_para_filial_cd() -> DataFrame:
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
         .filter(F.col("DtAtual") == DATA_CALCULO)
         .filter(F.col("CdSku").isNotNull())
-        .withColumn("cd_secundario",
-            F.when(
-                F.col("DsEstoqueLojaDeposito") == 'D', F.col("cdfilial")
-            )
-            .otherwise(F.col("cd_secundario"))
-        )
     )
 
     print(f"✅ De-para filial usando registros de {DATA_CALCULO}")
@@ -1492,6 +1486,142 @@ print("\n" + "=" * 80)
 print("🎯 SCRIPT DE CÁLCULO CONCLUÍDO!")
 print("📋 Próximo passo: Executar script de análise de factual e comparações")
 print("=" * 80)
+
+# COMMAND ----------
+
+df_base = carregar_dados_base(categoria, data_inicio)
+df_base.cache()
+
+# 2. Carregamento e aplicação do espelhamento de filiais
+df_espelhamento = carregar_de_para_espelhamento()
+df_base_com_espelhamento = aplicar_espelhamento_filiais(df_base, df_espelhamento)
+df_base_com_espelhamento.cache()
+
+# 3. Carregamento dos mapeamentos
+de_para_modelos, de_para_gemeos = carregar_mapeamentos_produtos(categoria)  
+
+# 4. Aplicação dos mapeamentos
+df_com_mapeamentos = aplicar_mapeamentos_produtos(
+    df_base_com_espelhamento, categoria, de_para_modelos, de_para_gemeos
+)
+
+# 5. Definição do grupo_de_necessidade
+df_com_grupo = determinar_grupo_necessidade(categoria, df_com_mapeamentos)
+#     df_com_grupo = (
+#         df_com_grupo
+#         .filter(
+#             F.col("grupo_de_necessidade").isin(
+#         'Telef pp', 
+#         'TV 50 ALTO P', 
+#         'TV 55 ALTO P',
+#         'TV 43 PP',
+#         'TV 75 PP',
+#         'TV 75 ALTO P',
+#         'Telef Medio 256GB',
+#         'Telef Medio 128GB',
+#         'Telef Alto',
+#         )
+#     )
+# )
+df_com_grupo.cache()
+
+df_agregado = (
+    df_com_grupo
+    .groupBy("grupo_de_necessidade", "CdFilial", "DtAtual", "year_month")
+    .agg(
+        F.sum("QtMercadoria").alias("QtMercadoria"),
+        F.sum("deltaRuptura").alias("deltaRuptura"),
+        F.first("tipo_agrupamento").alias("tipo_agrupamento")
+    )
+)
+
+df_agregado.cache()
+df_agregado.filter(F.col("grupo_de_necessidade").isin('SANDUICHEIRAS_220', 'SANDUICHEIRAS_110')).display()
+
+# COMMAND ----------
+
+# 6. Detecção de outliers
+df_stats, df_meses_atipicos = detectar_outliers_meses_atipicos(df_agregado, categoria)
+
+# 7. Filtragem de meses atípicos
+df_filtrado = filtrar_meses_atipicos(df_agregado, df_meses_atipicos, DATA_CALCULO)
+df_filtrado.cache()
+df_filtrado.filter(F.col("grupo_de_necessidade").isin('SANDUICHEIRAS_220', 'SANDUICHEIRAS_110')).orderBy(F.desc("DtAtual")).display()
+
+# COMMAND ----------
+
+# 8. Remoção de outliers das séries históricas
+print("=" * 80)
+print("🔄 Aplicando remoção de outliers das séries históricas...")
+
+# Definir filiais de atacado (exemplo - ajustar conforme necessário)
+filiais_atacado = FILIAIS_ATACADO  # Lista de filiais consideradas de atacado
+
+df_sem_outliers = remover_outliers_series_historicas(
+    df_filtrado,
+    coluna_valor="QtMercadoria",
+    n_sigmas_padrao=PARAMETROS_OUTLIERS["desvios_historico_loja"],
+    n_sigmas_atacado=PARAMETROS_OUTLIERS["desvios_atacado_loja"],
+    filiais_atacado=filiais_atacado
+)
+
+# 9. Cálculo das medidas centrais
+df_com_medidas = calcular_medidas_centrais_com_medias_aparadas(df_sem_outliers)
+
+# 10. Consolidação final
+df_final = consolidar_medidas(df_com_medidas)
+
+# ✅ 10.1 NOVO: Garantir integridade dos dados pré-merecimento
+df_final = garantir_integridade_dados_pre_merecimento(df_final)
+
+df_final.cache()
+df_final.filter(F.col("grupo_de_necessidade").isin('SANDUICHEIRAS_220', 'SANDUICHEIRAS_110')).orderBy(F.desc("DtAtual")).display()
+
+# COMMAND ----------
+
+# 11. Cálculo de merecimento por CD e filial
+print("=" * 80)
+print("🔄 Iniciando cálculo de merecimento...")
+
+# 11.1 Merecimento a nível CD
+df_merecimento_cd = calcular_merecimento_cd(df_final, DATA_CALCULO, categoria)
+df_merecimento_cd.cache()
+df_merecimento_cd.filter(F.col("grupo_de_necessidade").isin('SANDUICHEIRAS_220', 'SANDUICHEIRAS_110', 'ASPIRADOR DE PO_110')).display()
+
+# COMMAND ----------
+
+# 11.2 Merecimento interno ao CD
+df_merecimento_interno = calcular_merecimento_interno_cd(df_final, DATA_CALCULO, categoria)
+df_merecimento_interno.cache()
+df_merecimento_interno.display()
+
+# COMMAND ----------
+
+# 11.3 Merecimento final
+df_merecimento_final = calcular_merecimento_final(df_merecimento_cd, df_merecimento_interno)
+
+# Criar o esqueleto
+df_esqueleto = criar_esqueleto_matriz_completa(df_com_grupo, data_m_menos_1)
+
+# Primeiro, identificar todas as colunas de merecimento final
+colunas_merecimento_final = [col for col in df_merecimento_final.columns 
+                        if col.startswith('Merecimento_Final_')]
+
+
+# Criar dicionário de fillna
+fillna_dict = {col: 0.0 for col in colunas_merecimento_final}
+
+df_merecimento_sku_filial = (
+    df_esqueleto
+    .join(
+        df_merecimento_final
+        .select('grupo_de_necessidade', 'CdFilial', *colunas_merecimento_final)
+        .dropDuplicates(subset=['grupo_de_necessidade', 'CdFilial']), 
+        on=['grupo_de_necessidade', 'CdFilial'], 
+        how='left'
+    )
+    .fillna(fillna_dict)
+)
 
 # COMMAND ----------
 

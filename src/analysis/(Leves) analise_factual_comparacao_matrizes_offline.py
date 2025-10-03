@@ -82,7 +82,7 @@ df_demanda = (
 especies_top80 = (
     df_demanda
     .filter(F.col("PercDemandaCumulativo") <= 80)
-    .filter(F.col("NmEspecieGerencial") != 'SANDUICHEIRAS')
+    #.filter(F.col("NmEspecieGerencial") != 'SANDUICHEIRAS')
     .select("NmEspecieGerencial")
     .rdd.flatMap(lambda x: x)
     .collect()
@@ -505,10 +505,6 @@ for categoria in categorias_teste:
 
 # Apenas grupos existentes, sem linhas de TOTAL
 wmape_all.orderBy("categoria", "grupo", "modelo").display()
-
-# COMMAND ----------
-
-'SANDUICHEIRAS_110', 'LIQUIDIFICADORES 350 A 1000 W_220', 'SANDUICHEIRAS_220', 'CAFETEIRA ELETRICA (FILTRO)_220', 'PANELAS ELETRICAS DE ARROZ_220', 'FERROS DE PASSAR A SECO_220'
 
 # COMMAND ----------
 
