@@ -38,6 +38,32 @@ hoje_int = int(hoje.strftime("%Y%m%d"))
 
 FILIAIS_OUTLET = [2528, 3604]
 
+# ✅ DE-PARA CONSOLIDAÇÃO DE CDs - MESMO DO ONLINE
+DE_PARA_CONSOLIDACAO_CDS = {
+  "14"  : "1401",
+  "1635": "1200",
+  "1500": "1200",
+  "1640": "1401",
+  "1088": "1200",
+  "4760": "1760",
+  "4400": "1400",
+  "4887": "1887",
+  "4475": "1475",
+  "4445": "1445",
+  "2200": "1200",
+  "1736": "1887",
+  "1792": "1887",
+  "1875": "1887",
+  "1999": "1887",
+  "1887": "1887",
+  "1200": "1200",
+  "1400": "1400",
+  "1401": "1401",
+  "1445": "1445",
+  "1475": "1475",
+  "1760": "1760"
+}
+
 data_m_menos_1 = hoje - timedelta(days=30)
 data_m_menos_1 = data_m_menos_1.strftime("%Y-%m-%d")
 
@@ -811,18 +837,31 @@ def consolidar_medidas(df: DataFrame) -> DataFrame:
 
 def criar_de_para_filial_cd() -> DataFrame:
     """
-    Cria o mapeamento filial → CD usando dados da tabela base.
+    Cria o mapeamento filial → CD usando dados da tabela base com consolidação.
+    Aplica a mesma lógica do online para evitar distorções.
     """
-    print("🔄 Criando de-para filial → CD...")
+    print("🔄 Criando de-para filial → CD com consolidação...")
     
     df_base = (
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
         .filter(F.col("DtAtual") == DATA_CALCULO)
         .filter(F.col("CdSku").isNotNull())
+        .withColumn("cd_secundario",
+            F.when(
+                F.col("DsEstoqueLojaDeposito") == 'D', F.col("cdfilial")
+            )
+            .otherwise(F.col("cd_secundario"))
+        )
     )
 
     print(f"✅ De-para filial usando registros de {DATA_CALCULO}")
-    
+
+    # ✅ NORMALIZAÇÃO: None → 0 para depois filtrar
+    dict_norm = {int(k): (int(v) if v is not None else 0) for k, v in DE_PARA_CONSOLIDACAO_CDS.items()}
+
+    # ✅ CONSTRÓI EXPRESSÃO DE MAPEAMENTO
+    mapping_expr = F.create_map([F.lit(x) for kv in dict_norm.items() for x in kv])
+
     de_para_filial_cd = (
         df_base
         .select("cdfilial", "cd_secundario")
@@ -833,7 +872,37 @@ def criar_de_para_filial_cd() -> DataFrame:
             F.coalesce(F.col("cd_secundario"), F.lit("SEM_CD"))
         )
         .drop("cd_secundario")
+        # ✅ APLICA SUBSTITUIÇÃO DE CONSOLIDAÇÃO
+        .withColumn(
+            "cd_vinculo",
+            F.coalesce(mapping_expr.getItem(F.col("cd_vinculo").cast("int")), F.col("cd_vinculo"))
+        )
+        # ✅ FILTRA CDs ZERADOS (None no dict)
+        .filter(F.col("cd_vinculo") != F.lit(0))
+        .fillna("SEM_CD", subset="cd_vinculo")
     )
+    
+    # ✅ DIAGNÓSTICO: Verificar distribuição de CDs
+    print("🔍 Diagnóstico do mapeamento CD:")
+    
+    # Contar filiais por CD
+    distribuicao_cd = (
+        de_para_filial_cd
+        .groupBy("cd_vinculo")
+        .agg(F.count("*").alias("qtd_filiais"))
+        .orderBy(F.desc("qtd_filiais"))
+    )
+    
+    print("  📊 Distribuição de filiais por CD:")
+    for row in distribuicao_cd.collect():
+        print(f"    CD {row['cd_vinculo']}: {row['qtd_filiais']} filiais")
+    
+    # Verificar filiais sem CD
+    filiais_sem_cd = de_para_filial_cd.filter(F.col("cd_vinculo") == "SEM_CD").count()
+    if filiais_sem_cd > 0:
+        print(f"  ⚠️ ATENÇÃO: {filiais_sem_cd} filiais sem CD mapeado!")
+    else:
+        print("  ✅ Todas as filiais têm CD mapeado")
     
     print(f"✅ De-para filial → CD criado: {de_para_filial_cd.count():,} filiais")
     return de_para_filial_cd
@@ -861,14 +930,23 @@ def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) ->
     de_para_filial_cd = criar_de_para_filial_cd()
     df_com_cd = df_data_calculo.join(de_para_filial_cd, on="cdfilial", how="left")
     
+    # ✅ FILTRAR FILIAIS SEM CD PARA EVITAR DISTORÇÃO
+    filiais_sem_cd_count = df_com_cd.filter(F.col("cd_vinculo").isNull()).count()
+    if filiais_sem_cd_count > 0:
+        print(f"  ⚠️ ATENÇÃO: {filiais_sem_cd_count} filiais sem CD serão excluídas do cálculo")
+        df_com_cd = df_com_cd.filter(F.col("cd_vinculo").isNotNull())
+    
     # ✅ AGREGAÇÃO COM PROTEÇÃO DUPLA:
     df_merecimento_cd = (
         df_com_cd
+        .filter(F.col("cd_vinculo") != "SEM_CD")  # ✅ Excluir filiais sem CD válido
         .groupBy("cd_vinculo", "grupo_de_necessidade")
         .agg(
             # F.sum() já ignora NULLs, mas garantimos com coalesce
-            F.sum(F.coalesce(F.col(medida_cd), F.lit(0))).alias(f"Total_{medida_cd}")
+            F.sum(F.coalesce(F.col(medida_cd), F.lit(0))).alias(f"Total_{medida_cd}"),
+            F.count("*").alias("qtd_filiais_cd")  # ✅ Contar filiais por CD
         )
+        .filter(F.col(f"Total_{medida_cd}") > 0)  # ✅ Excluir CDs sem demanda
     )
     
     # Calcular percentual do CD dentro da Cia
@@ -891,6 +969,39 @@ def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) ->
         .orderBy('cd_vinculo', 'grupo_de_necessidade')
         .dropDuplicates(subset=['cd_vinculo', 'grupo_de_necessidade'])
     )
+    
+    # ✅ DIAGNÓSTICO FINAL: Verificar distribuição de merecimento
+    print("🔍 Diagnóstico do merecimento por CD:")
+    
+    # Somar merecimento por CD (todos os grupos)
+    merecimento_por_cd = (
+        df_merecimento_cd
+        .groupBy("cd_vinculo")
+        .agg(
+            F.sum(f"Merecimento_CD_{medida_cd}").alias("merecimento_total_cd"),
+            F.count("*").alias("qtd_grupos")
+        )
+        .orderBy(F.desc("merecimento_total_cd"))
+    )
+    
+    print("  📊 Merecimento total por CD:")
+    for row in merecimento_por_cd.collect():
+        print(f"    CD {row['cd_vinculo']}: {row['merecimento_total_cd']:.3f} ({row['qtd_grupos']} grupos)")
+    
+    # Verificar se soma fecha 100% por grupo
+    soma_por_grupo = (
+        df_merecimento_cd
+        .groupBy("grupo_de_necessidade")
+        .agg(F.sum(f"Merecimento_CD_{medida_cd}").alias("soma_grupo"))
+        .filter(F.abs(F.col("soma_grupo") - 1.0) > 0.01)  # Tolerância de 1%
+    )
+    
+    grupos_problema = soma_por_grupo.count()
+    if grupos_problema > 0:
+        print(f"  ⚠️ ATENÇÃO: {grupos_problema} grupos não somam 100%")
+    else:
+        print("  ✅ Todos os grupos somam 100% (tolerância 1%)")
+    
     print(f"✅ Merecimento CD calculado: {df_merecimento_cd.count():,} registros (média aparada 90 dias)")
     return df_merecimento_cd
 

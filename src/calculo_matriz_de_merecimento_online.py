@@ -922,14 +922,23 @@ def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) ->
     de_para_filial_cd = criar_de_para_filial_cd()
     df_com_cd = df_data_calculo.join(de_para_filial_cd, on="cdfilial", how="left")
     
+    # ✅ FILTRAR FILIAIS SEM CD PARA EVITAR DISTORÇÃO
+    filiais_sem_cd_count = df_com_cd.filter(F.col("cd_vinculo").isNull()).count()
+    if filiais_sem_cd_count > 0:
+        print(f"  ⚠️ ATENÇÃO: {filiais_sem_cd_count} filiais sem CD serão excluídas do cálculo")
+        df_com_cd = df_com_cd.filter(F.col("cd_vinculo").isNotNull())
+    
     # ✅ AGREGAÇÃO COM PROTEÇÃO DUPLA:
     df_merecimento_cd = (
         df_com_cd
+        .filter(F.col("cd_vinculo") != "SEM_CD")  # ✅ Excluir filiais sem CD válido
         .groupBy("cd_vinculo", "grupo_de_necessidade")
         .agg(
             # F.sum() já ignora NULLs, mas garantimos com coalesce
-            F.sum(F.coalesce(F.col(medida_cd), F.lit(0))).alias(f"Total_{medida_cd}")
+            F.sum(F.coalesce(F.col(medida_cd), F.lit(0))).alias(f"Total_{medida_cd}"),
+            F.count("*").alias("qtd_filiais_cd")  # ✅ Contar filiais por CD
         )
+        .filter(F.col(f"Total_{medida_cd}") > 0)  # ✅ Excluir CDs sem demanda
     )
     
     # Calcular percentual do CD dentro da Cia
@@ -952,6 +961,39 @@ def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) ->
         .orderBy('cd_vinculo', 'grupo_de_necessidade')
         .dropDuplicates(subset=['cd_vinculo', 'grupo_de_necessidade'])
     )
+    
+    # ✅ DIAGNÓSTICO FINAL: Verificar distribuição de merecimento
+    print("🔍 Diagnóstico do merecimento por CD:")
+    
+    # Somar merecimento por CD (todos os grupos)
+    merecimento_por_cd = (
+        df_merecimento_cd
+        .groupBy("cd_vinculo")
+        .agg(
+            F.sum(f"Merecimento_CD_{medida_cd}").alias("merecimento_total_cd"),
+            F.count("*").alias("qtd_grupos")
+        )
+        .orderBy(F.desc("merecimento_total_cd"))
+    )
+    
+    print("  📊 Merecimento total por CD:")
+    for row in merecimento_por_cd.collect():
+        print(f"    CD {row['cd_vinculo']}: {row['merecimento_total_cd']:.3f} ({row['qtd_grupos']} grupos)")
+    
+    # Verificar se soma fecha 100% por grupo
+    soma_por_grupo = (
+        df_merecimento_cd
+        .groupBy("grupo_de_necessidade")
+        .agg(F.sum(f"Merecimento_CD_{medida_cd}").alias("soma_grupo"))
+        .filter(F.abs(F.col("soma_grupo") - 1.0) > 0.01)  # Tolerância de 1%
+    )
+    
+    grupos_problema = soma_por_grupo.count()
+    if grupos_problema > 0:
+        print(f"  ⚠️ ATENÇÃO: {grupos_problema} grupos não somam 100%")
+    else:
+        print("  ✅ Todos os grupos somam 100% (tolerância 1%)")
+    
     print(f"✅ Merecimento CD calculado: {df_merecimento_cd.count():,} registros")
     return df_merecimento_cd
 
