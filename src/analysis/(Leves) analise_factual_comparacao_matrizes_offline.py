@@ -363,7 +363,7 @@ def add_smape_components(df, pred_col, real_col=COL_REAL, peso_col=COL_PESO, lab
 
 # === Lista de colunas de predição alvo ===
 pred_cols_base = list(colunas)  # ["Merecimento_Final_Media90_...", ...]
-extras = ["PercMatrizNeogrid"]  # , "PercMatrizNeogrid_median"]
+extras = ["PercMatrizNeogrid_median"]  # , "PercMatrizNeogrid_median"]
 
 def existing_pred_cols(df, base_cols, maybe_cols):
     present = [c for c in maybe_cols if c in df.columns]
@@ -524,7 +524,7 @@ for categoria in categorias_teste:
     df_base = df_acuracia[categoria].filter(~F.col('grupo_de_necessidade').isin(gdn_ruim))
 
     # checa existência das colunas opcionais
-    has_neogrid = "PercMatrizNeogrid" in df_base.columns
+    has_neogrid = "PercMatrizNeogrid_median" in df_base.columns
 
     df_tmp = (
         df_base
@@ -715,7 +715,7 @@ for categoria in categorias_teste:
     df_tmp = (
         df_base
         .withColumn("merecimento_percentual",
-                    F.col("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura"))
+                    F.col("Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura"))
         .join(
             spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
             .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),

@@ -274,6 +274,84 @@ df_demanda_on_off.display()
 
 # COMMAND ----------
 
+from pyspark.sql import functions as F
+
+TOL = 0.1  # tolerância em pontos percentuais
+
+# Soma por SKU
+df_check = (
+    df_demanda_on_off
+    .groupBy("CdSku")
+    .agg(
+        F.round(F.sum("merecimento_percentual_propocionalizado_on_off"), 3)
+         .alias("soma_percentual")
+    )
+    .withColumn("diff_pp", F.round(F.col("soma_percentual") - F.lit(100.0), 3))
+    .withColumn("ok", F.abs(F.col("diff_pp")) <= F.lit(TOL))
+)
+
+# SKUs com problema
+df_off = df_check.filter(~F.col("ok"))
+
+# Resultados
+df_check.display()      # visão geral por SKU
+df_off.display()        # somente SKUs fora de 100% ± tolerância
+
+# (Opcional) Detalhar contribuições dos SKUs com problema
+df_detalhe_off = (
+    df_demanda_on_off
+    .join(df_off.select("CdSku"), on="CdSku", how="inner")
+    .select(
+        "CdSku", "CdFilialEntrega",
+        "merecimento_percentual_propocionalizado_on_off"
+    )
+    .orderBy("CdSku", "CdFilialEntrega")
+)
+df_detalhe_off.display()
+
+# COMMAND ----------
+
+from pyspark.sql import functions as F
+
+TOL = 0.1  # tolerância em pontos percentuais
+
+# --- Checagem por SKU ---
+df_check_sku = (
+    df_demanda_on_off
+    .groupBy("CdSku")
+    .agg(F.round(F.sum("merecimento_percentual_propocionalizado_on_off"), 3)
+         .alias("soma_percentual"))
+    .withColumn("diff_pp", F.round(F.col("soma_percentual") - F.lit(100.0), 3))
+    .withColumn("ok", F.abs(F.col("diff_pp")) <= F.lit(TOL))
+)
+
+# --- Checagem por SKU x CdFilialEntrega (MerecimentoCD) ---
+df_check_cd = (
+    df_demanda_on_off
+    .groupBy("CdSku", "CdFilialEntrega")
+    .agg(F.round(F.sum("merecimento_percentual_propocionalizado_on_off"), 3)
+         .alias("soma_percentual"))
+    .join(
+        df_demanda_on_off
+        .select("CdSku", "CdFilialEntrega", "MerecimentoCD")
+        .distinct(),
+        on=["CdSku", "CdFilialEntrega"],
+        how="left"
+    )
+    .withColumn("diff_pp", F.round(F.col("soma_percentual") - F.col("MerecimentoCD"), 3))
+    .withColumn("ok", F.abs(F.col("diff_pp")) <= F.lit(TOL))
+)
+
+# Mostra resultados
+df_check_sku.display()   # soma por SKU
+df_check_cd.display()    # soma vs MerecimentoCD
+
+# COMMAND ----------
+
+df_check_cd.groupBy('CdSku').agg(F.sum('MerecimentoCD')).display()
+
+# COMMAND ----------
+
 hoje_str = datetime.now().strftime("%Y-%m-%d")
 
 (

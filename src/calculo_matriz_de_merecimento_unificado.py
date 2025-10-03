@@ -262,7 +262,7 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-07-01") -> Data
     df_base = (
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
         .filter(F.col("NmAgrupamentoDiretoriaSetor") == categoria)
-        .filter(F.col("NmSetorGerencial") == 'PORTATEIS')
+        #.filter(F.col("NmSetorGerencial") == 'PORTATEIS')
         .filter(F.col("DtAtual") >= data_inicio)
         .withColumn(
             "year_month",
@@ -1163,13 +1163,25 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
     # 2. Carregar todos os SKUs que existem na data especificada
     print(f"📊 Passo 2: Carregando SKUs existentes em {data_calculo}...")
     df_skus_data = (
-        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
+        spark.table('dev_logistica_ds.estoquegerencial')
+        .select(
+            F.col("cdfilial").cast("int").alias("CdFilial"),
+            F.col("CdSku").cast("string").alias("CdSku"),
+            F.col("dtatual").cast("date").alias("DtAtual"),
+            F.col("DsObrigatorio").alias("DsObrigatorio"),
+            F.col("Cluster_Sugestao").alias('Cluster_Sugestao')
+        )
         .filter(F.col("DtAtual") == data_calculo)
+        .filter(F.col("CdSku").isNotNull())
+        .filter(
+            (F.col("DsObrigatorio") == 'S') | 
+            (F.col("Cluster_Sugestao") == 1)
+        )
         .select("CdSku")
         .distinct()
         .join(df_gdn, on="CdSku", how="inner")
-        .filter(F.col("CdSku").isNotNull())
         .filter(F.col("grupo_de_necessidade").isNotNull())
+
     )
     
     skus_count = df_skus_data.count()
@@ -1409,8 +1421,8 @@ print("=" * 80)
 
 # Lista de todas as categorias disponíveis
 categorias = [
-    #"DIRETORIA DE TELAS",
-    #"DIRETORIA TELEFONIA CELULAR", 
+    "DIRETORIA DE TELAS",
+    "DIRETORIA TELEFONIA CELULAR", 
     #"DIRETORIA DE LINHA BRANCA",
     "DIRETORIA LINHA LEVE",
     # "DIRETORIA INFO/PERIFERICOS"
@@ -1486,6 +1498,10 @@ print("\n" + "=" * 80)
 print("🎯 SCRIPT DE CÁLCULO CONCLUÍDO!")
 print("📋 Próximo passo: Executar script de análise de factual e comparações")
 print("=" * 80)
+
+# COMMAND ----------
+
+# MAGIC %sql SELECT * FROM databox.bcg_comum.supply_matriz_merecimento_LINHA_LEVE_teste0410
 
 # COMMAND ----------
 
@@ -1622,6 +1638,47 @@ df_merecimento_sku_filial = (
     )
     .fillna(fillna_dict)
 )
+
+df_merecimento_sku_filial.cache()
+df_merecimento_sku_filial.display()
+
+# COMMAND ----------
+
+# Salva em tabela específica da categoria
+df_matriz_final = df_merecimento_sku_filial
+
+
+categoria_normalizada = (
+    categoria
+    .replace("DIRETORIA ", "")
+    .replace(" ", "_")
+    .upper()
+)
+
+nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste0410"
+
+print(f"💾 Salvando matriz de merecimento para: {categoria}")
+print(f"📊 Tabela: {nome_tabela}")
+
+(
+    df_matriz_final
+    .write
+    .format("delta")
+    .mode("overwrite")
+    .option("mergeSchema", "true")
+    .saveAsTable(nome_tabela)
+)
+
+# Armazena resultado
+resultados_finais[categoria] = {
+    "matriz": df_matriz_final,
+    "tabela": nome_tabela,
+    "status": "SUCESSO",
+    "total_registros": df_matriz_final.count()
+}
+
+print(f"✅ {categoria} - Matriz calculada e salva com sucesso!")
+print(f"📊 Total de registros: {df_matriz_final.count():,}")
 
 # COMMAND ----------
 

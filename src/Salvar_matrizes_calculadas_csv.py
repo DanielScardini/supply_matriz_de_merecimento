@@ -153,6 +153,31 @@ for categoria, grupos in CONFIGURACAO_REPLICACAO_MATRIZES.items():
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC # TODO 
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC - Loja - adicionar 0021_0XXX
+# MAGIC - Juntar online e offline numa pasta só
+# MAGIC - embutir o arredondamento
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 2. Funções de Tratamento
 
 # COMMAND ----------
