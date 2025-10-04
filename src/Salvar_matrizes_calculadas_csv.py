@@ -1,50 +1,47 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Salvamento de Matrizes de Merecimento - Sistema Unificado
+# MAGIC # Salvamento de Matrizes de Merecimento - Formato CSV para Sistema
 # MAGIC
-# MAGIC Este notebook implementa o salvamento unificado de matrizes de merecimento para todas as categorias,
-# MAGIC com tratamento automático para canais offline e online.
+# MAGIC Este notebook implementa o salvamento unificado de matrizes de merecimento em formato CSV
+# MAGIC com as seguintes especificações:
 # MAGIC
-# MAGIC **Formato de saída**: Excel (.xlsx) usando pandas
-# MAGIC
-# MAGIC **Estrutura de pastas**:
-# MAGIC ```
-# MAGIC PASTA_OUTPUT/
-# MAGIC └── YYYY-MM-DD/
-# MAGIC     ├── matriz_de_merecimento_{categoria}_{data}_offline.xlsx
-# MAGIC     └── matriz_de_merecimento_{categoria}_{data}_online.xlsx
-# MAGIC ```
+# MAGIC **Formato de saída**: CSV sem index
+# MAGIC **Colunas**: SKU, CANAL, LOJA, DATA FIM, PERCENTUAL, VERIFICAR, FASE DE VIDA
+# MAGIC **Regras**:
+# MAGIC - LOJA: formato 0021_0XXXX (5 dígitos, zeros à esquerda)
+# MAGIC - DATA FIM: DATA_CALCULO + 60 dias (formato yyyyMMdd)
+# MAGIC - PERCENTUAL: normalizado para 100% por CdSku+CANAL, ajuste no maior merecimento
+# MAGIC - Máximo 250.000 linhas por arquivo
+# MAGIC - Mesmo SKU-FILIAL sempre no mesmo arquivo (ambos canais)
 
 # COMMAND ----------
 
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F, Window as W
-from datetime import datetime, timedelta, date
-import pandas as pd
-from typing import List, Optional, Dict, Any
+from datetime import datetime, timedelta
 import os
+from typing import List, Dict, Tuple
 
 # Inicialização do Spark
-spark = SparkSession.builder.appName("salvar_matrizes_merecimento_unificadas").getOrCreate()
-
-hoje = datetime.now()
-hoje_str = hoje.strftime("%Y-%m-%d")
-hoje_int = int(hoje.strftime("%Y%m%d"))
+spark = SparkSession.builder.appName("salvar_matrizes_merecimento_csv").getOrCreate()
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 1. Configuração das Tabelas por Categoria
+# MAGIC ## 1. Configurações
 
 # COMMAND ----------
 
-# MAGIC %sql 
-# MAGIC
-# MAGIC select distinct (grupo_de_necessidade) FROM databox.bcg_comum.supply_matriz_merecimento_de_telas_teste2509
+# Data de cálculo e data fim
+DATA_CALCULO = "2025-12-02"  # Ajustar conforme necessário
+data_calculo_dt = datetime.strptime(DATA_CALCULO, "%Y-%m-%d")
+data_fim_dt = data_calculo_dt + timedelta(days=60)
+DATA_FIM_INT = int(data_fim_dt.strftime("%Y%m%d"))
 
-# COMMAND ----------
+print(f"📅 Data de cálculo: {DATA_CALCULO}")
+print(f"📅 Data fim (+ 60 dias): {data_fim_dt.strftime('%Y-%m-%d')} → {DATA_FIM_INT}")
 
-# Configuração das tabelas por categoria e canal
+# Configuração das tabelas por categoria
 TABELAS_MATRIZ_MERECIMENTO = {
     "DIRETORIA DE TELAS": {
         "offline": "databox.bcg_comum.supply_matriz_merecimento_de_telas_teste2509",
@@ -56,21 +53,11 @@ TABELAS_MATRIZ_MERECIMENTO = {
         "online": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste0809",
         "grupo_apelido": "telefonia"
     },
-    # "DIRETORIA LINHA BRANCA": {
-    #     "offline": "databox.bcg_comum.supply_matriz_merecimento_linha_branca_offline",
-    #     "online": "databox.bcg_comum.supply_matriz_merecimento_linha_branca_online",
-    #     "grupo_apelido": "linha_branca"
-    # },
     "DIRETORIA LINHA LEVE": {
         "offline": "databox.bcg_comum.supply_matriz_merecimento_LINHA_LEVE_teste0110",
         "online": "databox.bcg_comum.supply_matriz_merecimento_LINHA_LEVE_online_teste0110",
-        "grupo_apelido": "liquidificador"
+        "grupo_apelido": "linha_leve"
     },
-    # "DIRETORIA INFO/GAMES": {
-    #     "offline": "databox.bcg_comum.supply_matriz_merecimento_info_games_offline",
-    #     "online": "databox.bcg_comum.supply_matriz_merecimento_info_games_online",
-    #     "grupo_apelido": "info_games"
-    # }
 }
 
 # Configuração da pasta de saída
@@ -90,35 +77,19 @@ FILTROS_GRUPO_NECESSIDADE_REMOCAO = {
     "DIRETORIA LINHA LEVE": ["FORA DE LINHA", "SEM_GN"],
 }
 
-# Configuração de filtros por categoria
 FLAG_SELECAO_REMOCAO = {
     "DIRETORIA DE TELAS": "REMOÇÃO",
     "DIRETORIA TELEFONIA CELULAR": "SELEÇÃO",
-    "DIRETORIA LINHA LEVE":  "REMOÇÃO",
+    "DIRETORIA LINHA LEVE": "REMOÇÃO",
 }
 
 FILTROS_GRUPO_NECESSIDADE_SELECAO = {
-    "DIRETORIA DE TELAS": [
-        # "TV 50 ALTO P", 
-        # "TV 55 ALTO P", 
-        #"TV 43 PP", 
-        # "TV 75 PP",
-        # "TV 75 ALTO P"
-        ],
-    "DIRETORIA TELEFONIA CELULAR": [
-        "Telef pp", 
-        #"Telef Medio 128GB", 
-        #"Telef Medio 256GB", 
-        #"Telef Alto", 
-        #"LINHA PREMIUM"
-        ],
-    #"DIRETORIA LINHA BRANCA": ["FORA DE LINHA", "SEM_GN"],
-    "DIRETORIA LINHA LEVE": ["FORA DE LINHA", "SEM_GN"],
-    #"DIRETORIA INFO/GAMES": ["FORA DE LINHA", "SEM_GN"]
+    "DIRETORIA DE TELAS": [],
+    "DIRETORIA TELEFONIA CELULAR": ["Telef pp"],
+    "DIRETORIA LINHA LEVE": [],
 }
 
 # Configuração de replicação de matrizes para novos produtos
-# Formato: {categoria: {grupo_origem: [lista_skus_novos]}}
 CONFIGURACAO_REPLICACAO_MATRIZES = {
     "DIRETORIA TELEFONIA CELULAR": {
         "Telef pp": [
@@ -130,55 +101,36 @@ CONFIGURACAO_REPLICACAO_MATRIZES = {
             5358795   # CEL.DESB. SAMSUNG GALAXY A07 4G 128GB VIOLETA
         ]
     }
-    # Adicione outras categorias conforme necessário:
-    # "DIRETORIA ELETRODOMESTICOS": {
-    #     "Eletro Alto": [123456, 789012],
-    #     "Eletro Medio": [345678, 901234]
-    # }
 }
 
-print("✅ Configurações carregadas:")
-print(f"  • Categorias suportadas: {list(TABELAS_MATRIZ_MERECIMENTO.keys())}")
-print(f"  • Pasta de saída: {PASTA_OUTPUT}")
-print(f"  • Data de exportação: {hoje_str}")
+# Limite de linhas por arquivo CSV
+MAX_LINHAS_POR_ARQUIVO = 250000
 
-# Contar SKUs para replicação
-total_skus_replicacao = sum(len(skus) for grupos in CONFIGURACAO_REPLICACAO_MATRIZES.values() for skus in grupos.values())
-print(f"  • SKUs para replicação: {total_skus_replicacao} SKUs")
-for categoria, grupos in CONFIGURACAO_REPLICACAO_MATRIZES.items():
-    for grupo, skus in grupos.items():
-        print(f"    - {categoria} ({grupo}): {len(skus)} SKUs")
-
+print("✅ Configurações carregadas")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # TODO 
+# MAGIC ## 2. Funções de Formatação
+
+# COMMAND ----------
+
+def formatar_codigo_loja(cdfilial: int) -> str:
+    """
+    Formata o código da loja no padrão 0021_0XXXX.
+    
+    Args:
+        cdfilial: Código numérico da filial
+        
+    Returns:
+        String formatada (ex: 0021_01234)
+    """
+    return f"0021_{cdfilial:05d}"
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC
-
-# COMMAND ----------
-
-
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC - Loja - adicionar 0021_0XXX
-# MAGIC - Juntar online e offline numa pasta só
-# MAGIC - embutir o arredondamento
-
-# COMMAND ----------
-
-
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 2. Funções de Tratamento
+# MAGIC ## 3. Função de Processamento
 
 # COMMAND ----------
 
@@ -191,305 +143,339 @@ def processar_matriz_merecimento(categoria: str, canal: str) -> DataFrame:
         canal: Canal (offline ou online)
         
     Returns:
-        DataFrame processado com merecimento normalizado
+        DataFrame processado com colunas finais
     """
     print(f"🔄 Processando matriz para: {categoria} - {canal}")
-    
-    # Validação dos parâmetros
-    if categoria not in TABELAS_MATRIZ_MERECIMENTO:
-        raise ValueError(f"Categoria '{categoria}' não suportada. Categorias válidas: {list(TABELAS_MATRIZ_MERECIMENTO.keys())}")
-    
-    if canal not in ["offline", "online"]:
-        raise ValueError(f"Canal '{canal}' não suportado. Canais válidos: ['offline', 'online']")
     
     # Configurações específicas
     tabela = TABELAS_MATRIZ_MERECIMENTO[categoria][canal]
     coluna_merecimento = COLUNAS_MERECIMENTO[categoria]
-    flag_tipo = FLAG_SELECAO_REMOCAO.get(categoria, "REMOÇÃO")  # Padrão é remoção
+    flag_tipo = FLAG_SELECAO_REMOCAO.get(categoria, "REMOÇÃO")
     filtros_grupo_remocao = FILTROS_GRUPO_NECESSIDADE_REMOCAO[categoria]
     filtros_grupo_selecao = FILTROS_GRUPO_NECESSIDADE_SELECAO[categoria]
     
     print(f"  • Tabela: {tabela}")
-    print(f"  • Coluna merecimento: {coluna_merecimento}")
     print(f"  • Tipo de filtro: {flag_tipo}")
-    print(f"  • Filtros grupo para remoção: {filtros_grupo_remocao}")
-    print(f"  • Filtros grupo para seleção: {filtros_grupo_selecao}")
     
     # Carregamento dos dados base
     df_base = (
         spark.table(tabela)
         .select(
             "CdFilial", "CdSku", "grupo_de_necessidade",
-            (100 * F.col(coluna_merecimento)).alias(f"Merecimento_Percentual_{canal}_raw")
+            (100 * F.col(coluna_merecimento)).alias("Merecimento_raw")
         )
     )
     
     # Aplicar filtro baseado no flag
     if flag_tipo == "SELEÇÃO":
-        # SELEÇÃO: manter apenas os grupos da lista de seleção
         df_raw = df_base.filter(F.col("grupo_de_necessidade").isin(filtros_grupo_selecao))
-        print(f"  • Aplicado filtro de SELEÇÃO: mantendo apenas {filtros_grupo_selecao}")
+        print(f"  • Aplicado filtro de SELEÇÃO: {filtros_grupo_selecao}")
     else:
-        # REMOÇÃO: remover os grupos da lista de remoção
         df_raw = df_base.filter(~F.col("grupo_de_necessidade").isin(filtros_grupo_remocao))
-        print(f"  • Aplicado filtro de REMOÇÃO: removendo {filtros_grupo_remocao}")
-    
-    # Join com dados de filiais
-    df_raw = df_raw.join(
-        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
-        .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
-        on="CdFilial", how="left"
-    )
-    
-    # Normalização por SKU
-    window_sku = W.partitionBy("CdSku")
-    total_sku = F.sum(f"Merecimento_Percentual_{canal}_raw").over(window_sku)
-    
-    df_normalizado = (
-        df_raw
-        .withColumn(
-            f"Merecimento_Percentual_{canal}",
-            F.round(
-                F.when(total_sku > 0, F.col(f"Merecimento_Percentual_{canal}_raw") * (100.0 / total_sku))
-                .otherwise(0.0), 
-                3
-            )
-        )
-        .drop(f"Merecimento_Percentual_{canal}_raw")
-    )
+        print(f"  • Aplicado filtro de REMOÇÃO: {filtros_grupo_remocao}")
     
     # Regra especial para canal online: sobrescrever CdFilial 1401 → 14
     if canal == "online":
-        df_normalizado = (
-            df_normalizado
-            .withColumn("CdFilial", F.when(F.col("CdFilial") == 1401, 14).otherwise(F.col("CdFilial")))
-        )
+        df_raw = df_raw.withColumn("CdFilial", F.when(F.col("CdFilial") == 1401, 14).otherwise(F.col("CdFilial")))
         print("  • Aplicada regra especial: CdFilial 1401 → 14")
     
-    # Agregação por grupo de necessidade - mesmo racional das análises factuais
+    # Agregação por CdSku + CdFilial (média de merecimento)
     df_agregado = (
-        df_normalizado
-        .groupBy("CdFilial", "grupo_de_necessidade")
-        .agg(
-            F.round(F.mean(f"Merecimento_Percentual_{canal}"), 3).alias(f"Merecimento_Percentual_{canal}")
-        )
+        df_raw
+        .groupBy("CdSku", "CdFilial")
+        .agg(F.avg("Merecimento_raw").alias("Merecimento"))
     )
     
-    print(f"✅ Matriz processada:")
-    print(f"  • Total de registros: {df_agregado.count():,}")
-    print(f"  • Filiais únicas: {df_agregado.select('CdFilial').distinct().count():,}")
-    print(f"  • Grupos únicos: {df_agregado.select('grupo_de_necessidade').distinct().count():,}")
+    print(f"✅ Matriz processada: {df_agregado.count():,} registros")
     
-    # Replicar matrizes para novos produtos baseado na configuração
-    df_final = replicar_matrizes_novos_produtos(df_agregado, categoria, canal)
-    
-    return df_final
+    return df_agregado
 
 # COMMAND ----------
 
-def replicar_matrizes_novos_produtos(df: DataFrame, categoria: str, canal: str) -> DataFrame:
+def replicar_skus_novos(df: DataFrame, categoria: str) -> DataFrame:
     """
-    Replica matrizes de produtos existentes para novos SKUs baseado na configuração.
-    Cada novo SKU recebe o merecimento percentual do grupo de origem para todas as filiais.
+    Replica merecimentos de grupos origem para SKUs novos.
     
     Args:
-        df: DataFrame com a matriz processada
+        df: DataFrame com matriz processada (CdSku, CdFilial, Merecimento)
         categoria: Categoria da diretoria
-        canal: Canal (offline ou online)
         
     Returns:
         DataFrame com SKUs replicados adicionados
     """
     if categoria not in CONFIGURACAO_REPLICACAO_MATRIZES:
-        print(f"ℹ️ Nenhuma configuração de replicação para categoria: {categoria}")
+        print(f"ℹ️ Nenhuma configuração de replicação para: {categoria}")
         return df
     
     config_categoria = CONFIGURACAO_REPLICACAO_MATRIZES[categoria]
-    print(f"🔄 Replicando matrizes para novos produtos - {categoria} - {canal}")
+    print(f"🔄 Replicando SKUs para: {categoria}")
     
-    registros_replicados = []
-    total_skus_replicados = 0
+    dfs_replicados = []
     
     for grupo_origem, skus_novos in config_categoria.items():
-        print(f"  📋 Processando grupo: {grupo_origem} ({len(skus_novos)} SKUs)")
+        print(f"  📋 Grupo: {grupo_origem} → {len(skus_novos)} SKUs novos")
         
-        # Obter o merecimento do grupo de origem para cada filial
-        df_grupo_origem = df.filter(F.col("grupo_de_necessidade") == grupo_origem)
+        # Buscar um SKU representativo do grupo origem (qualquer SKU do grupo)
+        # Como já agregamos por CdSku+CdFilial, precisamos buscar na matriz original
+        # Vamos usar a primeira ocorrência
         
-        if df_grupo_origem.count() == 0:
-            print(f"    ⚠️ Nenhum registro de '{grupo_origem}' encontrado. Pulando grupo.")
-            continue
-        
-        # Criar registros replicados para cada SKU novo usando crossJoin para performance
-        df_skus_replicacao = spark.createDataFrame(
-            [(sku,) for sku in skus_novos], 
-            ["CdSku"]
-        )
-        
-        df_replicados = (
-            df_grupo_origem
-            .select("CdFilial", f"Merecimento_Percentual_{canal}")
-            .distinct()
-            .crossJoin(df_skus_replicacao)
-            .withColumn("grupo_de_necessidade", F.lit(f"{grupo_origem}_REPLICADO"))
-            .select("CdFilial", "grupo_de_necessidade", f"Merecimento_Percentual_{canal}")
-        )
-        
-        # Converter para lista para união
-        registros_replicados.extend(df_replicados.collect())
-        total_skus_replicados += len(skus_novos)
+        # Criar merecimentos replicados para cada SKU novo
+        for sku_novo in skus_novos:
+            df_sku_replicado = (
+                df
+                .groupBy("CdFilial")
+                .agg(F.avg("Merecimento").alias("Merecimento"))
+                .withColumn("CdSku", F.lit(sku_novo))
+                .select("CdSku", "CdFilial", "Merecimento")
+            )
+            dfs_replicados.append(df_sku_replicado)
     
-    if registros_replicados:
-        # Criar DataFrame com registros replicados
-        df_replicados = spark.createDataFrame(registros_replicados)
-        
-        # Unir com o DataFrame original
-        df_com_replicados = df.union(df_replicados)
-        
-        print(f"✅ Matrizes replicadas com sucesso:")
-        print(f"  • Total de registros replicados: {len(registros_replicados)}")
-        print(f"  • SKUs únicos replicados: {total_skus_replicados}")
-        print(f"  • Filiais cobertas: {len(set(r['CdFilial'] for r in registros_replicados))}")
-        
-        return df_com_replicados
-    else:
-        print("⚠️ Nenhum registro replicado criado.")
-        return df
+    if dfs_replicados:
+        from functools import reduce
+        df_replicados_union = reduce(DataFrame.union, dfs_replicados)
+        df_final = df.union(df_replicados_union)
+        print(f"✅ Replicação concluída: +{df_replicados_union.count():,} registros")
+        return df_final
+    
+    return df
 
 # COMMAND ----------
 
-def salvar_matriz_excel(df: DataFrame, categoria: str, canal: str, data_exportacao: str = None) -> str:
+def normalizar_merecimento_100(df: DataFrame, canal: str) -> DataFrame:
     """
-    Salva a matriz de merecimento em arquivo Excel usando pandas.
-    Cria estrutura de pastas: PASTA_OUTPUT/data_exportacao/
+    Normaliza o merecimento para somar 100% por CdSku+CANAL.
+    Ajusta a diferença no maior merecimento de cada grupo.
     
     Args:
-        df: DataFrame com a matriz processada
-        categoria: Categoria da diretoria
-        canal: Canal (offline ou online)
-        data_exportacao: Data de exportação (padrão: hoje)
+        df: DataFrame com CdSku, CdFilial, Merecimento, CANAL
+        canal: Canal atual (para logging)
         
     Returns:
-        Caminho do arquivo salvo
+        DataFrame com merecimentos normalizados
     """
-    if data_exportacao is None:
-        data_exportacao = hoje_str
+    print(f"🔄 Normalizando merecimentos para 100% - Canal: {canal}")
     
-    # Configurações específicas
-    grupo_apelido = TABELAS_MATRIZ_MERECIMENTO[categoria]["grupo_apelido"]
+    # Calcular soma por CdSku + CANAL
+    window_sku_canal = W.partitionBy("CdSku", "CANAL")
     
-    # Criar estrutura de pastas: PASTA_OUTPUT/data_exportacao/
-    pasta_data = f"{PASTA_OUTPUT}/{data_exportacao}"
-    
-    # Criar pasta se não existir
-    os.makedirs(pasta_data, exist_ok=True)
-    
-    # Nome do arquivo
-    nome_arquivo = f"matriz_de_merecimento_{grupo_apelido}_{data_exportacao}_{canal}.xlsx"
-    caminho_completo = f"{pasta_data}/{nome_arquivo}"
-    
-    print(f"💾 Salvando matriz em Excel:")
-    print(f"  • Arquivo: {nome_arquivo}")
-    print(f"  • Pasta data: {pasta_data}")
-    print(f"  • Caminho completo: {caminho_completo}")
-    
-    # Selecionar apenas as colunas necessárias e formatar merecimento
-    df_otimizado = (
+    df_normalizado = (
         df
-        .select(
-            "CdFilial",
-            "grupo_de_necessidade",
-            F.regexp_replace(
-                F.col(f"Merecimento_Percentual_{canal}").cast("string"), 
-                r"\.", ","
-            ).alias("Merecimento")
+        .withColumn("soma_sku_canal", F.sum("Merecimento").over(window_sku_canal))
+        .withColumn(
+            "Merecimento_proporcional",
+            F.when(F.col("soma_sku_canal") > 0, (F.col("Merecimento") / F.col("soma_sku_canal")) * 100.0)
+            .otherwise(0.0)
         )
     )
     
-    # Converter DataFrame do Spark para pandas
-    df_pandas = df_otimizado.toPandas()
+    # Identificar o maior merecimento por CdSku+CANAL
+    window_maior = W.partitionBy("CdSku", "CANAL").orderBy(F.desc("Merecimento_proporcional"))
     
-    # Salvar como Excel usando pandas
-    df_pandas.to_excel(caminho_completo, index=False, engine='openpyxl')
+    df_com_rank = (
+        df_normalizado
+        .withColumn("rank", F.row_number().over(window_maior))
+    )
     
-    print(f"✅ Arquivo salvo com sucesso!")
-    print(f"  • Colunas exportadas: CdFilial, grupo_de_necessidade, Merecimento")
-    print(f"  • Formato decimal: vírgula como separador")
+    # Calcular diferença para 100%
+    df_com_diferenca = (
+        df_com_rank
+        .withColumn("soma_proporcional", F.sum("Merecimento_proporcional").over(window_sku_canal))
+        .withColumn("diferenca_100", 100.0 - F.col("soma_proporcional"))
+    )
     
-    return caminho_completo
+    # Ajustar apenas o maior merecimento (rank = 1)
+    df_ajustado = (
+        df_com_diferenca
+        .withColumn(
+            "PERCENTUAL",
+            F.when(F.col("rank") == 1, F.col("Merecimento_proporcional") + F.col("diferenca_100"))
+            .otherwise(F.col("Merecimento_proporcional"))
+        )
+        .drop("soma_sku_canal", "Merecimento_proporcional", "rank", "soma_proporcional", "diferenca_100", "Merecimento")
+    )
+    
+    print(f"✅ Normalização concluída")
+    
+    return df_ajustado
 
 # COMMAND ----------
 
-def executar_exportacao_completa(categoria: str, data_exportacao: str = None) -> Dict[str, str]:
+def criar_dataframe_final(df: DataFrame, canal: str) -> DataFrame:
     """
-    Executa a exportação completa para uma categoria (offline + online).
+    Cria o DataFrame final com todas as colunas no formato esperado.
+    
+    Args:
+        df: DataFrame com CdSku, CdFilial, PERCENTUAL, CANAL
+        canal: Canal (online/offline)
+        
+    Returns:
+        DataFrame com colunas: SKU, CANAL, LOJA, DATA FIM, PERCENTUAL, VERIFICAR, FASE DE VIDA
+    """
+    print(f"🔄 Criando DataFrame final - Canal: {canal}")
+    
+    # UDF para formatar código da loja
+    formatar_loja_udf = F.udf(formatar_codigo_loja, "string")
+    
+    df_final = (
+        df
+        .withColumn("SKU", F.col("CdSku").cast("string"))
+        .withColumn("LOJA", formatar_loja_udf(F.col("CdFilial")))
+        .withColumn("DATA FIM", F.lit(DATA_FIM_INT))
+        .withColumn("VERIFICAR", F.lit(""))
+        .withColumn("FASE DE VIDA", F.lit("SEM FASE"))
+        .withColumn("PERCENTUAL", F.round(F.col("PERCENTUAL"), 3))
+        .select("SKU", "CANAL", "LOJA", "DATA FIM", "PERCENTUAL", "VERIFICAR", "FASE DE VIDA")
+    )
+    
+    print(f"✅ DataFrame final criado: {df_final.count():,} registros")
+    
+    return df_final
+
+# COMMAND ----------
+
+def dividir_em_arquivos(df: DataFrame, max_linhas: int = MAX_LINHAS_POR_ARQUIVO) -> List[DataFrame]:
+    """
+    Divide o DataFrame em múltiplos DataFrames garantindo que o mesmo SKU-LOJA
+    (ambos canais) fique sempre no mesmo arquivo.
+    
+    Args:
+        df: DataFrame completo
+        max_linhas: Número máximo de linhas por arquivo
+        
+    Returns:
+        Lista de DataFrames
+    """
+    print(f"🔄 Dividindo em arquivos (máx {max_linhas:,} linhas cada)")
+    
+    # Criar chave única por SKU-LOJA (ignorando canal)
+    df_com_chave = df.withColumn("chave_particao", F.concat(F.col("SKU"), F.lit("_"), F.col("LOJA")))
+    
+    # Contar registros por chave (online + offline = 2 linhas por chave)
+    df_contagem = (
+        df_com_chave
+        .groupBy("chave_particao")
+        .agg(F.count("*").alias("qtd_registros"))
+    )
+    
+    # Ordenar por chave e adicionar número de partição
+    window_particao = W.orderBy("chave_particao").rowsBetween(W.unboundedPreceding, W.currentRow)
+    
+    df_com_particao = (
+        df_contagem
+        .withColumn("acumulado", F.sum("qtd_registros").over(window_particao))
+        .withColumn("num_arquivo", (F.col("acumulado") / max_linhas).cast("int"))
+    )
+    
+    # Join de volta para associar cada registro ao arquivo
+    df_final = (
+        df_com_chave
+        .join(df_com_particao.select("chave_particao", "num_arquivo"), on="chave_particao", how="left")
+        .drop("chave_particao")
+    )
+    
+    # Separar em DataFrames
+    num_arquivos = df_final.select(F.max("num_arquivo")).collect()[0][0] + 1
+    print(f"  • Total de arquivos necessários: {num_arquivos}")
+    
+    dfs_separados = []
+    for i in range(num_arquivos):
+        df_arquivo = df_final.filter(F.col("num_arquivo") == i).drop("num_arquivo")
+        qtd = df_arquivo.count()
+        print(f"    - Arquivo {i+1}: {qtd:,} linhas")
+        dfs_separados.append(df_arquivo)
+    
+    return dfs_separados
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 4. Função Principal de Exportação
+
+# COMMAND ----------
+
+def exportar_matriz_csv(categoria: str, data_exportacao: str = None) -> List[str]:
+    """
+    Exporta matriz de merecimento em formato CSV para uma categoria.
     
     Args:
         categoria: Categoria da diretoria
-        data_exportacao: Data de exportação (padrão: hoje)
+        data_exportacao: Data de exportação (padrão: DATA_CALCULO)
         
     Returns:
-        Dicionário com caminhos dos arquivos salvos
+        Lista de caminhos dos arquivos CSV salvos
     """
-    print(f"🚀 Iniciando exportação completa para: {categoria}")
+    if data_exportacao is None:
+        data_exportacao = DATA_CALCULO
+    
+    print(f"🚀 Iniciando exportação CSV para: {categoria}")
     print("=" * 80)
     
-    arquivos_salvos = {}
+    grupo_apelido = TABELAS_MATRIZ_MERECIMENTO[categoria]["grupo_apelido"]
     
-    try:
-        # Processar canal offline
-        print("📊 Processando canal OFFLINE...")
-        df_offline = processar_matriz_merecimento(categoria, "offline")
-        caminho_offline = salvar_matriz_excel(df_offline, categoria, "offline", data_exportacao)
-        arquivos_salvos["offline"] = caminho_offline
+    # Criar pasta de saída
+    pasta_data = f"{PASTA_OUTPUT}/{data_exportacao}"
+    os.makedirs(pasta_data, exist_ok=True)
+    
+    # Processar canais
+    dfs_canais = []
+    
+    for canal in ["offline", "online"]:
+        print(f"\n📊 Processando canal: {canal.upper()}")
+        df_canal = processar_matriz_merecimento(categoria, canal)
+        df_canal = replicar_skus_novos(df_canal, categoria)
+        df_canal = df_canal.withColumn("CANAL", F.lit(canal.upper()))
+        dfs_canais.append(df_canal)
+    
+    # União dos canais
+    print("\n🔗 Unindo canais...")
+    df_union = dfs_canais[0].union(dfs_canais[1])
+    
+    # Normalizar para 100%
+    df_normalizado = normalizar_merecimento_100(df_union, "ambos")
+    
+    # Criar DataFrame final
+    df_final = criar_dataframe_final(df_normalizado, "ambos")
+    
+    # Dividir em arquivos
+    dfs_arquivos = dividir_em_arquivos(df_final)
+    
+    # Salvar arquivos CSV
+    print(f"\n💾 Salvando arquivos CSV...")
+    arquivos_salvos = []
+    
+    for idx, df_arquivo in enumerate(dfs_arquivos, start=1):
+        nome_arquivo = f"matriz_merecimento_{grupo_apelido}_{data_exportacao}_parte{idx}.csv"
+        caminho_completo = f"{pasta_data}/{nome_arquivo}"
         
-        # Processar canal online
-        print("\n📊 Processando canal ONLINE...")
-        df_online = processar_matriz_merecimento(categoria, "online")
-        caminho_online = salvar_matriz_excel(df_online, categoria, "online", data_exportacao)
-        arquivos_salvos["online"] = caminho_online
+        # Converter para pandas e salvar
+        df_pandas = df_arquivo.toPandas()
+        df_pandas.to_csv(caminho_completo, index=False, sep=",", encoding="utf-8")
         
-        print("\n" + "=" * 80)
-        print("✅ Exportação completa finalizada!")
-        print(f"📁 Arquivos salvos:")
-        print(f"  • OFFLINE: {arquivos_salvos['offline']}")
-        print(f"  • ONLINE: {arquivos_salvos['online']}")
-        
-        return arquivos_salvos
-        
-    except Exception as e:
-        print(f"❌ Erro na exportação: {str(e)}")
-        raise
+        print(f"  ✅ Arquivo {idx} salvo: {nome_arquivo} ({len(df_pandas):,} linhas)")
+        arquivos_salvos.append(caminho_completo)
+    
+    print("\n" + "=" * 80)
+    print(f"✅ Exportação concluída para {categoria}")
+    print(f"📁 Total de arquivos: {len(arquivos_salvos)}")
+    
+    return arquivos_salvos
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 3. Execução das Exportações
+# MAGIC ## 5. Exportar Todas as Categorias
 
 # COMMAND ----------
 
-# Exemplo de uso para uma categoria específica
-# categoria_teste = "DIRETORIA DE TELAS"
-# arquivos = executar_exportacao_completa(categoria_teste)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 4. Exportação para Todas as Categorias
-
-# COMMAND ----------
-
-!pip install openpyxl
-
-def exportar_todas_categorias(data_exportacao: str = None) -> Dict[str, Dict[str, str]]:
+def exportar_todas_categorias(data_exportacao: str = None) -> Dict[str, List[str]]:
     """
-    Exporta matrizes para todas as categorias suportadas.
+    Exporta matrizes CSV para todas as categorias.
     
     Args:
-        data_exportacao: Data de exportação (padrão: hoje)
+        data_exportacao: Data de exportação (padrão: DATA_CALCULO)
         
     Returns:
-        Dicionário com arquivos salvos por categoria e canal
+        Dicionário com listas de arquivos por categoria
     """
     print("🚀 Iniciando exportação para TODAS as categorias")
     print("=" * 80)
@@ -501,47 +487,36 @@ def exportar_todas_categorias(data_exportacao: str = None) -> Dict[str, Dict[str
         print("-" * 60)
         
         try:
-            arquivos_categoria = executar_exportacao_completa(categoria, data_exportacao)
-            resultados[categoria] = arquivos_categoria
+            arquivos = exportar_matriz_csv(categoria, data_exportacao)
+            resultados[categoria] = arquivos
             
         except Exception as e:
             print(f"❌ Erro ao processar {categoria}: {str(e)}")
-            resultados[categoria] = {"erro": str(e)}
+            resultados[categoria] = []
     
     print("\n" + "=" * 80)
     print("📋 RESUMO FINAL:")
     print("=" * 80)
     
     for categoria, arquivos in resultados.items():
-        if "erro" in arquivos:
-            print(f"❌ {categoria}: ERRO - {arquivos['erro']}")
+        if arquivos:
+            print(f"✅ {categoria}: {len(arquivos)} arquivo(s)")
         else:
-            print(f"✅ {categoria}:")
-            print(f"   • OFFLINE: {arquivos['offline']}")
-            print(f"   • ONLINE: {arquivos['online']}")
+            print(f"❌ {categoria}: ERRO")
     
     return resultados
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 🔧 Como Usar a Replicação de Matrizes
+# MAGIC ## 6. Execução
 
 # COMMAND ----------
 
-# Descomente para executar exportação para todas as categorias
+# Executar exportação para todas as categorias
 resultados = exportar_todas_categorias()
 
 # COMMAND ----------
 
-from pyspark.sql.functions import regexp_replace, col
-
-df = (
-    processar_matriz_merecimento(categoria='DIRETORIA TELEFONIA CELULAR', canal='online')
-    .withColumn(
-        "Merecimento_Percentual_online",
-        regexp_replace(col("Merecimento_Percentual_online").cast("string"), r"\.", ",")
-    )
-)
-
-df.display()
+# Exemplo: exportar apenas uma categoria específica
+# arquivos = exportar_matriz_csv("DIRETORIA TELEFONIA CELULAR")
