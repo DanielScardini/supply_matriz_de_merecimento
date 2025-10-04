@@ -839,16 +839,26 @@ def criar_de_para_filial_cd() -> DataFrame:
     """
     Cria o mapeamento filial → CD usando dados da tabela base com consolidação.
     Aplica a mesma lógica do online para evitar distorções.
+    Usa a data mais recente disponível (max DtAtual) em vez de data exata.
     """
     print("🔄 Criando de-para filial → CD com consolidação...")
     
+    # ✅ Buscar a data mais recente disponível
+    max_dt_atual = (
+        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
+        .select(F.max("DtAtual").alias("max_dt"))
+        .collect()[0]["max_dt"]
+    )
+    
+    print(f"✅ Data mais recente na base: {max_dt_atual}")
+    
     df_base = (
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
-        .filter(F.col("DtAtual") == DATA_CALCULO)
+        .filter(F.col("DtAtual") == max_dt_atual)
         .filter(F.col("CdSku").isNotNull())
     )
 
-    print(f"✅ De-para filial usando registros de {DATA_CALCULO}")
+    print(f"✅ De-para filial usando registros de {max_dt_atual}")
 
     # ✅ NORMALIZAÇÃO: None → 0 para depois filtrar
     dict_norm = {int(k): (int(v) if v is not None else 0) for k, v in DE_PARA_CONSOLIDACAO_CDS.items()}
