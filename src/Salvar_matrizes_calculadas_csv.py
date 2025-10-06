@@ -19,6 +19,7 @@ from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F, Window as W
 from datetime import datetime, timedelta
 import os
+import pandas as pd
 from typing import List, Dict, Tuple
 
 # Inicialização
@@ -557,12 +558,12 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None) -> List[str
         
         print(f"  ✅ Parte {idx}: {nome_arquivo} ({len(df_pandas):,} linhas)")
         arquivos_salvos.append(caminho_completo)
-    
-    print("\n" + "=" * 80)
+        
+        print("\n" + "=" * 80)
     print(f"✅ Exportação concluída: {categoria}")
     print(f"📁 Total de arquivos: {len(arquivos_salvos)}")
-    
-    return arquivos_salvos
+        
+        return arquivos_salvos
 
 # COMMAND ----------
 
@@ -612,7 +613,159 @@ def exportar_todas_categorias(data_exportacao: str = None) -> Dict[str, List[str
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 6. Execução
+# MAGIC ## 6. Exportação Excel para Validação (por Grupo de Necessidade)
+
+# COMMAND ----------
+
+def exportar_excel_validacao_grupo_necessidade(categoria: str, data_exportacao: str = None) -> str:
+    """
+    Exporta Excel de validação com ONLINE e OFFLINE lado a lado.
+    
+    Estrutura:
+    - Uma linha por (CdSku, CdFilial, grupo_de_necessidade)
+    - Colunas: CdSku, CdFilial, grupo_de_necessidade, Merecimento_OFFLINE, Merecimento_ONLINE
+    - Fill com 0.00 em merecimentos faltantes
+    - Exportado em pasta 'validacao'
+    
+    Args:
+        categoria: Nome da categoria
+        data_exportacao: Data de exportação (padrão: hoje)
+        
+    Returns:
+        Caminho do arquivo Excel gerado
+    """
+    if data_exportacao is None:
+        data_exportacao = DATA_ATUAL.strftime("%Y-%m-%d")
+    
+    print(f"📊 Exportando Excel de validação: {categoria}")
+    print("=" * 80)
+    
+    grupo_apelido = TABELAS_MATRIZ_MERECIMENTO[categoria]["grupo_apelido"]
+    
+    # Criar pasta validacao
+    pasta_validacao = f"{PASTA_OUTPUT}/{data_exportacao}/validacao"
+    os.makedirs(pasta_validacao, exist_ok=True)
+    
+    # 1. Carregar dados OFFLINE com grupo_de_necessidade
+    print("\n🔄 Carregando matriz OFFLINE...")
+    tabela_offline = TABELAS_MATRIZ_MERECIMENTO[categoria]["offline"]
+    coluna_merecimento = COLUNAS_MERECIMENTO[categoria]
+    
+    df_offline = (
+        spark.table(tabela_offline)
+        .select(
+            "CdSku", "CdFilial", "grupo_de_necessidade",
+            (100 * F.col(coluna_merecimento)).alias("Merecimento_OFFLINE")
+        )
+    )
+    print(f"  ✅ OFFLINE: {df_offline.count():,} registros")
+    
+    # 2. Carregar dados ONLINE com grupo_de_necessidade
+    print("\n🔄 Carregando matriz ONLINE...")
+    tabela_online = TABELAS_MATRIZ_MERECIMENTO[categoria]["online"]
+    
+    df_online = (
+        spark.table(tabela_online)
+        .select(
+            "CdSku", "CdFilial", "grupo_de_necessidade",
+            (100 * F.col(coluna_merecimento)).alias("Merecimento_ONLINE")
+        )
+        # Aplicar regra CdFilial 1401 → 14
+        .withColumn(
+            "CdFilial", 
+            F.when(F.col("CdFilial") == 1401, 14).otherwise(F.col("CdFilial"))
+        )
+    )
+    print(f"  ✅ ONLINE: {df_online.count():,} registros")
+    
+    # 3. Fazer FULL OUTER JOIN
+    print("\n🔗 Fazendo outer join...")
+    df_joined = (
+        df_offline.join(
+            df_online,
+            on=["CdSku", "CdFilial", "grupo_de_necessidade"],
+            how="outer"
+        )
+        # Fill NULLs com 0.00
+        .fillna(0.00, subset=["Merecimento_OFFLINE", "Merecimento_ONLINE"])
+        # Ordenar
+        .orderBy("grupo_de_necessidade", "CdSku", "CdFilial")
+    )
+    print(f"  ✅ Join: {df_joined.count():,} registros")
+    
+    # 4. Converter para Pandas e salvar Excel
+    print("\n💾 Salvando Excel...")
+    df_pandas = df_joined.toPandas()
+    
+    # Arredondar merecimentos para 3 casas decimais
+    df_pandas["Merecimento_OFFLINE"] = df_pandas["Merecimento_OFFLINE"].round(3)
+    df_pandas["Merecimento_ONLINE"] = df_pandas["Merecimento_ONLINE"].round(3)
+    
+    # Salvar
+    nome_arquivo = f"validacao_{grupo_apelido}_{data_exportacao}.xlsx"
+    caminho_completo = f"{pasta_validacao}/{nome_arquivo}"
+    
+    with pd.ExcelWriter(caminho_completo, engine="openpyxl") as writer:
+        df_pandas.to_excel(writer, sheet_name="Validacao", index=False)
+    
+    print(f"  ✅ Arquivo salvo: {nome_arquivo}")
+    print(f"  📁 Local: {pasta_validacao}")
+    print(f"  📊 Total de linhas: {len(df_pandas):,}")
+    
+    print("\n" + "=" * 80)
+    print(f"✅ Exportação Excel de validação concluída: {categoria}")
+    
+    return caminho_completo
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 7. Exportar Validação para Todas as Categorias
+
+# COMMAND ----------
+
+def exportar_excel_validacao_todas_categorias(data_exportacao: str = None) -> Dict[str, str]:
+    """
+    Exporta Excel de validação para todas as categorias.
+    
+    Args:
+        data_exportacao: Data de exportação (padrão: hoje)
+        
+    Returns:
+        Dicionário com caminhos dos arquivos por categoria
+    """
+    print("🚀 Iniciando exportação Excel de validação para TODAS as categorias")
+    print("=" * 80)
+    
+    resultados = {}
+    
+    for categoria in TABELAS_MATRIZ_MERECIMENTO.keys():
+        print(f"\n📊 Processando: {categoria}")
+        print("-" * 60)
+        
+        try:
+            arquivo = exportar_excel_validacao_grupo_necessidade(categoria, data_exportacao)
+            resultados[categoria] = arquivo
+        except Exception as e:
+            print(f"❌ Erro: {str(e)}")
+            resultados[categoria] = None
+    
+    print("\n" + "=" * 80)
+    print("📋 RESUMO FINAL - VALIDAÇÃO:")
+    print("=" * 80)
+    
+    for categoria, arquivo in resultados.items():
+        if arquivo:
+            print(f"✅ {categoria}: {arquivo}")
+        else:
+            print(f"❌ {categoria}: ERRO")
+    
+    return resultados
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 8. Execução
 
 # COMMAND ----------
 
@@ -621,5 +774,13 @@ resultados = exportar_todas_categorias()
 
 # COMMAND ----------
 
+# Exportar Excel de validação para todas as categorias
+resultados_validacao = exportar_excel_validacao_todas_categorias()
+
+# COMMAND ----------
+
 # Exemplo: exportar apenas uma categoria
 # arquivos = exportar_matriz_csv("DIRETORIA TELEFONIA CELULAR")
+
+# Exemplo: exportar apenas validação de uma categoria
+# arquivo_validacao = exportar_excel_validacao_grupo_necessidade("DIRETORIA TELEFONIA CELULAR")
