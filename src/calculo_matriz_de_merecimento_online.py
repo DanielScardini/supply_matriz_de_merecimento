@@ -1174,8 +1174,6 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
         .filter(F.col("CdFilial").isNotNull())
     )
     
-    filiais_count = df_filiais.count()
-    
     # Contar CDs, Lojas e Outlets separadamente
     # CDs: NmPorteLoja NULL E não é Outlet
     cds_count = df_filiais.filter(
@@ -1188,6 +1186,7 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
     # Outlets: Filiais da lista FILIAIS_OUTLET
     outlets_count = df_filiais.filter(F.col("CdFilial").isin(FILIAIS_OUTLET)).count()
     
+    filiais_count = df_filiais.count()
     print(f"  ✅ {filiais_count:,} filiais carregadas")
     print(f"     • {lojas_count:,} Lojas")
     print(f"     • {cds_count:,} CDs (NmPorteLoja NULL, exceto Outlets)")
