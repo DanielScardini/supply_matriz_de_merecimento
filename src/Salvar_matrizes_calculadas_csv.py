@@ -658,7 +658,13 @@ def exportar_excel_validacao_grupo_necessidade(categoria: str, data_exportacao: 
             (100 * F.col(coluna_merecimento)).alias("Merecimento_OFFLINE")
         )
     )
-    print(f"  ✅ OFFLINE: {df_offline.count():,} registros")
+    
+    # Filtro especial para Linha Leve: apenas SKUs top 80% de PORTATEIS
+    if categoria == "DIRETORIA LINHA LEVE":
+        df_offline = df_offline.filter(F.col("CdSku").isin(skus_especies_top80))
+        print(f"  ✅ OFFLINE (TOP 80%): {df_offline.count():,} registros | {len(skus_especies_top80)} SKUs")
+    else:
+        print(f"  ✅ OFFLINE: {df_offline.count():,} registros")
     
     # 2. Carregar dados ONLINE com grupo_de_necessidade
     print("\n🔄 Carregando matriz ONLINE...")
@@ -676,7 +682,13 @@ def exportar_excel_validacao_grupo_necessidade(categoria: str, data_exportacao: 
             F.when(F.col("CdFilial") == 1401, 14).otherwise(F.col("CdFilial"))
         )
     )
-    print(f"  ✅ ONLINE: {df_online.count():,} registros")
+    
+    # Filtro especial para Linha Leve: apenas SKUs top 80% de PORTATEIS
+    if categoria == "DIRETORIA LINHA LEVE":
+        df_online = df_online.filter(F.col("CdSku").isin(skus_especies_top80))
+        print(f"  ✅ ONLINE (TOP 80%): {df_online.count():,} registros | {len(skus_especies_top80)} SKUs")
+    else:
+        print(f"  ✅ ONLINE: {df_online.count():,} registros")
     
     # 3. Fazer FULL OUTER JOIN
     print("\n🔗 Fazendo outer join...")
