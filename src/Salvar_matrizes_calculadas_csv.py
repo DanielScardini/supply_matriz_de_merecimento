@@ -8,7 +8,7 @@
 # MAGIC - Formato: CSV sem index
 # MAGIC - Colunas: SKU, CANAL, LOJA, DATA FIM, PERCENTUAL, VERIFICAR, FASE DE VIDA
 # MAGIC - União de ONLINE e OFFLINE no mesmo arquivo
-# MAGIC - Máximo 500.000 linhas por arquivo
+# MAGIC - Máximo 200.000 linhas por arquivo
 # MAGIC - Mesmo SKU-FILIAL sempre no mesmo arquivo (ambos canais)
 # MAGIC - Normalização para exatamente 100.00% por CdSku
 # MAGIC - Ajuste de diferença no maior merecimento
@@ -115,16 +115,16 @@ df_demanda.filter(F.col("NmEspecieGerencial").isin(especies_top80)).agg(F.sum("P
 
 # Tabelas por categoria
 TABELAS_MATRIZ_MERECIMENTO = {
-    "DIRETORIA DE TELAS": {
-        "offline": "databox.bcg_comum.supply_matriz_merecimento_de_telas_teste2509",
-        "online": "databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste2609",
-        "grupo_apelido": "telas"
-    },
-    "DIRETORIA TELEFONIA CELULAR": {
-        "offline": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste1009",
-        "online": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste0809",
-        "grupo_apelido": "telefonia"
-    },
+    # "DIRETORIA DE TELAS": {
+    #     "offline": "databox.bcg_comum.supply_matriz_merecimento_de_telas_teste2509",
+    #     "online": "databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste2609",
+    #     "grupo_apelido": "telas"
+    # },
+    # "DIRETORIA TELEFONIA CELULAR": {
+    #     "offline": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste1009",
+    #     "online": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste0809",
+    #     "grupo_apelido": "telefonia"
+    # },
     "DIRETORIA LINHA LEVE": {
         "offline": "databox.bcg_comum.supply_matriz_merecimento_LINHA_LEVE_teste0410",
         "online": "databox.bcg_comum.supply_matriz_merecimento_LINHA_LEVE_online_teste0310",
@@ -162,7 +162,7 @@ FILTROS_GRUPO_SELECAO = {
 }
 
 # Limite de linhas por arquivo
-MAX_LINHAS_POR_ARQUIVO = 500000
+MAX_LINHAS_POR_ARQUIVO = 200000
 
 print("✅ Configurações carregadas")
 
@@ -650,7 +650,7 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None) -> List[str
     3. Normalizar para 100.00% exato
     4. Adicionar informações de filiais
     5. Criar DataFrame final formatado
-    6. Dividir em arquivos (max 500k linhas)
+    6. Dividir em arquivos (max 200k linhas)
     7. Salvar CSVs
     
     Args:
@@ -719,7 +719,7 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None) -> List[str
     print(f"✅ Exportação concluída: {categoria}")
     print(f"📁 Total de arquivos: {len(arquivos_salvos)}")
         
-        return arquivos_salvos
+    return arquivos_salvos
 
 # COMMAND ----------
 
@@ -992,7 +992,7 @@ def exportar_excel_validacao_todas_categorias(data_exportacao: str = None) -> Di
 # COMMAND ----------
 
 # Executar exportação para todas as categorias
-resultados = exportar_todas_categorias()
+#resultados = exportar_todas_categorias()
 
 # COMMAND ----------
 

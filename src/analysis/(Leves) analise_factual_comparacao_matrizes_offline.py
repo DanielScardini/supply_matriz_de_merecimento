@@ -363,7 +363,7 @@ def add_smape_components(df, pred_col, real_col=COL_REAL, peso_col=COL_PESO, lab
 
 # === Lista de colunas de predição alvo ===
 pred_cols_base = list(colunas)  # ["Merecimento_Final_Media90_...", ...]
-extras = ["PercMatrizNeogrid_mean"]  # , "PercMatrizNeogrid_median"]
+extras = ["PercMatrizNeogrid"]  # , "PercMatrizNeogrid_median"]
 
 def existing_pred_cols(df, base_cols, maybe_cols):
     present = [c for c in maybe_cols if c in df.columns]
