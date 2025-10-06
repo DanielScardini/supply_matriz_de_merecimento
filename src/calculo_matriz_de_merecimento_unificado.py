@@ -750,20 +750,16 @@ def add_media_aparada_rolling(df, janelas, col_val="demanda_robusta", col_ord="D
         ).otherwise(mean_simple)  # Fallback para média simples protegida
 
         # ✅ PROTEÇÃO: Lógica final com múltiplos fallbacks
-        out = (
-            out
-            .withColumn(
-                f"MediaAparada{dias}_Qt_venda_sem_ruptura",
-                F.when(
-                    cnt >= F.lit(min_obs), 
-                    F.coalesce(mean_trim, mean_simple, backup_360_mean, F.lit(0))
-                )
-                .otherwise(
-                    F.coalesce(mean_simple, backup_360_mean, F.lit(0))
-                )
+        out = out.withColumn(
+            f"MediaAparada{dias}_Qt_venda_sem_ruptura",
+            F.when(
+                cnt >= F.lit(min_obs), 
+                F.coalesce(mean_trim, mean_simple, backup_360_mean, F.lit(0))
             )
-            .drop(f"_ql_{dias}", f"_qh_{dias}")
-        )
+            .otherwise(
+                F.coalesce(mean_simple, backup_360_mean, F.lit(0))
+            )
+        ).drop(f"_ql_{dias}", f"_qh_{dias}")
 
     return out
 
