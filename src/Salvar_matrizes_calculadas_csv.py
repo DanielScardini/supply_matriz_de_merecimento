@@ -209,7 +209,7 @@ def diagnosticar_diferenca_canais(df_offline: DataFrame, df_online: DataFrame, c
         categoria: Nome da categoria
     """
     print("\n" + "="*80)
-    print(f"🔍 DIAGNÓSTICO DE DIFERENÇAS - {categoria}")
+    print(f"🔍 DIAGNÓSTICO COMPARATIVO - {categoria}")
     print("="*80)
     
     # 1. Contagens básicas
@@ -217,19 +217,51 @@ def diagnosticar_diferenca_canais(df_offline: DataFrame, df_online: DataFrame, c
     count_online = df_online.count()
     ratio = count_online / count_offline if count_offline > 0 else 0
     
-    print(f"\n📊 VOLUMES:")
+    print(f"\n📊 VOLUMES TOTAIS:")
     print(f"  • OFFLINE: {count_offline:,} registros")
     print(f"  • ONLINE:  {count_online:,} registros")
-    print(f"  • Razão:   {ratio:.1f}x {'🚨' if ratio > 2 else '✅'}")
+    print(f"  • Razão:   {ratio:.1f}x {'🚨 MUITO ALTO' if ratio > 5 else '⚠️  ALTO' if ratio > 2 else '✅ OK'}")
     
-    # 2. SKUs únicos
-    skus_offline = df_offline.select("CdSku").distinct().count()
-    skus_online = df_online.select("CdSku").distinct().count()
+    # 2. SKUs únicos - ANÁLISE DETALHADA
+    print(f"\n🏷️  ANÁLISE DE SKUs:")
     
-    print(f"\n🏷️  SKUs ÚNICOS:")
-    print(f"  • OFFLINE: {skus_offline:,} SKUs")
-    print(f"  • ONLINE:  {skus_online:,} SKUs")
-    print(f"  • Diferença: {skus_online - skus_offline:+,} SKUs")
+    skus_offline_set = set([row.CdSku for row in df_offline.select("CdSku").distinct().collect()])
+    skus_online_set = set([row.CdSku for row in df_online.select("CdSku").distinct().collect()])
+    
+    skus_apenas_offline = skus_offline_set - skus_online_set
+    skus_apenas_online = skus_online_set - skus_offline_set
+    skus_em_ambos = skus_offline_set & skus_online_set
+    
+    print(f"  • SKUs OFFLINE: {len(skus_offline_set):,} SKUs únicos")
+    print(f"  • SKUs ONLINE:  {len(skus_online_set):,} SKUs únicos")
+    print(f"  • SKUs em AMBOS: {len(skus_em_ambos):,} SKUs")
+    print(f"  • SKUs APENAS OFFLINE: {len(skus_apenas_offline):,} SKUs")
+    print(f"  • SKUs APENAS ONLINE:  {len(skus_apenas_online):,} SKUs")
+    
+    if len(skus_apenas_online) > 0:
+        print(f"  💡 ONLINE tem {len(skus_apenas_online):,} SKUs exclusivos")
+    if len(skus_apenas_offline) > 0:
+        print(f"  ⚠️  OFFLINE tem {len(skus_apenas_offline):,} SKUs que não aparecem no ONLINE")
+    
+    # Validação do filtro TOP 80% para Linha Leve
+    if categoria == "DIRETORIA LINHA LEVE":
+        print(f"\n🔝 VALIDAÇÃO FILTRO TOP 80%:")
+        print(f"  • SKUs top 80% definidos: {len(skus_especies_top80)}")
+        
+        skus_top80_em_offline = len(skus_offline_set & set(skus_especies_top80))
+        skus_top80_em_online = len(skus_online_set & set(skus_especies_top80))
+        
+        print(f"  • SKUs top 80% presentes no OFFLINE: {skus_top80_em_offline:,} ({skus_top80_em_offline/len(skus_especies_top80)*100:.1f}%)")
+        print(f"  • SKUs top 80% presentes no ONLINE:  {skus_top80_em_online:,} ({skus_top80_em_online/len(skus_especies_top80)*100:.1f}%)")
+        
+        if skus_top80_em_offline < len(skus_especies_top80):
+            print(f"  ⚠️  {len(skus_especies_top80) - skus_top80_em_offline} SKUs top 80% ausentes no OFFLINE")
+        if skus_top80_em_online < len(skus_especies_top80):
+            print(f"  ⚠️  {len(skus_especies_top80) - skus_top80_em_online} SKUs top 80% ausentes no ONLINE")
+        
+        if len(skus_apenas_online) > len(skus_especies_top80):
+            print(f"  🚨 ALERTA: ONLINE tem mais SKUs ({len(skus_apenas_online):,}) que os definidos no top 80% ({len(skus_especies_top80):,})")
+            print(f"     Isso indica que o filtro pode não estar funcionando corretamente!")
     
     # 3. Filiais únicas
     filiais_offline = df_offline.select("CdFilial").distinct().count()
@@ -238,39 +270,38 @@ def diagnosticar_diferenca_canais(df_offline: DataFrame, df_online: DataFrame, c
     print(f"\n🏪 FILIAIS ÚNICAS:")
     print(f"  • OFFLINE: {filiais_offline:,} filiais")
     print(f"  • ONLINE:  {filiais_online:,} filiais")
-    print(f"  • Diferença: {filiais_online - filiais_offline:+,} filiais")
+    print(f"  • Diferença: {filiais_online - filiais_offline:+,} filiais (+{(filiais_online/filiais_offline - 1)*100:.1f}%)")
     
-    # 4. Grupos de necessidade únicos
-    grupos_offline = df_offline.select("grupo_de_necessidade").distinct().count()
-    grupos_online = df_online.select("grupo_de_necessidade").distinct().count()
-    
-    print(f"\n📦 GRUPOS DE NECESSIDADE:")
-    print(f"  • OFFLINE: {grupos_offline:,} grupos")
-    print(f"  • ONLINE:  {grupos_online:,} grupos")
-    print(f"  • Diferença: {grupos_online - grupos_offline:+,} grupos")
-    
-    # 5. Granularidade média (registros por filial)
+    # 4. Granularidade média (registros por filial e por SKU)
     registros_por_filial_offline = count_offline / filiais_offline if filiais_offline > 0 else 0
     registros_por_filial_online = count_online / filiais_online if filiais_online > 0 else 0
     
-    print(f"\n📏 GRANULARIDADE (registros/filial):")
-    print(f"  • OFFLINE: {registros_por_filial_offline:.1f} registros/filial")
-    print(f"  • ONLINE:  {registros_por_filial_online:.1f} registros/filial")
+    registros_por_sku_offline = count_offline / len(skus_offline_set) if len(skus_offline_set) > 0 else 0
+    registros_por_sku_online = count_online / len(skus_online_set) if len(skus_online_set) > 0 else 0
     
-    # 6. Análise de causa provável
-    print(f"\n🔎 ANÁLISE:")
+    print(f"\n📏 GRANULARIDADE:")
+    print(f"  • OFFLINE: {registros_por_filial_offline:.1f} registros/filial | {registros_por_sku_offline:.1f} registros/SKU")
+    print(f"  • ONLINE:  {registros_por_filial_online:.1f} registros/filial | {registros_por_sku_online:.1f} registros/SKU")
+    print(f"  • Razão registros/filial: {registros_por_filial_online / registros_por_filial_offline:.1f}x")
+    
+    # 5. Análise de causa provável
+    print(f"\n🔎 DIAGNÓSTICO FINAL:")
     if ratio > 5:
-        print(f"  ⚠️  ALERTA: Diferença de {ratio:.1f}x é MUITO ALTA")
+        print(f"  🚨 ALERTA CRÍTICO: Diferença de {ratio:.1f}x é EXTREMAMENTE ALTA")
+        print(f"  ")
+        print(f"  📌 Causas identificadas:")
+        if len(skus_apenas_online) > len(skus_online_set) * 0.3:
+            print(f"     • ONLINE tem {len(skus_apenas_online):,} SKUs exclusivos ({len(skus_apenas_online)/len(skus_online_set)*100:.1f}% do total)")
         if registros_por_filial_online > registros_por_filial_offline * 3:
-            print(f"  💡 Causa provável: ONLINE tem granularidade muito mais fina")
-            print(f"     (Possivelmente desagregado por SKU vs agregado por grupo)")
-        if skus_online > skus_offline * 1.5:
-            print(f"  💡 Causa provável: ONLINE tem {skus_online - skus_offline:,} SKUs a mais")
+            print(f"     • Granularidade {registros_por_filial_online / registros_por_filial_offline:.1f}x maior no ONLINE")
+            print(f"       (Possivelmente desagregado por SKU individual vs agregado por grupo)")
+        if filiais_online > filiais_offline * 1.2:
+            print(f"     • ONLINE tem {filiais_online - filiais_offline:,} filiais a mais ({(filiais_online/filiais_offline - 1)*100:.1f}%)")
     elif ratio > 2:
         print(f"  ⚠️  Diferença de {ratio:.1f}x é ALTA mas pode ser aceitável")
-        print(f"  💡 ONLINE tem mais filiais e/ou mais SKUs ativos")
+        print(f"  💡 Causas: ONLINE tem mais filiais ({filiais_online - filiais_offline:+,}) e/ou mais SKUs ({len(skus_online_set) - len(skus_offline_set):+,})")
     else:
-        print(f"  ✅ Diferença de {ratio:.1f}x está dentro do esperado")
+        print(f"  ✅ Diferença de {ratio:.1f}x está dentro do esperado para operações Online/Offline")
     
     print("="*80 + "\n")
 
@@ -287,7 +318,8 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
     Returns:
         DataFrame com CdSku, CdFilial, Merecimento_raw
     """
-    print(f"🔄 Carregando matriz: {categoria} - {canal}")
+    print(f"\n🔄 Carregando matriz: {categoria} - {canal.upper()}")
+    print("-" * 80)
     
     tabela = TABELAS_MATRIZ_MERECIMENTO[categoria][canal]
     coluna_merecimento = COLUNAS_MERECIMENTO[categoria]
@@ -304,28 +336,62 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
         )
     )
     
-    # Aplicar filtros
+    # CHECKPOINT 1: Dados brutos
+    skus_inicial = df_base.select("CdSku").distinct().count()
+    registros_inicial = df_base.count()
+    print(f"📦 DADOS BRUTOS DA TABELA:")
+    print(f"  • Registros: {registros_inicial:,}")
+    print(f"  • SKUs únicos: {skus_inicial:,}")
+    
+    # Aplicar filtros de grupo
+    print(f"\n🎯 FILTRO DE GRUPOS DE NECESSIDADE:")
     if flag_tipo == "SELEÇÃO":
         df_filtrado = df_base.filter(F.col("grupo_de_necessidade").isin(filtros_selecao))
-        print(f"  • Seleção: {filtros_selecao}")
+        print(f"  • Tipo: SELEÇÃO")
+        print(f"  • Grupos selecionados: {len(filtros_selecao)}")
     else:
         df_filtrado = df_base.filter(~F.col("grupo_de_necessidade").isin(filtros_remocao))
-        print(f"  • Remoção: {filtros_remocao}")
+        print(f"  • Tipo: REMOÇÃO")
+        print(f"  • Grupos removidos: {len(filtros_remocao)}")
+    
+    # CHECKPOINT 2: Após filtro de grupos
+    skus_pos_grupo = df_filtrado.select("CdSku").distinct().count()
+    registros_pos_grupo = df_filtrado.count()
+    print(f"  • SKUs após filtro: {skus_pos_grupo:,} ({skus_pos_grupo - skus_inicial:+,})")
+    print(f"  • Registros após filtro: {registros_pos_grupo:,} ({registros_pos_grupo - registros_inicial:+,})")
     
     # Filtro especial para Linha Leve: apenas SKUs top 80% de PORTATEIS
     if categoria == "DIRETORIA LINHA LEVE":
+        print(f"\n🔝 FILTRO TOP 80% PORTATEIS:")
+        print(f"  • SKUs top 80% definidos: {len(skus_especies_top80)}")
+        
+        skus_antes_top80 = df_filtrado.select("CdSku").distinct().count()
         df_filtrado = df_filtrado.filter(F.col("CdSku").isin(skus_especies_top80))
-        print(f"  • Filtro TOP 80% PORTATEIS: {len(skus_especies_top80)} SKUs")
+        skus_apos_top80 = df_filtrado.select("CdSku").distinct().count()
+        registros_apos_top80 = df_filtrado.count()
+        
+        print(f"  • SKUs antes: {skus_antes_top80:,}")
+        print(f"  • SKUs após: {skus_apos_top80:,} ({skus_apos_top80 - skus_antes_top80:+,})")
+        print(f"  • Registros após: {registros_apos_top80:,}")
+        
+        if skus_apos_top80 != len(skus_especies_top80):
+            print(f"  ⚠️  ATENÇÃO: {len(skus_especies_top80) - skus_apos_top80} SKUs top 80% não encontrados nos dados!")
     
     # Regra especial online: CdFilial 1401 → 14
     if canal == "online":
+        print(f"\n🔄 CONSOLIDAÇÃO DE FILIAIS:")
+        filial_1401_count = df_filtrado.filter(F.col("CdFilial") == 1401).count()
+        
         df_filtrado = df_filtrado.withColumn(
             "CdFilial", 
             F.when(F.col("CdFilial") == 1401, 14).otherwise(F.col("CdFilial"))
         )
-        print("  • CdFilial 1401 → 14")
+        
+        print(f"  • CdFilial 1401 → 14")
+        print(f"  • Registros consolidados: {filial_1401_count:,}")
     
     # Agregar por CdSku + CdFilial
+    print(f"\n📊 AGREGAÇÃO FINAL:")
     df_agregado = (
         df_filtrado
         .groupBy("CdSku", "CdFilial")
@@ -333,7 +399,16 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
         .withColumn("CANAL", F.lit(canal.upper()))
     )
     
-    print(f"  ✅ {df_agregado.count():,} registros carregados")
+    registros_final = df_agregado.count()
+    skus_final = df_agregado.select("CdSku").distinct().count()
+    filiais_final = df_agregado.select("CdFilial").distinct().count()
+    
+    print(f"  • Registros finais: {registros_final:,}")
+    print(f"  • SKUs finais: {skus_final:,}")
+    print(f"  • Filiais finais: {filiais_final:,}")
+    print(f"  • Granularidade: {registros_final / filiais_final:.1f} registros/filial")
+    print("-" * 80)
+    print(f"✅ Carregamento concluído: {canal.upper()}")
     
     return df_agregado
 
