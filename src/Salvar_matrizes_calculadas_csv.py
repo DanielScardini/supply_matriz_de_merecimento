@@ -399,7 +399,7 @@ def criar_dataframe_final(df: DataFrame) -> DataFrame:
     """
     Cria DataFrame final com todas as colunas no formato do sistema.
     
-    Colunas finais: SKU, CANAL, LOJA, DATA FIM, PERCENTUAL, VERIFICAR, FASE DE VIDA
+    Colunas finais: SKU, CANAL, LOJA, DATA FIM, PERCENTUAL
     
     Args:
         df: DataFrame com CdSku, CANAL, LOJA, PERCENTUAL
@@ -413,10 +413,8 @@ def criar_dataframe_final(df: DataFrame) -> DataFrame:
         df
         .withColumn("SKU", F.col("CdSku").cast("string"))
         .withColumn("DATA FIM", F.lit(DATA_FIM_INT))
-        .withColumn("VERIFICAR", F.lit(""))
-        .withColumn("FASE DE VIDA", F.lit("SEM FASE"))
         .withColumn("PERCENTUAL", F.round(F.col("PERCENTUAL"), 3))
-        .select("SKU", "CANAL", "LOJA", "DATA FIM", "PERCENTUAL", "VERIFICAR", "FASE DE VIDA")
+        .select("SKU", "CANAL", "LOJA", "DATA FIM", "PERCENTUAL")
         .orderBy("SKU", "LOJA", "CANAL")
     )
     
