@@ -57,10 +57,10 @@ df_demanda = (
 )
 
 # calcular totais com window
-w_total = Window.rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing)
+w_total = W.rowsBetween(W.unboundedPreceding, W.unboundedFollowing)
 
 # window para cumulativo
-w_cum = Window.orderBy(F.col("PercDemanda").desc()).rowsBetween(Window.unboundedPreceding, 0)
+w_cum = W.orderBy(F.col("PercDemanda").desc()).rowsBetween(W.unboundedPreceding, 0)
 
 df_demanda = (
     df_demanda
@@ -561,7 +561,7 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None) -> List[str
     print(f"✅ Exportação concluída: {categoria}")
     print(f"📁 Total de arquivos: {len(arquivos_salvos)}")
         
-        return arquivos_salvos
+    return arquivos_salvos
 
 # COMMAND ----------
 
@@ -605,6 +605,7 @@ def exportar_todas_categorias(data_exportacao: str = None) -> Dict[str, List[str
             print(f"✅ {categoria}: {len(arquivos)} arquivo(s)")
         else:
             print(f"❌ {categoria}: ERRO")
+    
     
     return resultados
 
