@@ -196,6 +196,86 @@ def formatar_codigo_loja(cdfilial: int, is_cd: bool) -> str:
 
 # COMMAND ----------
 
+def diagnosticar_diferenca_canais(df_offline: DataFrame, df_online: DataFrame, categoria: str) -> None:
+    """
+    Diagnóstico de diferenças entre canais OFFLINE e ONLINE.
+    
+    Investiga granularidade, SKUs únicos, grupos de necessidade e filiais
+    para identificar por que há diferenças significativas de volume.
+    
+    Args:
+        df_offline: DataFrame do canal offline
+        df_online: DataFrame do canal online
+        categoria: Nome da categoria
+    """
+    print("\n" + "="*80)
+    print(f"🔍 DIAGNÓSTICO DE DIFERENÇAS - {categoria}")
+    print("="*80)
+    
+    # 1. Contagens básicas
+    count_offline = df_offline.count()
+    count_online = df_online.count()
+    ratio = count_online / count_offline if count_offline > 0 else 0
+    
+    print(f"\n📊 VOLUMES:")
+    print(f"  • OFFLINE: {count_offline:,} registros")
+    print(f"  • ONLINE:  {count_online:,} registros")
+    print(f"  • Razão:   {ratio:.1f}x {'🚨' if ratio > 2 else '✅'}")
+    
+    # 2. SKUs únicos
+    skus_offline = df_offline.select("CdSku").distinct().count()
+    skus_online = df_online.select("CdSku").distinct().count()
+    
+    print(f"\n🏷️  SKUs ÚNICOS:")
+    print(f"  • OFFLINE: {skus_offline:,} SKUs")
+    print(f"  • ONLINE:  {skus_online:,} SKUs")
+    print(f"  • Diferença: {skus_online - skus_offline:+,} SKUs")
+    
+    # 3. Filiais únicas
+    filiais_offline = df_offline.select("CdFilial").distinct().count()
+    filiais_online = df_online.select("CdFilial").distinct().count()
+    
+    print(f"\n🏪 FILIAIS ÚNICAS:")
+    print(f"  • OFFLINE: {filiais_offline:,} filiais")
+    print(f"  • ONLINE:  {filiais_online:,} filiais")
+    print(f"  • Diferença: {filiais_online - filiais_offline:+,} filiais")
+    
+    # 4. Grupos de necessidade únicos
+    grupos_offline = df_offline.select("grupo_de_necessidade").distinct().count()
+    grupos_online = df_online.select("grupo_de_necessidade").distinct().count()
+    
+    print(f"\n📦 GRUPOS DE NECESSIDADE:")
+    print(f"  • OFFLINE: {grupos_offline:,} grupos")
+    print(f"  • ONLINE:  {grupos_online:,} grupos")
+    print(f"  • Diferença: {grupos_online - grupos_offline:+,} grupos")
+    
+    # 5. Granularidade média (registros por filial)
+    registros_por_filial_offline = count_offline / filiais_offline if filiais_offline > 0 else 0
+    registros_por_filial_online = count_online / filiais_online if filiais_online > 0 else 0
+    
+    print(f"\n📏 GRANULARIDADE (registros/filial):")
+    print(f"  • OFFLINE: {registros_por_filial_offline:.1f} registros/filial")
+    print(f"  • ONLINE:  {registros_por_filial_online:.1f} registros/filial")
+    
+    # 6. Análise de causa provável
+    print(f"\n🔎 ANÁLISE:")
+    if ratio > 5:
+        print(f"  ⚠️  ALERTA: Diferença de {ratio:.1f}x é MUITO ALTA")
+        if registros_por_filial_online > registros_por_filial_offline * 3:
+            print(f"  💡 Causa provável: ONLINE tem granularidade muito mais fina")
+            print(f"     (Possivelmente desagregado por SKU vs agregado por grupo)")
+        if skus_online > skus_offline * 1.5:
+            print(f"  💡 Causa provável: ONLINE tem {skus_online - skus_offline:,} SKUs a mais")
+    elif ratio > 2:
+        print(f"  ⚠️  Diferença de {ratio:.1f}x é ALTA mas pode ser aceitável")
+        print(f"  💡 ONLINE tem mais filiais e/ou mais SKUs ativos")
+    else:
+        print(f"  ✅ Diferença de {ratio:.1f}x está dentro do esperado")
+    
+    print("="*80 + "\n")
+
+# COMMAND ----------
+
 def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
     """
     Carrega matriz de merecimento e aplica filtros.
@@ -521,6 +601,9 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None) -> List[str
     df_offline = carregar_e_filtrar_matriz(categoria, "offline")
     df_online = carregar_e_filtrar_matriz(categoria, "online")
     
+    # 1.5. Diagnóstico de diferenças
+    diagnosticar_diferenca_canais(df_offline, df_online, categoria)
+    
     # 2. União
     print("\n🔗 Unindo canais...")
     df_union = df_offline.union(df_online)
@@ -561,7 +644,7 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None) -> List[str
     print(f"✅ Exportação concluída: {categoria}")
     print(f"📁 Total de arquivos: {len(arquivos_salvos)}")
         
-    return arquivos_salvos
+        return arquivos_salvos
 
 # COMMAND ----------
 
