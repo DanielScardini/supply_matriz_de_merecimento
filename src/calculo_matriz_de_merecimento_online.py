@@ -1012,21 +1012,19 @@ def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) ->
 def calcular_merecimento_interno_cd(df: DataFrame, data_calculo: str, categoria: str) -> DataFrame:
     """
     Calcula a proporção interna de cada loja dentro do CD por grupo de necessidade.
+    Usa médias aparadas de 90 a 360 dias.
     Mantém colunas: Total_<medida> e Proporcao_Interna_<medida>.
     """
-    print(f"🔄 Calculando merecimento interno CD para categoria: {categoria}")
+    print(f"🔄 Calculando merecimento interno CD para categoria: {categoria} (médias aparadas 90-360 dias)")
     
     # Filtro pela data
     df_data_calculo = df.filter(F.col("DtAtual") == data_calculo)
     
-    # Lista de medidas
-    medidas_disponiveis = [
-        "Media90_Qt_venda_sem_ruptura", "Media180_Qt_venda_sem_ruptura", 
-        "Media270_Qt_venda_sem_ruptura", "Media360_Qt_venda_sem_ruptura",
-        "MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada180_Qt_venda_sem_ruptura",
-        "MediaAparada270_Qt_venda_sem_ruptura", "MediaAparada360_Qt_venda_sem_ruptura"
-    ]
-    medidas = [m for m in medidas_disponiveis if m in df_data_calculo.columns]
+    # Lista de medidas aparadas disponíveis
+    medidas_aparadas = [f"MediaAparada{dias}_Qt_venda_sem_ruptura" for dias in JANELAS_MOVEIS_APARADAS]
+    medidas = [m for m in medidas_aparadas if m in df_data_calculo.columns]
+    
+    print(f"  📊 Medidas disponíveis: {medidas}")
     
     # Join com de-para filial-CD
     de_para_filial_cd = criar_de_para_filial_cd()
@@ -1053,7 +1051,7 @@ def calcular_merecimento_interno_cd(df: DataFrame, data_calculo: str, categoria:
             )
         )
 
-    print(f"✅ Merecimento interno CD calculado: {df_out.count():,} registros")
+    print(f"✅ Merecimento interno CD calculado: {df_out.count():,} registros (médias aparadas 90-360 dias)")
     return df_out
 
 # COMMAND ----------
