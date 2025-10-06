@@ -1169,7 +1169,7 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
     print("📊 Passo 1: Carregando todas as filiais da base ONLINE...")
     df_filiais = (
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4_online')
-        .select("CdFilial", "NmRegiaoGeografica", "NmPorteLoja")
+        .select("CdFilial", "NmPorteLoja")
         .distinct()
         .filter(F.col("CdFilial").isNotNull())
     )
@@ -1243,13 +1243,12 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
     esqueleto_count = df_esqueleto.count()
     print(f"  ✅ Cross join criado: {esqueleto_count:,} combinações (filiais × SKUs)")
     
-    # 4. Adicionar informações adicionais das filiais
-    print("📊 Passo 4: Adicionando informações das filiais...")
+    # 4. Selecionar colunas finais
+    print("📊 Passo 4: Selecionando colunas finais...")
     df_esqueleto_final = df_esqueleto.select(
         "CdFilial",
         "CdSku", 
         "grupo_de_necessidade",
-        "NmRegiaoGeografica",
         "NmPorteLoja"
     )
 
