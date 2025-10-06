@@ -715,12 +715,19 @@ def exportar_excel_validacao_grupo_necessidade(categoria: str, data_exportacao: 
     nome_arquivo = f"validacao_{grupo_apelido}_{data_exportacao}.xlsx"
     caminho_completo = f"{pasta_validacao}/{nome_arquivo}"
     
-    with pd.ExcelWriter(caminho_completo, engine="openpyxl") as writer:
-        df_pandas.to_excel(writer, sheet_name="Validacao", index=False)
-    
-    print(f"  ✅ Arquivo salvo: {nome_arquivo}")
-    print(f"  📁 Local: {pasta_validacao}")
-    print(f"  📊 Total de linhas: {len(df_pandas):,}")
+    # Salvar diretamente (mais robusto para DataFrames grandes)
+    try:
+        df_pandas.to_excel(caminho_completo, sheet_name="Validacao", index=False, engine="openpyxl")
+        print(f"  ✅ Arquivo salvo: {nome_arquivo}")
+        print(f"  📁 Local: {pasta_validacao}")
+        print(f"  📊 Total de linhas: {len(df_pandas):,}")
+    except Exception as e:
+        print(f"  ⚠️ Erro ao salvar Excel: {str(e)}")
+        print(f"  💡 Tentando salvar como CSV...")
+        caminho_csv = caminho_completo.replace(".xlsx", ".csv")
+        df_pandas.to_csv(caminho_csv, index=False)
+        print(f"  ✅ Arquivo CSV salvo: {caminho_csv}")
+        caminho_completo = caminho_csv
     
     print("\n" + "=" * 80)
     print(f"✅ Exportação Excel de validação concluída: {categoria}")
