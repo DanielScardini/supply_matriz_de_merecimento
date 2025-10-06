@@ -847,10 +847,13 @@ def exportar_excel_validacao_grupo_necessidade(categoria: str, data_exportacao: 
             "CdFilial", 
             F.when(F.col("CdFilial") == 1401, 14).otherwise(F.col("CdFilial"))
         )
-        # Identificar se é CD ou Loja
+        # Identificar se é CD, Outlet ou Loja
+        # CD: NmPorteLoja NULL E não é Outlet (2528, 3604)
         .withColumn(
             "Tipo_Filial",
-            F.when(F.col("NmPorteLoja").isNull(), F.lit("CD")).otherwise(F.lit("LOJA"))
+            F.when(F.col("CdFilial").isin([2528, 3604]), F.lit("OUTLET"))
+            .when(F.col("NmPorteLoja").isNull(), F.lit("CD"))
+            .otherwise(F.lit("LOJA"))
         )
         .drop("NmPorteLoja")
     )
@@ -873,11 +876,13 @@ def exportar_excel_validacao_grupo_necessidade(categoria: str, data_exportacao: 
         )
     )
     
-    # Contar CDs e Lojas
+    # Contar CDs, Outlets e Lojas
     cds_count = df_online_agg.filter(F.col("Tipo_Filial") == "CD").count()
+    outlets_count = df_online_agg.filter(F.col("Tipo_Filial") == "OUTLET").count()
     lojas_count = df_online_agg.filter(F.col("Tipo_Filial") == "LOJA").count()
     print(f"  ✅ ONLINE agregado: {df_online_agg.count():,} registros (grupo + filial)")
     print(f"     • {cds_count:,} CDs")
+    print(f"     • {outlets_count:,} Outlets")
     print(f"     • {lojas_count:,} Lojas")
     
     # 3. Fazer FULL OUTER JOIN
@@ -892,8 +897,16 @@ def exportar_excel_validacao_grupo_necessidade(categoria: str, data_exportacao: 
         .fillna(0.00, subset=["Merecimento_OFFLINE", "Merecimento_ONLINE"])
         # Fill NULLs para Tipo_Filial (se só existe em OFFLINE, é LOJA)
         .fillna("LOJA", subset=["Tipo_Filial"])
-        # Ordenar: CDs primeiro, depois Lojas
-        .orderBy("Tipo_Filial", "grupo_de_necessidade", "CdFilial")
+        # Ordenar: CDs primeiro, depois Outlets, depois Lojas
+        # Criar coluna auxiliar para ordenação
+        .withColumn(
+            "ordem_tipo",
+            F.when(F.col("Tipo_Filial") == "CD", 1)
+            .when(F.col("Tipo_Filial") == "OUTLET", 2)
+            .otherwise(3)
+        )
+        .orderBy("ordem_tipo", "grupo_de_necessidade", "CdFilial")
+        .drop("ordem_tipo")
     )
     print(f"  ✅ Join: {df_joined.count():,} registros")
     
