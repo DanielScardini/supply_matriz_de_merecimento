@@ -231,6 +231,11 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
         df_filtrado = df_base.filter(~F.col("grupo_de_necessidade").isin(filtros_remocao))
         print(f"  • Remoção: {filtros_remocao}")
     
+    # Filtro especial para Linha Leve: apenas SKUs top 80% de PORTATEIS
+    if categoria == "DIRETORIA LINHA LEVE":
+        df_filtrado = df_filtrado.filter(F.col("CdSku").isin(skus_especies_top80))
+        print(f"  • Filtro TOP 80% PORTATEIS: {len(skus_especies_top80)} SKUs")
+    
     # Regra especial online: CdFilial 1401 → 14
     if canal == "online":
         df_filtrado = df_filtrado.withColumn(
