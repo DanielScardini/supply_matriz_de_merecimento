@@ -1173,7 +1173,18 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
     df_gdn = df_com_grupo.select("CdSku", "grupo_de_necessidade").distinct()
     
     # 2. Carregar todos os SKUs que existem na data especificada
-    print(f"📊 Passo 2: Carregando SKUs existentes em {data_calculo}...")
+    # ✅ Buscar a data mais recente disponível na tabela
+    max_dt_estoque = (
+        spark.table('dev_logistica_ds.estoquegerencial')
+        .select(F.max("dtatual").alias("max_dt"))
+        .collect()[0]["max_dt"]
+    )
+    
+    print(f"📊 Passo 2: Carregando SKUs existentes...")
+    print(f"  • Data solicitada: {data_calculo}")
+    print(f"  • Data mais recente na tabela: {max_dt_estoque}")
+    print(f"  • Usando data: {max_dt_estoque}")
+    
     df_skus_data = (
         spark.table('dev_logistica_ds.estoquegerencial')
         .select(
@@ -1183,7 +1194,7 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
             F.col("DsObrigatorio").alias("DsObrigatorio"),
             F.col("Cluster_Sugestao").alias('Cluster_Sugestao')
         )
-        .filter(F.col("DtAtual") == data_calculo)
+        .filter(F.col("DtAtual") == max_dt_estoque)  # ✅ Usar data mais recente
         .filter(F.col("CdSku").isNotNull())
         .filter(
             (F.col("DsObrigatorio") == 'S') | 
