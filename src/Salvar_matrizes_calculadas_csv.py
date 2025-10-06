@@ -620,8 +620,9 @@ def exportar_excel_validacao_grupo_necessidade(categoria: str, data_exportacao: 
     Exporta Excel de validação com ONLINE e OFFLINE lado a lado.
     
     Estrutura:
-    - Uma linha por (CdSku, CdFilial, grupo_de_necessidade)
-    - Colunas: CdSku, CdFilial, grupo_de_necessidade, Merecimento_OFFLINE, Merecimento_ONLINE
+    - Uma linha por (grupo_de_necessidade, CdFilial) - DISTINCT
+    - Merecimentos são SOMADOS por grupo + filial
+    - Colunas: grupo_de_necessidade, CdFilial, Merecimento_OFFLINE, Merecimento_ONLINE
     - Fill com 0.00 em merecimentos faltantes
     - Exportado em pasta 'validacao'
     
@@ -664,6 +665,14 @@ def exportar_excel_validacao_grupo_necessidade(categoria: str, data_exportacao: 
     else:
         print(f"  ✅ OFFLINE: {df_offline.count():,} registros")
     
+    # Agregar por grupo_de_necessidade + CdFilial (soma merecimentos)
+    df_offline_agg = (
+        df_offline
+        .groupBy("grupo_de_necessidade", "CdFilial")
+        .agg(F.sum("Merecimento_OFFLINE").alias("Merecimento_OFFLINE"))
+    )
+    print(f"  ✅ OFFLINE agregado: {df_offline_agg.count():,} registros (grupo + filial)")
+    
     # 2. Carregar dados ONLINE com grupo_de_necessidade
     print("\n🔄 Carregando matriz ONLINE...")
     tabela_online = TABELAS_MATRIZ_MERECIMENTO[categoria]["online"]
@@ -688,18 +697,26 @@ def exportar_excel_validacao_grupo_necessidade(categoria: str, data_exportacao: 
     else:
         print(f"  ✅ ONLINE: {df_online.count():,} registros")
     
+    # Agregar por grupo_de_necessidade + CdFilial (soma merecimentos)
+    df_online_agg = (
+        df_online
+        .groupBy("grupo_de_necessidade", "CdFilial")
+        .agg(F.sum("Merecimento_ONLINE").alias("Merecimento_ONLINE"))
+    )
+    print(f"  ✅ ONLINE agregado: {df_online_agg.count():,} registros (grupo + filial)")
+    
     # 3. Fazer FULL OUTER JOIN
     print("\n🔗 Fazendo outer join...")
     df_joined = (
-        df_offline.join(
-            df_online,
-            on=["CdSku", "CdFilial", "grupo_de_necessidade"],
+        df_offline_agg.join(
+            df_online_agg,
+            on=["grupo_de_necessidade", "CdFilial"],
             how="outer"
         )
         # Fill NULLs com 0.00
         .fillna(0.00, subset=["Merecimento_OFFLINE", "Merecimento_ONLINE"])
         # Ordenar
-        .orderBy("grupo_de_necessidade", "CdSku", "CdFilial")
+        .orderBy("grupo_de_necessidade", "CdFilial")
     )
     print(f"  ✅ Join: {df_joined.count():,} registros")
     
