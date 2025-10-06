@@ -1165,17 +1165,36 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
     print(f"🚀 Criando esqueleto da matriz completa para data: {data_calculo}")
     print("=" * 80)
     
-    # 1. Carregar todas as filiais ativas
+    # 1. Carregar todas as filiais ativas (LOJAS)
     print("📊 Passo 1: Carregando todas as filiais ativas...")
-    df_filiais = (
+    df_lojas = (
         spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
         .select("CdFilial", "NmRegiaoGeografica", "NmPorteLoja")
         .distinct()
         .filter(F.col("CdFilial").isNotNull())
     )
     
+    lojas_count = df_lojas.count()
+    print(f"  ✅ {lojas_count:,} lojas carregadas")
+    
+    # 1.1. Carregar CDs da base online (NmPorteLoja é NULL para CDs)
+    print("📊 Passo 1.1: Carregando CDs da base ONLINE...")
+    df_cds = (
+        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4_online')
+        .select("CdFilial", "NmRegiaoGeografica", "NmPorteLoja")
+        .filter(F.col("NmPorteLoja").isNull())  # CDs têm NmPorteLoja NULL
+        .filter(F.col("CdFilial").isNotNull())
+        .distinct()
+    )
+    
+    cds_count = df_cds.count()
+    print(f"  ✅ {cds_count:,} CDs carregados")
+    
+    # 1.2. União de lojas + CDs
+    df_filiais = df_lojas.union(df_cds).distinct()
+    
     filiais_count = df_filiais.count()
-    print(f"  ✅ {filiais_count:,} filiais carregadas")
+    print(f"  ✅ Total: {filiais_count:,} filiais (lojas + CDs)")
 
     df_gdn = df_com_grupo.select("CdSku", "grupo_de_necessidade").distinct()
     
