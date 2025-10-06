@@ -1174,10 +1174,21 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
     df_gdn = df_com_grupo.select("CdSku", "grupo_de_necessidade").distinct()
     
     # 2. Carregar todos os SKUs que existem na data especificada
-    print(f"📊 Passo 2: Carregando SKUs existentes em {data_calculo}...")
+    # ✅ Buscar a data mais recente disponível na tabela
+    max_dt_base = (
+        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4_online')
+        .select(F.max("DtAtual").alias("max_dt"))
+        .collect()[0]["max_dt"]
+    )
+    
+    print(f"📊 Passo 2: Carregando SKUs existentes...")
+    print(f"  • Data solicitada: {data_calculo}")
+    print(f"  • Data mais recente na tabela: {max_dt_base}")
+    print(f"  • Usando data: {max_dt_base}")
+    
     df_skus_data = (
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4_online')
-        .filter(F.col("DtAtual") == data_calculo)
+        .filter(F.col("DtAtual") == max_dt_base)  # ✅ Usar data mais recente
         .select("CdSku")
         .distinct()
         .join(df_gdn, on="CdSku", how="inner")
