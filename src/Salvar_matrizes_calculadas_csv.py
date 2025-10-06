@@ -39,6 +39,79 @@ print(f"📅 Data fim (+60 dias): {DATA_FIM.strftime('%Y-%m-%d')} → {DATA_FIM_
 
 # COMMAND ----------
 
+dt_inicio = "2025-08-01"
+dt_fim = "2025-10-01"
+
+df_demanda = (
+  spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
+  .filter(F.col("NmSetorGerencial") == "PORTATEIS")
+  .filter(F.col("DtAtual") >= dt_inicio)
+  .filter(F.col("DtAtual") < dt_fim)
+  .groupBy("NmEspecieGerencial")
+  .agg(
+    F.sum(F.col("QtMercadoria")).alias("QtDemanda"),
+    F.sum(F.col("Receita")).alias("Receita")
+  )
+
+)
+
+# calcular totais com window
+w_total = Window.rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing)
+
+# window para cumulativo
+w_cum = Window.orderBy(F.col("PercDemanda").desc()).rowsBetween(Window.unboundedPreceding, 0)
+
+df_demanda = (
+    df_demanda
+    .withColumn("TotalDemanda", F.sum("QtDemanda").over(w_total))
+    .withColumn("TotalReceita", F.sum("Receita").over(w_total))
+    .withColumn("PercDemanda", F.round((F.col("QtDemanda") / F.col("TotalDemanda")) * 100, 0))
+    .withColumn("PercReceita", F.round((F.col("Receita") / F.col("TotalReceita")) * 100, 0))
+    .drop("TotalDemanda", "TotalReceita")
+    .withColumn("PercDemandaCumulativo", F.sum("PercDemanda").over(w_cum))
+    .withColumn("PercReceitaCumulativo", F.sum("PercReceita").over(w_cum))
+
+)
+
+especies_top80 = (
+    df_demanda
+    .filter(F.col("PercDemandaCumulativo") <= 80)
+    .select("NmEspecieGerencial")
+    .rdd.flatMap(lambda x: x)
+    .collect()
+)
+
+
+print(especies_top80)
+
+
+especies_boas = [
+    "LIQUIDIFICADORES 350 A 1000 W",
+    "FERROS DE PASSAR A SECO",
+    "LIQUIDIFICADORES ACIMA 1001 W.",
+    "PANELAS ELETRICAS DE ARROZ",
+    "FRITADEIRA ELETRICA (CAPSULA)",
+    "FERROS PAS. ROUPA VAPOR/SPRAY",
+    "CAFETEIRA ELETRICA (FILTRO)"
+]
+
+skus_especies_top80 = (
+    spark.table('data_engineering_prd.app_venda.mercadoria')
+    .select(
+        F.col("CdSkuLoja").alias("CdSku"),
+        F.col("NmEspecieGerencial")
+    )
+    .filter(F.col("NmEspecieGerencial").isin(especies_top80))
+    .filter(F.col("CdSku") != -1)
+    .select("CdSku")
+    .rdd.flatMap(lambda x: x)
+    .collect()
+)
+
+df_demanda.filter(F.col("NmEspecieGerencial").isin(especies_top80)).agg(F.sum("PercDemanda")).display()
+
+# COMMAND ----------
+
 # Tabelas por categoria
 TABELAS_MATRIZ_MERECIMENTO = {
     "DIRETORIA DE TELAS": {
@@ -52,8 +125,8 @@ TABELAS_MATRIZ_MERECIMENTO = {
         "grupo_apelido": "telefonia"
     },
     "DIRETORIA LINHA LEVE": {
-        "offline": "databox.bcg_comum.supply_matriz_merecimento_LINHA_LEVE_teste0110",
-        "online": "databox.bcg_comum.supply_matriz_merecimento_LINHA_LEVE_online_teste0110",
+        "offline": "databox.bcg_comum.supply_matriz_merecimento_LINHA_LEVE_teste0410",
+        "online": "databox.bcg_comum.supply_matriz_merecimento_LINHA_LEVE_online_teste0310",
         "grupo_apelido": "linha_leve"
     },
 }

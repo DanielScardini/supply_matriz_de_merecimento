@@ -267,7 +267,7 @@ df_proporcao_factual = (
     .dropna(subset='grupo_de_necessidade')
     .filter(F.col("NmSetorGerencial") == 'PORTATEIS')
     .filter(~F.col("grupo_de_necessidade").isin('SEM_GN', 'FORA DE LINHA'))
-    .filter(F.col("CdSku").isin(skus_especies_top80))
+    #.filter(F.col("CdSku").isin(skus_especies_top80))
     .groupBy('CdFilial', 'grupo_de_necessidade')
     .agg(
         F.round(F.sum('QtDemanda'), 0).alias('QtDemanda'),
@@ -363,7 +363,7 @@ def add_smape_components(df, pred_col, real_col=COL_REAL, peso_col=COL_PESO, lab
 
 # === Lista de colunas de predição alvo ===
 pred_cols_base = list(colunas)  # ["Merecimento_Final_Media90_...", ...]
-extras = ["PercMatrizNeogrid_median"]  # , "PercMatrizNeogrid_median"]
+extras = ["PercMatrizNeogrid_mean"]  # , "PercMatrizNeogrid_median"]
 
 def existing_pred_cols(df, base_cols, maybe_cols):
     present = [c for c in maybe_cols if c in df.columns]
@@ -373,7 +373,7 @@ def existing_pred_cols(df, base_cols, maybe_cols):
 metrics_all = None  # DataFrame final com métricas
 
 for categoria in categorias_teste:
-    df_cat = df_acuracia[categoria].filter(~F.col('grupo_de_necessidade').isin(gdn_ruim))
+    df_cat = df_acuracia[categoria]#.filter(~F.col('grupo_de_necessidade').isin(gdn_ruim))
 
     pred_cols = existing_pred_cols(df_cat, pred_cols_base, extras)
 
