@@ -888,9 +888,12 @@ def criar_de_para_filial_cd() -> DataFrame:
 
     de_para_filial_cd = (
         df_base
-        .select("cdfilial", "cd_secundario")
+        .select(
+            F.col("cdfilial").alias("CdFilial"),  # ✅ Renomear para CamelCase
+            "cd_secundario"
+        )
         .distinct()
-        .filter(F.col("cdfilial").isNotNull())
+        .filter(F.col("CdFilial").isNotNull())
         .withColumn(
             "cd_vinculo",
             F.coalesce(F.col("cd_secundario"), F.lit("SEM_CD"))
@@ -930,7 +933,7 @@ def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) ->
     medida_cd = f"MediaAparada{JANELA_CD_MERECIMENTO}_Qt_venda_sem_ruptura"
     
     de_para_filial_cd = criar_de_para_filial_cd()
-    df_com_cd = df_data_calculo.join(de_para_filial_cd, on="cdfilial", how="left")
+    df_com_cd = df_data_calculo.join(de_para_filial_cd, on="CdFilial", how="left")  # ✅ CamelCase
     
     # ✅ AGREGAÇÃO COM PROTEÇÃO DUPLA:
     df_merecimento_cd = (
@@ -1022,7 +1025,7 @@ def calcular_merecimento_interno_cd(df: DataFrame, data_calculo: str, categoria:
     
     # Join com de-para filial-CD
     de_para_filial_cd = criar_de_para_filial_cd()
-    df_com_cd = df_data_calculo.join(de_para_filial_cd, on="cdfilial", how="left")
+    df_com_cd = df_data_calculo.join(de_para_filial_cd, on="CdFilial", how="left")  # ✅ CamelCase
     
     # Agregar no nível filial × grupo_de_necessidade (somando os SKUs)
     aggs = [F.sum(F.coalesce(F.col(m), F.lit(0))).alias(m) for m in medidas]
