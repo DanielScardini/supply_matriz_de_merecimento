@@ -839,7 +839,7 @@ def exportar_excel_validacao_grupo_necessidade(categoria: str, data_exportacao: 
     df_online = (
         spark.table(tabela_online)
         .select(
-            "CdSku", "CdFilial", "grupo_de_necessidade",
+            "CdSku", "CdFilial", "grupo_de_necessidade", "NmPorteLoja",
             (100 * F.col(coluna_merecimento)).alias("Merecimento_ONLINE")
         )
         # Aplicar regra CdFilial 1401 → 14
@@ -847,6 +847,12 @@ def exportar_excel_validacao_grupo_necessidade(categoria: str, data_exportacao: 
             "CdFilial", 
             F.when(F.col("CdFilial") == 1401, 14).otherwise(F.col("CdFilial"))
         )
+        # Identificar se é CD ou Loja
+        .withColumn(
+            "Tipo_Filial",
+            F.when(F.col("NmPorteLoja").isNull(), F.lit("CD")).otherwise(F.lit("LOJA"))
+        )
+        .drop("NmPorteLoja")
     )
     
     # Filtro especial para Linha Leve: apenas SKUs top 80% de PORTATEIS
@@ -857,12 +863,22 @@ def exportar_excel_validacao_grupo_necessidade(categoria: str, data_exportacao: 
         print(f"  ✅ ONLINE: {df_online.count():,} registros")
     
     # Agregar por grupo_de_necessidade + CdFilial (soma merecimentos)
+    # Manter Tipo_Filial usando first()
     df_online_agg = (
         df_online
         .groupBy("grupo_de_necessidade", "CdFilial")
-        .agg(F.sum("Merecimento_ONLINE").alias("Merecimento_ONLINE"))
+        .agg(
+            F.sum("Merecimento_ONLINE").alias("Merecimento_ONLINE"),
+            F.first("Tipo_Filial").alias("Tipo_Filial")
+        )
     )
+    
+    # Contar CDs e Lojas
+    cds_count = df_online_agg.filter(F.col("Tipo_Filial") == "CD").count()
+    lojas_count = df_online_agg.filter(F.col("Tipo_Filial") == "LOJA").count()
     print(f"  ✅ ONLINE agregado: {df_online_agg.count():,} registros (grupo + filial)")
+    print(f"     • {cds_count:,} CDs")
+    print(f"     • {lojas_count:,} Lojas")
     
     # 3. Fazer FULL OUTER JOIN
     print("\n🔗 Fazendo outer join...")
@@ -872,16 +888,29 @@ def exportar_excel_validacao_grupo_necessidade(categoria: str, data_exportacao: 
             on=["grupo_de_necessidade", "CdFilial"],
             how="outer"
         )
-        # Fill NULLs com 0.00
+        # Fill NULLs com 0.00 para merecimentos
         .fillna(0.00, subset=["Merecimento_OFFLINE", "Merecimento_ONLINE"])
-        # Ordenar
-        .orderBy("grupo_de_necessidade", "CdFilial")
+        # Fill NULLs para Tipo_Filial (se só existe em OFFLINE, é LOJA)
+        .fillna("LOJA", subset=["Tipo_Filial"])
+        # Ordenar: CDs primeiro, depois Lojas
+        .orderBy("Tipo_Filial", "grupo_de_necessidade", "CdFilial")
     )
     print(f"  ✅ Join: {df_joined.count():,} registros")
+    
+    # Contar CDs que só aparecem no ONLINE
+    cds_apenas_online = df_joined.filter(
+        (F.col("Tipo_Filial") == "CD") & (F.col("Merecimento_OFFLINE") == 0.00)
+    ).count()
+    if cds_apenas_online > 0:
+        print(f"  📊 {cds_apenas_online:,} CDs aparecem APENAS no ONLINE (Merecimento_OFFLINE = 0.00)")
     
     # 4. Converter para Pandas e salvar Excel
     print("\n💾 Salvando Excel...")
     df_pandas = df_joined.toPandas()
+    
+    # Reordenar colunas para melhor visualização
+    colunas_ordenadas = ["grupo_de_necessidade", "CdFilial", "Tipo_Filial", "Merecimento_OFFLINE", "Merecimento_ONLINE"]
+    df_pandas = df_pandas[colunas_ordenadas]
     
     # Arredondar merecimentos para 3 casas decimais
     df_pandas["Merecimento_OFFLINE"] = df_pandas["Merecimento_OFFLINE"].round(3)
