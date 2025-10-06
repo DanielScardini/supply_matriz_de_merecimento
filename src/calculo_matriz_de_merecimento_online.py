@@ -1148,9 +1148,12 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
     """
     Cria esqueleto completo da matriz com cross join entre todas as filiais e SKUs.
     
+    ⚠️  IMPORTANTE: Esta função agora usa a MESMA LÓGICA do cálculo OFFLINE
+    para garantir consistência entre os dois canais.
+    
     Processo:
     1. Pega todas as filiais de roteirizacaolojaativa
-    2. Pega todos os SKUs que existem em df_base no dia especificado
+    2. Pega todos os SKUs OBRIGATÓRIOS ou SUGERIDOS de estoquegerencial
     3. Faz cross join entre filiais e SKUs
     4. Adiciona grupo_de_necessidade para cada SKU
     5. Retorna esqueleto pronto para join com merecimento final
@@ -1167,8 +1170,8 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
     # 1. Carregar todas as filiais ativas
     print("📊 Passo 1: Carregando todas as filiais ativas...")
     df_filiais = (
-        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4_online')
-        .select("CdFilial")
+        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+        .select("CdFilial", "NmRegiaoGeografica", "NmPorteLoja")
         .distinct()
         .filter(F.col("CdFilial").isNotNull())
     )
@@ -1180,29 +1183,41 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
     
     # 2. Carregar todos os SKUs que existem na data especificada
     # ✅ Buscar a data mais recente disponível na tabela
-    max_dt_base = (
-        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4_online')
-        .select(F.max("DtAtual").alias("max_dt"))
+    max_dt_estoque = (
+        spark.table('dev_logistica_ds.estoquegerencial')
+        .select(F.max("dtatual").alias("max_dt"))
         .collect()[0]["max_dt"]
     )
     
     print(f"📊 Passo 2: Carregando SKUs existentes...")
     print(f"  • Data solicitada: {data_calculo}")
-    print(f"  • Data mais recente na tabela: {max_dt_base}")
-    print(f"  • Usando data: {max_dt_base}")
+    print(f"  • Data mais recente na tabela: {max_dt_estoque}")
+    print(f"  • Usando data: {max_dt_estoque}")
     
+    # ✅ FILTRO CRÍTICO: Apenas SKUs obrigatórios ou sugeridos (igual ao OFFLINE)
     df_skus_data = (
-        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4_online')
-        .filter(F.col("DtAtual") == max_dt_base)  # ✅ Usar data mais recente
+        spark.table('dev_logistica_ds.estoquegerencial')
+        .select(
+            F.col("cdfilial").cast("int").alias("CdFilial"),
+            F.col("CdSku").cast("string").alias("CdSku"),
+            F.col("dtatual").cast("date").alias("DtAtual"),
+            F.col("DsObrigatorio").alias("DsObrigatorio"),
+            F.col("Cluster_Sugestao").alias('Cluster_Sugestao')
+        )
+        .filter(F.col("DtAtual") == max_dt_estoque)  # ✅ Usar data mais recente
+        .filter(F.col("CdSku").isNotNull())
+        .filter(
+            (F.col("DsObrigatorio") == 'S') | 
+            (F.col("Cluster_Sugestao") == 1)
+        )
         .select("CdSku")
         .distinct()
         .join(df_gdn, on="CdSku", how="inner")
-        .filter(F.col("CdSku").isNotNull())
         .filter(F.col("grupo_de_necessidade").isNotNull())
     )
     
     skus_count = df_skus_data.count()
-    print(f"  ✅ {skus_count:,} SKUs únicos encontrados")
+    print(f"  ✅ {skus_count:,} SKUs únicos encontrados (obrigatórios + sugeridos)")
     
     # 3. Cross join entre filiais e SKUs
     print("📊 Passo 3: Criando cross join filiais × SKUs...")
@@ -1220,10 +1235,14 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
         "CdFilial",
         "CdSku", 
         "grupo_de_necessidade",
-       # "NmRegiaoGeografica",
-        #"NmPorteLoja"
+        "NmRegiaoGeografica",
+        "NmPorteLoja"
     )
 
+    print("=" * 80)
+    print(f"✅ Esqueleto criado com {esqueleto_count:,} registros")
+    print(f"   ({filiais_count:,} filiais × {skus_count:,} SKUs)")
+    print("=" * 80)
 
     return df_esqueleto_final
 
