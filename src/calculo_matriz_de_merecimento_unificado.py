@@ -1026,7 +1026,7 @@ def calcular_merecimento_interno_cd(df: DataFrame, data_calculo: str, categoria:
     
     # Join com de-para filial-CD
     de_para_filial_cd = criar_de_para_filial_cd()
-    df_com_cd = df_data_calculo.join(de_para_filial_cd, on="cdfilial", how="left")
+    df_com_cd = df_data_calculo.join(de_para_filial_cd, on="CdFilial", how="left")  # ✅ CamelCase
     
     # Agregar no nível filial × grupo_de_necessidade (somando os SKUs)
     aggs = [F.sum(F.coalesce(F.col(m), F.lit(0))).alias(m) for m in medidas]
