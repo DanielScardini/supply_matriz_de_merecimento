@@ -176,12 +176,13 @@ def formatar_codigo_loja(cdfilial: int, is_cd: bool) -> str:
     
     Regras:
     - Loja (is_cd=False): 0021_0XXXX (5 dígitos com zeros à esquerda)
-    - CD (is_cd=True): 0099_0XXXX (5 dígitos com zeros à esquerda)
+    - CD/Entreposto (is_cd=True): 0099_0XXXX (5 dígitos com zeros à esquerda)
     
     Exemplos:
-    - formatar_codigo_loja(1234, False) → "0021_01234"
-    - formatar_codigo_loja(7, False) → "0021_00007"
-    - formatar_codigo_loja(1401, True) → "0099_01401"
+    - formatar_codigo_loja(1234, False) → "0021_01234" (loja)
+    - formatar_codigo_loja(7, False) → "0021_00007" (loja)
+    - formatar_codigo_loja(1401, True) → "0099_01401" (CD)
+    - formatar_codigo_loja(1501, True) → "0099_01501" (Entreposto)
     """
     prefixo = "0099" if is_cd else "0021"
     return f"{prefixo}_{cdfilial:05d}"
