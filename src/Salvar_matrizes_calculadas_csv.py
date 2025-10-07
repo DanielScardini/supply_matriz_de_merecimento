@@ -491,19 +491,57 @@ def normalizar_para_100_exato(df: DataFrame) -> DataFrame:
 
 def adicionar_informacoes_filial(df: DataFrame) -> DataFrame:
     """
-    Retorna DataFrame sem modificações (LOJA e CD removidos).
+    Adiciona informações de filiais e cria coluna LOJA formatada.
+    
+    Lógica LOJA:
+    - OFFLINE: sempre 0021_0XXXX
+    - ONLINE + NmPorteLoja NULL: 0099_0XXXX (é CD)
+    - ONLINE + NmPorteLoja NOT NULL: 0021_0XXXX (é loja)
     
     Args:
         df: DataFrame com CdFilial, CANAL
         
     Returns:
-        DataFrame sem modificações
+        DataFrame com coluna LOJA adicionada
     """
-    print("🔄 Passando dados sem modificações...")
+    print("🔄 Adicionando informações de filiais...")
     
-    print(f"✅ Dados mantidos: {df.count():,} registros")
+    # Join com dados de filiais
+    df_filiais = (
+        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+        .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica")
+    )
     
-    return df
+    df_com_filiais = df.join(df_filiais, on="CdFilial", how="left")
+    
+    # Criar coluna is_cd
+    df_com_tipo = (
+        df_com_filiais
+        .withColumn(
+            "is_cd",
+            F.when(
+                (F.col("CANAL") == "ONLINE") & (F.col("NmPorteLoja").isNull()),
+                F.lit(True)
+            ).otherwise(F.lit(False))
+        )
+    )
+    
+    # UDF para formatar loja
+    from pyspark.sql.types import StringType
+    formatar_loja_udf = F.udf(
+        lambda cdfilial, is_cd: formatar_codigo_loja(int(cdfilial), bool(is_cd)),
+        StringType()
+    )
+    
+    df_com_loja = (
+        df_com_tipo
+        .withColumn("LOJA", formatar_loja_udf(F.col("CdFilial"), F.col("is_cd")))
+        .drop("is_cd", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica")
+    )
+    
+    print(f"✅ Informações adicionadas: {df_com_loja.count():,} registros")
+    
+    return df_com_loja
 
 # COMMAND ----------
 
@@ -511,10 +549,10 @@ def criar_dataframe_final(df: DataFrame) -> DataFrame:
     """
     Cria DataFrame final com todas as colunas no formato do sistema.
     
-    Colunas finais: SKU, CANAL, CdFilial, DATA FIM, PERCENTUAL
+    Colunas finais: SKU, CANAL, LOJA, DATA FIM, PERCENTUAL
     
     Args:
-        df: DataFrame com CdSku, CANAL, CdFilial, PERCENTUAL
+        df: DataFrame com CdSku, CANAL, LOJA, PERCENTUAL
         
     Returns:
         DataFrame formatado
@@ -526,8 +564,8 @@ def criar_dataframe_final(df: DataFrame) -> DataFrame:
         .withColumn("SKU", F.col("CdSku").cast("string"))
         .withColumn("DATA FIM", F.lit(DATA_FIM_INT))
         .withColumn("PERCENTUAL", F.round(F.col("PERCENTUAL"), 3).cast("double"))
-        .select("SKU", "CANAL", "CdFilial", "DATA FIM", "PERCENTUAL")
-        .orderBy("SKU", "CdFilial", "CANAL")
+        .select("SKU", "CANAL", "LOJA", "DATA FIM", "PERCENTUAL")
+        .orderBy("SKU", "LOJA", "CANAL")
     )
     
     print(f"✅ DataFrame final criado: {df_final.count():,} registros")
@@ -538,9 +576,9 @@ def criar_dataframe_final(df: DataFrame) -> DataFrame:
 
 def dividir_em_arquivos(df: DataFrame, max_linhas: int = MAX_LINHAS_POR_ARQUIVO) -> List[DataFrame]:
     """
-    Divide DataFrame em arquivos garantindo que SKU-CdFilial fique junto (ambos canais).
+    Divide DataFrame em arquivos garantindo que SKU-LOJA fique junto (ambos canais).
     
-    Regra: Cada SKU-CdFilial tem 2 registros (ONLINE + OFFLINE) que devem ficar no mesmo arquivo.
+    Regra: Cada SKU-LOJA tem 2 registros (ONLINE + OFFLINE) que devem ficar no mesmo arquivo.
     
     Args:
         df: DataFrame completo
@@ -551,8 +589,8 @@ def dividir_em_arquivos(df: DataFrame, max_linhas: int = MAX_LINHAS_POR_ARQUIVO)
     """
     print(f"🔄 Dividindo em arquivos (máx {max_linhas:,} linhas cada)...")
     
-    # Criar chave única por SKU-CdFilial
-    df_com_chave = df.withColumn("chave_particao", F.concat(F.col("SKU"), F.lit("_"), F.col("CdFilial")))
+    # Criar chave única por SKU-LOJA
+    df_com_chave = df.withColumn("chave_particao", F.concat(F.col("SKU"), F.lit("_"), F.col("LOJA")))
     
     # Contar registros por chave
     df_contagem = (
