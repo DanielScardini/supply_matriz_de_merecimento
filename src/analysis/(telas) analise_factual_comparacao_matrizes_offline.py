@@ -35,8 +35,8 @@ GRUPOS_TESTE = [
     'TV 50 ALTO P', 
     'TV 55 ALTO P',
      'TV 43 PP',
-     'TV 75 PP',
-     'TV 75 ALTO P'
+     #'TV 75 PP',
+     #'TV 75 ALTO P'
      ]
 print(GRUPOS_TESTE)
 
@@ -152,8 +152,8 @@ from pyspark.sql import functions as F
 from pyspark.sql import Window
 
 # === Janela dinâmica: últimos 30 dias até ontem ===
-fim_janela = F.date_sub(F.current_date(), 1)
-inicio_janela = F.date_sub(fim_janela, 29)
+fim_janela = F.date_sub(F.current_date(), 2)
+inicio_janela = F.date_sub(fim_janela, 47)
 
 # Log das datas (yyyy-MM-dd)
 _row = (

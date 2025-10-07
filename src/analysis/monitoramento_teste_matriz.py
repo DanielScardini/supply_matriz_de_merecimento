@@ -23,13 +23,21 @@ hoje = datetime.now() - timedelta(days=1)
 hoje_str = hoje.strftime("%Y-%m-%d")
 hoje_int = int(hoje.strftime("%Y%m%d"))
 
-GRUPOS_TESTE = ['Telef pp', 'TV 50 ALTO P', 'TV 55 ALTO P']
+GRUPOS_TESTE = [
+    "Telef pp",
+    "TV 50 ALTO P",
+    "TV 55 ALTO P",
+    "TV 43 PP",
+    "Telef Alto",
+    "Telef Medio 256GB",
+    "Telef Medio 128GB"+
+]
 print(GRUPOS_TESTE)
 
 data_inicio = "2025-09-01"
 fim_baseline = "2025-09-08"
 
-inicio_teste = "2025-09-08"
+inicio_teste = "2025-09-25"
 
 categorias_teste = ['TELAS', 'TELEFONIA']
 
@@ -1437,271 +1445,6 @@ for categoria in categorias_teste:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Comparação Visual - DDE Médio por Cortes
-
-# COMMAND ----------
-
-# -*- coding: utf-8 -*-
-from pyspark.sql import functions as F
-import plotly.express as px
-import plotly.graph_objects as go
-
-def create_dde_comparison_visualizations(df_estoque_loja_porte_regiao, df_comparacao, categorias_teste):
-    """
-    Cria visualizações comparativas de DDE Médio para os 4 cortes.
-    Ajustes:
-      - Barras bem cheias (bargap/bargroupgap pequenos)
-      - Porte: cores por porte (mesma cor para teste/controle)
-      - Região: cores por região (mesma cor para teste/controle)
-      - Delta Merecimento: apenas TESTE, com palette por bucket
-    """
-    for categoria in categorias_teste:
-        print(f"\n=== COMPARAÇÃO VISUAL DDE MÉDIO - {categoria} ===")
-        create_tudo_cut_visualization(df_estoque_loja_porte_regiao[categoria], categoria)
-        create_porte_cut_visualization(df_estoque_loja_porte_regiao[categoria], categoria)
-        create_regiao_cut_visualization(df_estoque_loja_porte_regiao[categoria], categoria)
-        create_delta_merecimento_cut_visualization(
-            df_estoque_loja_porte_regiao[categoria],
-            df_comparacao[categoria],
-            categoria
-        )
-
-def create_tudo_cut_visualization(df_estoque, categoria):
-    # Agregar por grupo e período
-    df_base = (
-        df_estoque
-        .groupBy("grupo", "periodo_analise")
-        .agg(F.round(F.median("DDE"), 1).alias("DDE_medio"))
-    )
-    # Pivot
-    df_pivot = (
-        df_base.groupBy("grupo")
-        .pivot("periodo_analise").agg(F.first("DDE_medio")).fillna(0.0)
-    )
-    df_pandas = df_pivot.toPandas()
-
-    # Valores com fallback 0.0
-    def get_val(g, col):
-        try:
-            return float(df_pandas[df_pandas["grupo"]==g][col].iloc[0]) if col in df_pandas.columns else 0.0
-        except Exception:
-            return 0.0
-
-    teste_baseline   = get_val("teste", "baseline")
-    teste_piloto     = get_val("teste", "piloto")
-    controle_baseline= get_val("controle", "baseline")
-    controle_piloto  = get_val("controle", "piloto")
-
-    delta_teste    = round(teste_piloto - teste_baseline, 1)
-    delta_controle = round(controle_piloto - controle_baseline, 1)
-    diff_in_diff   = round(delta_teste - delta_controle, 1)
-
-    # Gráfico
-    fig = go.Figure()
-    colors = {'teste': ['#6BAED6', '#2171B5'], 'controle': ['#FDAE6B', '#E6550D']}
-
-    fig.add_trace(go.Bar(name='Teste - Baseline',   x=['Teste'],    y=[teste_baseline],
-                         marker_color=colors['teste'][0], opacity=0.85,
-                         text=[f"{teste_baseline:.1f}"], textposition='outside'))
-    fig.add_trace(go.Bar(name='Teste - Piloto',     x=['Teste'],    y=[teste_piloto],
-                         marker_color=colors['teste'][1], opacity=1.0,
-                         text=[f"{teste_piloto:.1f}"], textposition='outside'))
-    fig.add_trace(go.Bar(name='Controle - Baseline',x=['Controle'], y=[controle_baseline],
-                         marker_color=colors['controle'][0], opacity=0.85,
-                         text=[f"{controle_baseline:.1f}"], textposition='outside'))
-    fig.add_trace(go.Bar(name='Controle - Piloto',  x=['Controle'], y=[controle_piloto],
-                         marker_color=colors['controle'][1], opacity=1.0,
-                         text=[f"{controle_piloto:.1f}"], textposition='outside'))
-
-    fig.update_layout(
-        title=f"DDE Médio - Corte Tudo - {categoria}<br><sub>Δ Teste: {delta_teste:+.1f} | Δ Controle: {delta_controle:+.1f} | DiD: {diff_in_diff:+.1f}</sub>",
-        xaxis_title="Grupo", yaxis_title="DDE Médio (dias)",
-        barmode='group', paper_bgcolor="#F7F7F7", plot_bgcolor="#F7F7F7",
-        height=480, font=dict(size=12),
-        bargap=0.02, bargroupgap=0.01
-    )
-    fig.show()
-
-def create_porte_cut_visualization(df_estoque, categoria):
-    # Agregar
-    df_base = (
-        df_estoque
-        .groupBy("grupo", "periodo_analise", "NmPorteLoja")
-        .agg(F.round(F.median("DDE"), 1).alias("DDE_medio"))
-        .dropna(subset=["NmPorteLoja"])
-        .filter(F.col("NmPorteLoja") != '-')
-    )
-    df_pivot = (
-        df_base.groupBy("grupo","NmPorteLoja")
-        .pivot("periodo_analise").agg(F.first("DDE_medio")).fillna(0.0)
-    )
-    df_pandas = df_pivot.toPandas()
-
-    fig = go.Figure()
-    portes = sorted(df_pandas['NmPorteLoja'].unique())
-    palette = px.colors.qualitative.Plotly
-    color_map = {p: palette[i % len(palette)] for i, p in enumerate(portes)}
-
-    def safe_val(df, g, col):
-        try:
-            return float(df[df["grupo"]==g][col].iloc[0]) if col in df.columns else 0.0
-        except Exception:
-            return 0.0
-
-    for p in portes:
-        d = df_pandas[df_pandas['NmPorteLoja']==p]
-        tb = safe_val(d,"teste","baseline"); tp = safe_val(d,"teste","piloto")
-        cb = safe_val(d,"controle","baseline"); cp = safe_val(d,"controle","piloto")
-
-        # Teste
-        fig.add_trace(go.Bar(name=f'{p} - Teste B', x=[f'{p} - Teste'], y=[tb],
-                             marker_color=color_map[p], opacity=0.75,
-                             text=[f"{tb:.1f}"], textposition='outside', showlegend=False))
-        fig.add_trace(go.Bar(name=f'{p} - Teste P', x=[f'{p} - Teste'], y=[tp],
-                             marker_color=color_map[p], opacity=1.0,
-                             text=[f"{tp:.1f}"], textposition='outside', showlegend=False))
-        # Controle
-        fig.add_trace(go.Bar(name=f'{p} - Controle B', x=[f'{p} - Controle'], y=[cb],
-                             marker_color=color_map[p], opacity=0.75,
-                             text=[f"{cb:.1f}"], textposition='outside', showlegend=False))
-        fig.add_trace(go.Bar(name=f'{p} - Controle P', x=[f'{p} - Controle'], y=[cp],
-                             marker_color=color_map[p], opacity=1.0,
-                             text=[f"{cp:.1f}"], textposition='outside', showlegend=False))
-
-    fig.update_layout(
-        title=f"DDE Médio - Corte Porte - {categoria}",
-        xaxis_title="Porte da Loja", yaxis_title="DDE Médio (dias)",
-        barmode='group', paper_bgcolor="#F7F7F7", plot_bgcolor="#F7F7F7",
-        height=520, font=dict(size=12), xaxis_tickangle=-45,
-        bargap=0.02, bargroupgap=0.01
-    )
-    fig.show()
-
-def create_regiao_cut_visualization(df_estoque, categoria):
-    # Agregar
-    df_base = (
-        df_estoque
-        .groupBy("grupo", "periodo_analise", "NmRegiaoGeografica")
-        .agg(F.round(F.median("DDE"), 1).alias("DDE_medio"))
-        .dropna(subset=["NmRegiaoGeografica"])
-    )
-    df_pivot = (
-        df_base.groupBy("grupo","NmRegiaoGeografica")
-        .pivot("periodo_analise").agg(F.first("DDE_medio")).fillna(0.0)
-    )
-    df_pandas = df_pivot.toPandas()
-
-    fig = go.Figure()
-    regioes = sorted(df_pandas['NmRegiaoGeografica'].unique())
-    palette = px.colors.qualitative.Plotly
-    color_map = {r: palette[i % len(palette)] for i, r in enumerate(regioes)}
-
-    def safe_val(df, g, col):
-        try:
-            return float(df[df["grupo"]==g][col].iloc[0]) if col in df.columns else 0.0
-        except Exception:
-            return 0.0
-
-    for r in regioes:
-        d = df_pandas[df_pandas['NmRegiaoGeografica']==r]
-        tb = safe_val(d,"teste","baseline"); tp = safe_val(d,"teste","piloto")
-        cb = safe_val(d,"controle","baseline"); cp = safe_val(d,"controle","piloto")
-
-        # Teste
-        fig.add_trace(go.Bar(name=f'{r} - Teste B', x=[f'{r} - Teste'], y=[tb],
-                             marker_color=color_map[r], opacity=0.75,
-                             text=[f"{tb:.1f}"], textposition='outside', showlegend=False))
-        fig.add_trace(go.Bar(name=f'{r} - Teste P', x=[f'{r} - Teste'], y=[tp],
-                             marker_color=color_map[r], opacity=1.0,
-                             text=[f"{tp:.1f}"], textposition='outside', showlegend=False))
-        # Controle
-        fig.add_trace(go.Bar(name=f'{r} - Controle B', x=[f'{r} - Controle'], y=[cb],
-                             marker_color=color_map[r], opacity=0.75,
-                             text=[f"{cb:.1f}"], textposition='outside', showlegend=False))
-        fig.add_trace(go.Bar(name=f'{r} - Controle P', x=[f'{r} - Controle'], y=[cp],
-                             marker_color=color_map[r], opacity=1.0,
-                             text=[f"{cp:.1f}"], textposition='outside', showlegend=False))
-
-    fig.update_layout(
-        title=f"DDE Médio - Corte Região - {categoria}",
-        xaxis_title="Região", yaxis_title="DDE Médio (dias)",
-        barmode='group', paper_bgcolor="#F7F7F7", plot_bgcolor="#F7F7F7",
-        height=520, font=dict(size=12), xaxis_tickangle=-45,
-        bargap=0.0, bargroupgap=0.005
-    )
-    fig.show()
-
-def create_delta_merecimento_cut_visualization(df_estoque, df_comparacao, categoria):
-    """
-    Apenas TESTE, com palette por bucket_delta.
-    """
-    df_joined = (
-        df_estoque
-        .join(
-            df_comparacao.select("CdFilial","grupo_de_necessidade","bucket_delta").distinct(),
-            on=["CdFilial","grupo_de_necessidade"], how="inner"
-        )
-    )
-    df_base = (
-        df_joined
-        .groupBy("grupo", "periodo_analise", "bucket_delta")
-        .agg(F.round(F.median("DDE"), 1).alias("DDE_medio"))
-        .dropna(subset=["bucket_delta"])
-    )
-    df_pivot = (
-        df_base.groupBy("grupo","bucket_delta")
-        .pivot("periodo_analise").agg(F.first("DDE_medio")).fillna(0.0)
-    )
-    df_pandas = df_pivot.toPandas()
-
-    fig = go.Figure()
-    # Apenas TESTE
-    buckets = sorted(df_pandas['bucket_delta'].unique())
-    palette = px.colors.qualitative.Plotly
-    color_map = {b: palette[i % len(palette)] for i, b in enumerate(buckets)}
-
-    def safe_val_bucket(df, col):
-        try:
-            return float(df[col].iloc[0]) if col in df.columns else 0.0
-        except Exception:
-            return 0.0
-
-    for b in buckets:
-        d_all = df_pandas[(df_pandas['bucket_delta']==b) & (df_pandas['grupo']=='teste')]
-        tb = safe_val_bucket(d_all, 'baseline')
-        tp = safe_val_bucket(d_all, 'piloto')
-
-        # Barras só do teste
-        fig.add_trace(go.Bar(name=f'{b} - Teste B', x=[f'{b} - Teste'], y=[tb],
-                             marker_color=color_map[b], opacity=0.75,
-                             text=[f"{tb:.1f}"], textposition='outside', showlegend=False))
-        fig.add_trace(go.Bar(name=f'{b} - Teste P', x=[f'{b} - Teste'], y=[tp],
-                             marker_color=color_map[b], opacity=1.0,
-                             text=[f"{tp:.1f}"], textposition='outside', showlegend=False))
-
-    fig.update_layout(
-        title=f"DDE Médio - Corte Delta Merecimento (Teste) - {categoria}",
-        xaxis_title="Delta Merecimento", yaxis_title="DDE Médio (dias)",
-        barmode='group', paper_bgcolor="#F7F7F7", plot_bgcolor="#F7F7F7",
-        height=520, font=dict(size=12), xaxis_tickangle=-45,
-        bargap=0.0, bargroupgap=0.005
-    )
-    fig.show()
-
-# Execução
-# create_dde_comparison_visualizations(df_estoque_loja_porte_regiao, df_comparacao, categorias_teste)
-
-# Executar visualizações comparativas
-create_dde_comparison_visualizations(df_estoque_loja_porte_regiao, df_comparacao, categorias_teste)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Análise de acurácia realizada
-
-# COMMAND ----------
-
-# MAGIC %md
 # MAGIC ### Resultado factual dos últimos 7 dias
 
 # COMMAND ----------
@@ -2409,44 +2152,44 @@ codigos = (
 # COMMAND ----------
 
 
-!pip install openpyxl
+# !pip install openpyxl
 
-import pandas as pd
-import pyspark.sql.functions as F
-from pyspark.sql import Window
+# import pandas as pd
+# import pyspark.sql.functions as F
+# from pyspark.sql import Window
 
-# Leitura e transformações
-df_envios_manuais_TELAS_teste = (
-    spark.createDataFrame(
-        pd.read_csv(
-            '/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/dados_analise/(DRP)_INDICADOR_DE_PROGRAMAÇÕES_20250922132602.csv',
-            #skiprows=1,
-            delimiter=';'
-        )
-    )
-    # .filter(F.col("DIR_OPERACIONAL") != 'ONLINE')
-    # .filter(F.col("DATA_PROGRAMACAO") > 20250905)
-    .filter(
-        F.col("CODIGO").isin(codigos)
-        )
-    .withColumn("QUANTIDADE_PEDIDA", 
-        F.regexp_replace(F.col("QUANTIDADE_PEDIDA"), r"[^0-9\-]", ".").cast("long"))
-    .groupBy("DIRETORIA", "TIPO DE PEDIDO")
-    .agg(
-        F.sum("QUANTIDADE_PEDIDA").alias("QtdPedida")
-    )
-)
+# # Leitura e transformações
+# df_envios_manuais_TELAS_teste = (
+#     spark.createDataFrame(
+#         pd.read_csv(
+#             '/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/dados_analise/(DRP)_INDICADOR_DE_PROGRAMAÇÕES_20250922132602.csv',
+#             #skiprows=1,
+#             delimiter=';'
+#         )
+#     )
+#     # .filter(F.col("DIR_OPERACIONAL") != 'ONLINE')
+#     # .filter(F.col("DATA_PROGRAMACAO") > 20250905)
+#     .filter(
+#         F.col("CODIGO").isin(codigos)
+#         )
+#     .withColumn("QUANTIDADE_PEDIDA", 
+#         F.regexp_replace(F.col("QUANTIDADE_PEDIDA"), r"[^0-9\-]", ".").cast("long"))
+#     .groupBy("DIRETORIA", "TIPO DE PEDIDO")
+#     .agg(
+#         F.sum("QUANTIDADE_PEDIDA").alias("QtdPedida")
+#     )
+# )
 
-# Define janela por diretoria
-w = Window.partitionBy("DIRETORIA")
+# # Define janela por diretoria
+# w = Window.partitionBy("DIRETORIA")
 
-# Percentual dentro de cada diretoria
-df_envios_manuais_TELAS_teste = df_envios_manuais_TELAS_teste.withColumn(
-    "Percentual", (F.col("QtdPedida") / F.sum("QtdPedida").over(w)) * 100
-)
+# # Percentual dentro de cada diretoria
+# df_envios_manuais_TELAS_teste = df_envios_manuais_TELAS_teste.withColumn(
+#     "Percentual", (F.col("QtdPedida") / F.sum("QtdPedida").over(w)) * 100
+# )
 
-# Exibe
-df_envios_manuais_TELAS_teste.display()
+# # Exibe
+# df_envios_manuais_TELAS_teste.display()
 
 # COMMAND ----------
 

@@ -28,10 +28,10 @@ GRUPOS_TESTE = ['LIQUIDIFICADORES ACIMA 1001 W._110',
                 
 print(GRUPOS_TESTE)
 
-data_inicio = "2025-09-01"
-fim_baseline = "2025-09-08"
+data_inicio = "2025-09-15"
+fim_baseline = "2025-09-21"
 
-inicio_teste = "2025-09-08"
+inicio_teste = "2025-09-22"
 
 categorias_teste = ['LEVES']
 

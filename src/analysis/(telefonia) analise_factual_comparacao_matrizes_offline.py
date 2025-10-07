@@ -46,6 +46,10 @@ categorias_teste = ['TELEFONIA_CELULAR']
 
 # COMMAND ----------
 
+# MAGIC %sql SELECT DISTINCT grupo_de_necessidade from databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste2509
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 1. Carregamento das Matrizes de Merecimento Calculadas
 
@@ -145,8 +149,8 @@ from pyspark.sql import functions as F
 from pyspark.sql import Window
 
 # === Janela dinâmica: últimos 30 dias até ontem ===
-fim_janela = F.date_sub(F.current_date(), 1)
-inicio_janela = F.date_sub(fim_janela, 29)
+fim_janela = F.date_sub(F.current_date(), 2)
+inicio_janela = F.date_sub(fim_janela, 47)
 
 # Log das datas (yyyy-MM-dd)
 _row = (
@@ -521,13 +525,6 @@ for categoria in categorias_teste:
         fig_neogrid.show()
     else:
         print(f"[{categoria}] Coluna PercMatrizNeogrid não disponível para plot.")
-
-# COMMAND ----------
-
-(
-    spark.table('databox.bcg_comum.supply_de_para_modelos_gemeos_tecnologia')
-    
-    .display()
 
 # COMMAND ----------
 

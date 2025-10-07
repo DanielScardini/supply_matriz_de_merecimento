@@ -70,7 +70,7 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     
     for categoria in categorias:
         try:
-            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_online_teste1809_liq"
+            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_online_teste0310"
             df_matriz = spark.table(nome_tabela)
             
             matrizes[categoria] = df_matriz
@@ -168,7 +168,7 @@ df_matriz_neogrid_agg_offline.limit(1).display()
 
 # === Janela dinâmica: últimos 30 dias até ontem ===
 fim_janela = F.date_sub(F.current_date(), 1)
-inicio_janela = F.date_sub(fim_janela, 29)
+inicio_janela = F.date_sub(fim_janela, 35)
 
 print(inicio_janela, fim_janela)
 
@@ -189,7 +189,7 @@ df_proporcao_factual = (
     )
     .dropna(subset='grupo_de_necessidade')
     .filter(F.col("NmSetorGerencial") == 'PORTATEIS')
-    .filter(F.col("grupo_de_necessidade").isin(GRUPOS_TESTE))
+    #.filter(F.col("grupo_de_necessidade").isin(GRUPOS_TESTE))
     .groupBy('CdFilial', 'grupo_de_necessidade')
     .agg(
         F.round(F.sum('QtDemanda'), 0).alias('QtDemanda'),

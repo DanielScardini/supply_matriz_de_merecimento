@@ -1005,7 +1005,7 @@ def exportar_excel_validacao_todas_categorias(data_exportacao: str = None) -> Di
 # COMMAND ----------
 
 # Executar exportação para todas as categorias
-#resultados = exportar_todas_categorias()
+resultados = exportar_todas_categorias()
 
 # COMMAND ----------
 

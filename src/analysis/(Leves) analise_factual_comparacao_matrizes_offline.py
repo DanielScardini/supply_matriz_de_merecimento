@@ -125,6 +125,10 @@ df_demanda.filter(F.col("NmEspecieGerencial").isin(especies_top80)).agg(F.sum("P
 
 # COMMAND ----------
 
+# MAGIC %sql SELECT * FROM databox.bcg_comum.supply_matriz_merecimento_linha_leve_teste1909_liq
+
+# COMMAND ----------
+
 def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     """
     Carrega todas as matrizes de merecimento calculadas para cada categoria.
@@ -146,7 +150,7 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     
     for categoria in categorias:
         try:
-            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_LINHA_LEVE_teste0410"
+            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_linha_leve_teste1909_liq"
             df_matriz = spark.table(nome_tabela)
             
             matrizes[categoria] = df_matriz
@@ -244,8 +248,8 @@ df_matriz_neogrid_agg_offline.limit(1).display()
 # COMMAND ----------
 
 # === Janela dinâmica: últimos 30 dias até ontem ===
-fim_janela = F.date_sub(F.current_date(), 31)
-inicio_janela = F.date_sub(fim_janela, 61)
+fim_janela = F.date_sub(F.current_date(), 1)
+inicio_janela = F.date_sub(fim_janela, 47)
 
 print(inicio_janela, fim_janela)
 
