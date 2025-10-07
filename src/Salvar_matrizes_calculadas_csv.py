@@ -460,7 +460,7 @@ def normalizar_para_100_exato(df: DataFrame) -> DataFrame:
         .withColumn("diferenca_100", 100.0 - F.col("soma_proporcional"))
     )
     
-    # 4. Ajustar apenas o maior merecimento (rank = 1)
+    # 4. Ajustar apenas o maior merecimento (rank = 1) para soma exata 100.000
     df_ajustado = (
         df_com_diferenca
         .withColumn(
@@ -469,6 +469,7 @@ def normalizar_para_100_exato(df: DataFrame) -> DataFrame:
                    F.col("Merecimento_proporcional") + F.col("diferenca_100"))
             .otherwise(F.col("Merecimento_proporcional"))
         )
+        .withColumn("PERCENTUAL", F.round(F.col("PERCENTUAL"), 3))
         .select("CdSku", "CdFilial", "CANAL", "PERCENTUAL")
     )
     
@@ -479,16 +480,75 @@ def normalizar_para_100_exato(df: DataFrame) -> DataFrame:
         .agg(F.sum("PERCENTUAL").alias("soma_total"))
     )
     
-    nao_100 = soma_validacao.filter((F.col("soma_total") < 99.9) | (F.col("soma_total") > 100.1)).count()
+    nao_100 = soma_validacao.filter((F.col("soma_total") < 99.9999) | (F.col("soma_total") > 100.0001)).count()
     
     if nao_100 > 0:
-        print(f"  ⚠️ ATENÇÃO: {nao_100} grupos não somam 100.00% (tolerância 0.1%)")
+        print(f"  ⚠️ ATENÇÃO: {nao_100} grupos não somam exatamente 100.000%")
+        soma_validacao.filter((F.col("soma_total") < 99.9999) | (F.col("soma_total") > 100.0001)).show(5, truncate=False)
     else:
-        print(f"  ✅ Todos os grupos somam 100.00% (tolerância 0.1%)")
+        print(f"  ✅ Todos os grupos somam exatamente 100.000%")
     
-    print(f"✅ Normalização concluída: {df_ajustado.count():,} registros")
+    # 5. Correção final para garantir exatidão matemática
+    print("  🔧 Aplicando correção final para exatidão matemática...")
+    df_final_corrigido = garantir_soma_exata_100(df_ajustado)
     
-    return df_ajustado
+    print(f"✅ Normalização concluída: {df_final_corrigido.count():,} registros")
+    
+    return df_final_corrigido
+
+def garantir_soma_exata_100(df: DataFrame) -> DataFrame:
+    """
+    Garante que todas as somas por SKU+CANAL sejam exatamente 100.000%.
+    Aplica correção final no maior merecimento de cada grupo.
+    """
+    print("    🔧 Garantindo soma exata de 100.000%...")
+    
+    # Window para agrupar por SKU+CANAL
+    window_sku_canal = W.partitionBy("CdSku", "CANAL")
+    window_rank = W.partitionBy("CdSku", "CANAL").orderBy(F.desc("PERCENTUAL"))
+    
+    # Calcular soma atual e diferença exata
+    df_com_soma = (
+        df
+        .withColumn("soma_atual", F.sum("PERCENTUAL").over(window_sku_canal))
+        .withColumn("diferenca_exata", 100.0 - F.col("soma_atual"))
+    )
+    
+    # Aplicar correção no maior merecimento de cada grupo
+    df_com_rank = (
+        df_com_soma
+        .withColumn("rank", F.row_number().over(window_rank))
+    )
+    
+    df_corrigido = (
+        df_com_rank
+        .withColumn(
+            "PERCENTUAL",
+            F.when(F.col("rank") == 1, 
+                   F.col("PERCENTUAL") + F.col("diferenca_exata"))
+            .otherwise(F.col("PERCENTUAL"))
+        )
+        .withColumn("PERCENTUAL", F.round(F.col("PERCENTUAL"), 3))
+        .select("CdSku", "CdFilial", "CANAL", "PERCENTUAL")
+    )
+    
+    # Validação final rigorosa
+    validacao_final = (
+        df_corrigido
+        .groupBy("CdSku", "CANAL")
+        .agg(F.sum("PERCENTUAL").alias("soma_final"))
+    )
+    
+    nao_100_final = validacao_final.filter(F.abs(F.col("soma_final") - 100.0) > 0.0001).count()
+    
+    if nao_100_final > 0:
+        print(f"    ❌ ERRO: {nao_100_final} grupos ainda não somam exatamente 100.000%")
+        validacao_final.filter(F.abs(F.col("soma_final") - 100.0) > 0.0001).show(3, truncate=False)
+        raise ValueError(f"{nao_100_final} grupos não somam exatamente 100.000% após correção")
+    else:
+        print(f"    ✅ Todos os grupos somam exatamente 100.000%")
+    
+    return df_corrigido
 
 # COMMAND ----------
 
@@ -629,16 +689,16 @@ def validar_integridade_dados(df: DataFrame) -> bool:
         .agg(F.sum("PERCENTUAL").alias("SomaPercentual"))
     )
     
-    # Verificar se todas as somas são 100% (tolerância 0.1% para precisão de 3 casas decimais)
-    somas_invalidas = df_somas.filter(F.abs(F.col("SomaPercentual") - 100.0) > 0.1)
+    # Verificar se todas as somas são exatamente 100.000%
+    somas_invalidas = df_somas.filter(F.abs(F.col("SomaPercentual") - 100.0) > 0.0001)
     qtd_somas_invalidas = somas_invalidas.count()
     
     if qtd_somas_invalidas > 0:
-        print(f"  ❌ ERRO: {qtd_somas_invalidas} combinações SKU+CANAL não somam 100% (tolerância 0.1%)")
+        print(f"  ❌ ERRO: {qtd_somas_invalidas} combinações SKU+CANAL não somam exatamente 100.000%")
         somas_invalidas.show(10, truncate=False)
         return False
     else:
-        print(f"  ✅ Todas as {df_somas.count()} combinações SKU+CANAL somam 100% (tolerância 0.1%)")
+        print(f"  ✅ Todas as {df_somas.count()} combinações SKU+CANAL somam exatamente 100.000%")
     
     # 2. Validar unicidade de chaves SKU-LOJA-CANAL
     print("  🔑 Validando unicidade de chaves SKU-LOJA-CANAL...")
@@ -894,7 +954,7 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None, formato: st
     print(f"✅ Exportação concluída: {categoria}")
     print(f"📁 Total de arquivos: {len(arquivos_salvos)}")
         
-    return arquivos_salvos
+        return arquivos_salvos
 
 # COMMAND ----------
 
