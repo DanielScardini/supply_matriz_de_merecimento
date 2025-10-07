@@ -604,6 +604,95 @@ def criar_dataframe_final(df: DataFrame) -> DataFrame:
 
 # COMMAND ----------
 
+def validar_integridade_dados(df: DataFrame) -> bool:
+    """
+    Valida integridade dos dados antes de dividir em arquivos.
+    
+    Validações:
+    1. Somas por SKU+CANAL = 100%
+    2. Chaves SKU-LOJA-CANAL aparecem uma única vez
+    3. Para cada SKU-LOJA, ambos os canais estão presentes
+    
+    Args:
+        df: DataFrame para validação
+        
+    Returns:
+        True se todas as validações passaram
+    """
+    print("🔍 Validando integridade dos dados...")
+    
+    # 1. Validar somas por SKU+CANAL = 100%
+    print("  📊 Validando somas por SKU+CANAL...")
+    df_somas = (
+        df
+        .groupBy("SKU", "CANAL")
+        .agg(F.sum("PERCENTUAL").alias("SomaPercentual"))
+    )
+    
+    # Verificar se todas as somas são 100%
+    somas_invalidas = df_somas.filter(F.abs(F.col("SomaPercentual") - 100.0) > 0.01)
+    qtd_somas_invalidas = somas_invalidas.count()
+    
+    if qtd_somas_invalidas > 0:
+        print(f"  ❌ ERRO: {qtd_somas_invalidas} combinações SKU+CANAL não somam 100%")
+        somas_invalidas.show(10, truncate=False)
+        return False
+    else:
+        print(f"  ✅ Todas as {df_somas.count()} combinações SKU+CANAL somam 100%")
+    
+    # 2. Validar unicidade de chaves SKU-LOJA-CANAL
+    print("  🔑 Validando unicidade de chaves SKU-LOJA-CANAL...")
+    df_contagem = (
+        df
+        .groupBy("SKU", "LOJA", "CANAL")
+        .agg(F.count("*").alias("QtdRegistros"))
+    )
+    
+    chaves_duplicadas = df_contagem.filter(F.col("QtdRegistros") > 1)
+    qtd_chaves_duplicadas = chaves_duplicadas.count()
+    
+    if qtd_chaves_duplicadas > 0:
+        print(f"  ❌ ERRO: {qtd_chaves_duplicadas} chaves SKU-LOJA-CANAL duplicadas")
+        chaves_duplicadas.show(10, truncate=False)
+        return False
+    else:
+        print(f"  ✅ Todas as {df_contagem.count()} chaves SKU-LOJA-CANAL são únicas")
+    
+    # 3. Validar que para cada SKU-LOJA, ambos os canais estão presentes
+    print("  🔄 Validando presença de ambos os canais por SKU-LOJA...")
+    df_canais_por_sku_loja = (
+        df
+        .groupBy("SKU", "LOJA")
+        .agg(
+            F.countDistinct("CANAL").alias("QtdCanais"),
+            F.collect_list("CANAL").alias("Canais")
+        )
+    )
+    
+    skus_lojas_incompletos = df_canais_por_sku_loja.filter(F.col("QtdCanais") != 2)
+    qtd_skus_lojas_incompletos = skus_lojas_incompletos.count()
+    
+    if qtd_skus_lojas_incompletos > 0:
+        print(f"  ❌ ERRO: {qtd_skus_lojas_incompletos} SKU-LOJA não têm ambos os canais")
+        skus_lojas_incompletos.show(10, truncate=False)
+        return False
+    else:
+        print(f"  ✅ Todos os {df_canais_por_sku_loja.count()} SKU-LOJA têm ambos os canais")
+    
+    # 4. Validar que ambos os canais são ONLINE e OFFLINE
+    print("  📋 Validando tipos de canais...")
+    canais_unicos = df.select("CANAL").distinct().rdd.flatMap(lambda x: x).collect()
+    canais_esperados = ["ONLINE", "OFFLINE"]
+    
+    if set(canais_unicos) != set(canais_esperados):
+        print(f"  ❌ ERRO: Canais encontrados: {canais_unicos}, esperados: {canais_esperados}")
+        return False
+    else:
+        print(f"  ✅ Canais corretos: {canais_unicos}")
+    
+    print("  ✅ Todas as validações passaram!")
+    return True
+
 def dividir_em_arquivos(df: DataFrame, max_linhas: int = MAX_LINHAS_POR_ARQUIVO) -> List[DataFrame]:
     """
     Divide DataFrame em arquivos garantindo que SKU-LOJA fique junto (ambos canais).
@@ -618,6 +707,10 @@ def dividir_em_arquivos(df: DataFrame, max_linhas: int = MAX_LINHAS_POR_ARQUIVO)
         Lista de DataFrames
     """
     print(f"🔄 Dividindo em arquivos (máx {max_linhas:,} linhas cada)...")
+    
+    # Validar integridade antes de dividir
+    if not validar_integridade_dados(df):
+        raise ValueError("❌ Validação de integridade falhou. Não é possível dividir os arquivos.")
     
     # Criar chave única por SKU-LOJA
     df_com_chave = df.withColumn("chave_particao", F.concat(F.col("SKU"), F.lit("_"), F.col("LOJA")))
@@ -653,10 +746,54 @@ def dividir_em_arquivos(df: DataFrame, max_linhas: int = MAX_LINHAS_POR_ARQUIVO)
     for i in range(num_arquivos):
         df_arquivo = df_final.filter(F.col("num_arquivo") == i).drop("num_arquivo")
         qtd = df_arquivo.count()
+        
+        # Validar que cada arquivo tem pares completos de canais
+        validar_pares_canais_arquivo(df_arquivo, i)
+        
         print(f"    - Parte {i+1}: {qtd:,} linhas")
         dfs_separados.append(df_arquivo)
     
     return dfs_separados
+
+def validar_pares_canais_arquivo(df_arquivo: DataFrame, num_arquivo: int) -> None:
+    """
+    Valida que cada arquivo tem pares completos de canais (ONLINE + OFFLINE) para cada SKU-LOJA.
+    
+    Args:
+        df_arquivo: DataFrame do arquivo específico
+        num_arquivo: Número do arquivo para logs
+    """
+    print(f"  🔍 Validando arquivo {num_arquivo + 1}...")
+    
+    # Contar canais por SKU-LOJA no arquivo
+    df_canais_arquivo = (
+        df_arquivo
+        .groupBy("SKU", "LOJA")
+        .agg(
+            F.countDistinct("CANAL").alias("QtdCanais"),
+            F.collect_list("CANAL").alias("Canais")
+        )
+    )
+    
+    # Verificar se todos os SKU-LOJA têm exatamente 2 canais
+    skus_lojas_incompletos = df_canais_arquivo.filter(F.col("QtdCanais") != 2)
+    qtd_incompletos = skus_lojas_incompletos.count()
+    
+    if qtd_incompletos > 0:
+        print(f"    ❌ ERRO: Arquivo {num_arquivo + 1} tem {qtd_incompletos} SKU-LOJA incompletos")
+        skus_lojas_incompletos.show(5, truncate=False)
+        raise ValueError(f"Arquivo {num_arquivo + 1} tem pares de canais incompletos")
+    else:
+        print(f"    ✅ Arquivo {num_arquivo + 1}: Todos os SKU-LOJA têm pares completos")
+    
+    # Verificar se os canais são ONLINE e OFFLINE
+    canais_arquivo = df_arquivo.select("CANAL").distinct().rdd.flatMap(lambda x: x).collect()
+    canais_esperados = ["ONLINE", "OFFLINE"]
+    
+    if not all(canal in canais_arquivo for canal in canais_esperados):
+        print(f"    ⚠️  AVISO: Arquivo {num_arquivo + 1} não tem ambos os canais: {canais_arquivo}")
+    else:
+        print(f"    ✅ Arquivo {num_arquivo + 1}: Canais corretos: {canais_arquivo}")
 
 # COMMAND ----------
 
@@ -757,7 +894,7 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None, formato: st
     print(f"✅ Exportação concluída: {categoria}")
     print(f"📁 Total de arquivos: {len(arquivos_salvos)}")
         
-    return arquivos_salvos
+        return arquivos_salvos
 
 # COMMAND ----------
 
