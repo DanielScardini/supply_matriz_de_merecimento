@@ -38,6 +38,87 @@ hoje_int = int(hoje.strftime("%Y%m%d"))
 
 FILIAIS_OUTLET = [2528, 3604]
 
+# Flag para escolher fonte do de-para
+USAR_DE_PARA_EXCEL = True  # True = Excel, False = CSV antigo
+
+def carregar_de_para_gemeos_tecnologia() -> pd.DataFrame:
+    """
+    Carrega o de-para de gêmeos tecnologia baseado no flag USAR_DE_PARA_EXCEL.
+    
+    Returns:
+        DataFrame com colunas: CdSku, gemeos
+    """
+    if USAR_DE_PARA_EXCEL:
+        print("📋 Carregando de-para do Excel (de_para_gemeos_tecnologia.xlsx)...")
+        try:
+            de_para_df = pd.read_excel(
+                'dados_analise/de_para_gemeos_tecnologia.xlsx',
+                sheet_name='de_para'
+            )
+            
+            # Padronizar nomes das colunas
+            de_para_df.columns = (
+                de_para_df.columns
+                .str.strip()
+                .str.lower()
+                .str.replace(r"[^\w]+", "_", regex=True)
+                .str.strip("_")
+            )
+            
+            # Mapear colunas para o formato esperado
+            if 'sku' in de_para_df.columns and 'gemeos' in de_para_df.columns:
+                de_para_df = de_para_df.rename(columns={'sku': 'cdsku'})
+            elif 'cdsku' in de_para_df.columns and 'gemeos' in de_para_df.columns:
+                pass  # Já está no formato correto
+            else:
+                raise ValueError(f"Colunas não encontradas. Disponíveis: {list(de_para_df.columns)}")
+            
+            # Garantir que CdSku seja string
+            de_para_df['cdsku'] = de_para_df['cdsku'].astype(str)
+            
+            # Remover duplicatas
+            de_para_df = de_para_df.drop_duplicates()
+            
+            print(f"  ✅ Excel carregado: {len(de_para_df):,} registros")
+            print(f"  📊 Colunas: {list(de_para_df.columns)}")
+            
+            return de_para_df
+            
+        except Exception as e:
+            print(f"  ❌ Erro ao carregar Excel: {e}")
+            print("  🔄 Tentando CSV como fallback...")
+            USAR_DE_PARA_EXCEL = False
+    
+    if not USAR_DE_PARA_EXCEL:
+        print("📋 Carregando de-para do CSV (ITENS_GEMEOS 2.csv)...")
+        try:
+            de_para_df = pd.read_csv(
+                'dados_analise/ITENS_GEMEOS 2.csv',
+                delimiter=";",
+                encoding='iso-8859-1'
+            )
+            
+            # Padronizar nomes das colunas
+            de_para_df.columns = (
+                de_para_df.columns
+                .str.strip()
+                .str.lower()
+                .str.replace(r"[^\w]+", "_", regex=True)
+                .str.strip("_")
+            )
+            
+            # Remover duplicatas
+            de_para_df = de_para_df.drop_duplicates()
+            
+            print(f"  ✅ CSV carregado: {len(de_para_df):,} registros")
+            print(f"  📊 Colunas: {list(de_para_df.columns)}")
+            
+            return de_para_df
+            
+        except Exception as e:
+            print(f"  ❌ Erro ao carregar CSV: {e}")
+            raise ValueError("Não foi possível carregar o de-para de nenhuma fonte")
+
 # ✅ DE-PARA CONSOLIDAÇÃO DE CDs - MESMO DO ONLINE
 DE_PARA_CONSOLIDACAO_CDS = {
   "14"  : "1401",
@@ -287,8 +368,7 @@ def carregar_de_para_espelhamento() -> DataFrame:
     """
     print("🔄 Carregando de-para de espelhamento de filiais...")
 
-    # noqa: E999
-    !pip install openpyxl
+    # pip install openpyxl
     
     try:
         # Carrega o arquivo Excel usando pandas
@@ -426,20 +506,8 @@ def carregar_mapeamentos_produtos(categoria: str) -> tuple:
     )
     
     try:
-        de_para_gemeos_tecnologia = (
-            pd.read_csv('dados_analise/ITENS_GEMEOS 2.csv',
-                        delimiter=";",
-                        encoding='iso-8859-1')
-            .drop_duplicates()
-        )
-        
-        de_para_gemeos_tecnologia.columns = (
-            de_para_gemeos_tecnologia.columns
-            .str.strip()
-            .str.lower()
-            .str.replace(r"[^\w]+", "_", regex=True)
-            .str.strip("_")
-        )
+        # Usar a nova função para carregar de-para
+        de_para_gemeos_tecnologia = carregar_de_para_gemeos_tecnologia()
         
         print("✅ Mapeamento de gêmeos carregado")
     except FileNotFoundError:
