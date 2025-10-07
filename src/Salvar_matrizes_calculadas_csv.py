@@ -43,28 +43,13 @@ print(f"📅 Data fim (+60 dias): {DATA_FIM.strftime('%Y-%m-%d')} → {DATA_FIM_
 dt_inicio = "2025-08-01"
 dt_fim = "2025-10-01"
 
-# Calcular top 80% por ESPÉCIE (SKUs)
+# Calcular top 80% por ESPÉCIE (SKUs) - apenas PORTATEIS
 df_demanda_especie = (
   spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
   .filter(F.col("NmSetorGerencial") == "PORTATEIS")
-  .filter(F.col("NmAgrupamentoDiretoriaSetor") == "LINHA LEVE")
   .filter(F.col("DtAtual") >= dt_inicio)
   .filter(F.col("DtAtual") < dt_fim)
   .groupBy("NmEspecieGerencial")
-  .agg(
-    F.sum(F.col("QtMercadoria")).alias("QtDemanda"),
-    F.sum(F.col("Receita")).alias("Receita")
-  )
-)
-
-# Calcular top 80% por GRUPO DE NECESSIDADE
-df_demanda_grupo = (
-  spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
-  .filter(F.col("NmSetorGerencial") == "PORTATEIS")
-  .filter(F.col("NmAgrupamentoDiretoriaSetor") == "LINHA LEVE")
-  .filter(F.col("DtAtual") >= dt_inicio)
-  .filter(F.col("DtAtual") < dt_fim)
-  .groupBy("grupo_de_necessidade")
   .agg(
     F.sum(F.col("QtMercadoria")).alias("QtDemanda"),
     F.sum(F.col("Receita")).alias("Receita")
@@ -77,7 +62,7 @@ w_total = W.rowsBetween(W.unboundedPreceding, W.unboundedFollowing)
 # window para cumulativo
 w_cum = W.orderBy(F.col("PercDemanda").desc()).rowsBetween(W.unboundedPreceding, 0)
 
-# TOP 80% POR ESPÉCIE (SKUs)
+# TOP 80% POR ESPÉCIE (SKUs) - apenas PORTATEIS
 df_demanda_especie = (
     df_demanda_especie
     .withColumn("TotalDemanda", F.sum("QtDemanda").over(w_total))
@@ -97,34 +82,10 @@ especies_top80 = (
     .collect()
 )
 
-# TOP 80% POR GRUPO DE NECESSIDADE
-df_demanda_grupo = (
-    df_demanda_grupo
-    .withColumn("TotalDemanda", F.sum("QtDemanda").over(w_total))
-    .withColumn("TotalReceita", F.sum("Receita").over(w_total))
-    .withColumn("PercDemanda", F.round((F.col("QtDemanda") / F.col("TotalDemanda")) * 100, 0))
-    .withColumn("PercReceita", F.round((F.col("Receita") / F.col("TotalReceita")) * 100, 0))
-    .drop("TotalDemanda", "TotalReceita")
-    .withColumn("PercDemandaCumulativo", F.sum("PercDemanda").over(w_cum))
-    .withColumn("PercReceitaCumulativo", F.sum("PercReceita").over(w_cum))
-)
 
-grupos_top80 = (
-    df_demanda_grupo
-    .filter(F.col("PercDemandaCumulativo") <= 80)
-    .select("grupo_de_necessidade")
-    .rdd.flatMap(lambda x: x)
-    .collect()
-)
-
-
-print("🔝 ESPÉCIES TOP 80%:")
+print("🔝 ESPÉCIES TOP 80% PORTATEIS:")
 print(especies_top80)
 print(f"Total de espécies: {len(especies_top80)}")
-
-print("\n🔝 GRUPOS DE NECESSIDADE TOP 80%:")
-print(grupos_top80)
-print(f"Total de grupos: {len(grupos_top80)}")
 
 # SKUs das espécies top 80%
 skus_especies_top80 = (
@@ -144,11 +105,8 @@ print(f"\n📊 SKUs das espécies top 80%: {len(skus_especies_top80)} SKUs")
 
 # Validação dos percentuais
 print("\n📈 VALIDAÇÃO PERCENTUAIS:")
-print("ESPÉCIES:")
+print("ESPÉCIES TOP 80%:")
 df_demanda_especie.filter(F.col("NmEspecieGerencial").isin(especies_top80)).agg(F.sum("PercDemanda")).show()
-
-print("GRUPOS DE NECESSIDADE:")
-df_demanda_grupo.filter(F.col("grupo_de_necessidade").isin(grupos_top80)).agg(F.sum("PercDemanda")).show()
 
 # COMMAND ----------
 
@@ -284,22 +242,20 @@ def diagnosticar_diferenca_canais(df_offline: DataFrame, df_online: DataFrame, c
     
     # Validação do filtro TOP 80% para Linha Leve
     if categoria == "DIRETORIA LINHA LEVE":
-        print(f"\n🔝 VALIDAÇÃO FILTRO TOP 80% GRUPOS:")
-        print(f"  • Grupos top 80% definidos: {len(grupos_top80)}")
+        print(f"\n🔝 VALIDAÇÃO FILTRO TOP 80% ESPÉCIES:")
+        print(f"  • Espécies top 80% definidas: {len(especies_top80)}")
+        print(f"  • SKUs das espécies: {len(skus_especies_top80)}")
         
-        grupos_offline_set = set([row.grupo_de_necessidade for row in df_offline.select("grupo_de_necessidade").distinct().collect()])
-        grupos_online_set = set([row.grupo_de_necessidade for row in df_online.select("grupo_de_necessidade").distinct().collect()])
+        skus_top80_em_offline = len(skus_offline_set & set(skus_especies_top80))
+        skus_top80_em_online = len(skus_online_set & set(skus_especies_top80))
         
-        grupos_top80_em_offline = len(grupos_offline_set & set(grupos_top80))
-        grupos_top80_em_online = len(grupos_online_set & set(grupos_top80))
+        print(f"  • SKUs top 80% presentes no OFFLINE: {skus_top80_em_offline:,} ({skus_top80_em_offline/len(skus_especies_top80)*100:.1f}%)")
+        print(f"  • SKUs top 80% presentes no ONLINE:  {skus_top80_em_online:,} ({skus_top80_em_online/len(skus_especies_top80)*100:.1f}%)")
         
-        print(f"  • Grupos top 80% presentes no OFFLINE: {grupos_top80_em_offline:,} ({grupos_top80_em_offline/len(grupos_top80)*100:.1f}%)")
-        print(f"  • Grupos top 80% presentes no ONLINE:  {grupos_top80_em_online:,} ({grupos_top80_em_online/len(grupos_top80)*100:.1f}%)")
-        
-        if grupos_top80_em_offline < len(grupos_top80):
-            print(f"  ⚠️  {len(grupos_top80) - grupos_top80_em_offline} grupos top 80% ausentes no OFFLINE")
-        if grupos_top80_em_online < len(grupos_top80):
-            print(f"  ⚠️  {len(grupos_top80) - grupos_top80_em_online} grupos top 80% ausentes no ONLINE")
+        if skus_top80_em_offline < len(skus_especies_top80):
+            print(f"  ⚠️  {len(skus_especies_top80) - skus_top80_em_offline} SKUs top 80% ausentes no OFFLINE")
+        if skus_top80_em_online < len(skus_especies_top80):
+            print(f"  ⚠️  {len(skus_especies_top80) - skus_top80_em_online} SKUs top 80% ausentes no ONLINE")
     
     # 3. Filiais únicas
     filiais_offline = df_offline.select("CdFilial").distinct().count()
@@ -398,22 +354,23 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
     print(f"  • SKUs após filtro: {skus_pos_grupo:,} ({skus_pos_grupo - skus_inicial:+,})")
     print(f"  • Registros após filtro: {registros_pos_grupo:,} ({registros_pos_grupo - registros_inicial:+,})")
     
-    # Filtro especial para Linha Leve: apenas grupos de necessidade top 80% de PORTATEIS
+    # Filtro especial para Linha Leve: apenas SKUs das espécies top 80% de PORTATEIS
     if categoria == "DIRETORIA LINHA LEVE":
-        print(f"\n🔝 FILTRO TOP 80% GRUPOS DE NECESSIDADE:")
-        print(f"  • Grupos top 80% definidos: {len(grupos_top80)}")
+        print(f"\n🔝 FILTRO TOP 80% ESPÉCIES PORTATEIS:")
+        print(f"  • Espécies top 80% definidas: {len(especies_top80)}")
+        print(f"  • SKUs das espécies: {len(skus_especies_top80)}")
         
-        grupos_antes_top80 = df_filtrado.select("grupo_de_necessidade").distinct().count()
-        df_filtrado = df_filtrado.filter(F.col("grupo_de_necessidade").isin(grupos_top80))
-        grupos_apos_top80 = df_filtrado.select("grupo_de_necessidade").distinct().count()
+        skus_antes_top80 = df_filtrado.select("CdSku").distinct().count()
+        df_filtrado = df_filtrado.filter(F.col("CdSku").isin(skus_especies_top80))
+        skus_apos_top80 = df_filtrado.select("CdSku").distinct().count()
         registros_apos_top80 = df_filtrado.count()
         
-        print(f"  • Grupos antes: {grupos_antes_top80:,}")
-        print(f"  • Grupos após: {grupos_apos_top80:,} ({grupos_apos_top80 - grupos_antes_top80:+,})")
+        print(f"  • SKUs antes: {skus_antes_top80:,}")
+        print(f"  • SKUs após: {skus_apos_top80:,} ({skus_apos_top80 - skus_antes_top80:+,})")
         print(f"  • Registros após: {registros_apos_top80:,}")
         
-        if grupos_apos_top80 != len(grupos_top80):
-            print(f"  ⚠️  ATENÇÃO: {len(grupos_top80) - grupos_apos_top80} grupos top 80% não encontrados nos dados!")
+        if skus_apos_top80 != len(skus_especies_top80):
+            print(f"  ⚠️  ATENÇÃO: {len(skus_especies_top80) - skus_apos_top80} SKUs top 80% não encontrados nos dados!")
     
     # Regra especial online: CdFilial 1401 → 14 (apenas para TELAS e TELEFONIA)
     if canal == "online" and categoria in ["DIRETORIA DE TELAS", "DIRETORIA TELEFONIA CELULAR"]:
@@ -869,10 +826,10 @@ def exportar_excel_validacao_grupo_necessidade(categoria: str, data_exportacao: 
         )
     )
     
-    # Filtro especial para Linha Leve: apenas grupos de necessidade top 80% de PORTATEIS
+    # Filtro especial para Linha Leve: apenas SKUs das espécies top 80% de PORTATEIS
     if categoria == "DIRETORIA LINHA LEVE":
-        df_offline = df_offline.filter(F.col("grupo_de_necessidade").isin(grupos_top80))
-        print(f"  ✅ OFFLINE (TOP 80%): {df_offline.count():,} registros | {len(grupos_top80)} grupos")
+        df_offline = df_offline.filter(F.col("CdSku").isin(skus_especies_top80))
+        print(f"  ✅ OFFLINE (TOP 80%): {df_offline.count():,} registros | {len(skus_especies_top80)} SKUs")
     else:
         print(f"  ✅ OFFLINE: {df_offline.count():,} registros")
     
@@ -913,10 +870,10 @@ def exportar_excel_validacao_grupo_necessidade(categoria: str, data_exportacao: 
         .drop("NmPorteLoja")
     )
     
-    # Filtro especial para Linha Leve: apenas grupos de necessidade top 80% de PORTATEIS
+    # Filtro especial para Linha Leve: apenas SKUs das espécies top 80% de PORTATEIS
     if categoria == "DIRETORIA LINHA LEVE":
-        df_online = df_online.filter(F.col("grupo_de_necessidade").isin(grupos_top80))
-        print(f"  ✅ ONLINE (TOP 80%): {df_online.count():,} registros | {len(grupos_top80)} grupos")
+        df_online = df_online.filter(F.col("CdSku").isin(skus_especies_top80))
+        print(f"  ✅ ONLINE (TOP 80%): {df_online.count():,} registros | {len(skus_especies_top80)} SKUs")
     else:
         print(f"  ✅ ONLINE: {df_online.count():,} registros")
     
