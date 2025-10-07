@@ -377,8 +377,8 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
         if skus_apos_top80 != len(skus_especies_top80):
             print(f"  ⚠️  ATENÇÃO: {len(skus_especies_top80) - skus_apos_top80} SKUs top 80% não encontrados nos dados!")
     
-    # Regra especial online: CdFilial 1401 → 14
-    if canal == "online":
+    # Regra especial online: CdFilial 1401 → 14 (apenas para TELAS e TELEFONIA)
+    if canal == "online" and categoria in ["DIRETORIA DE TELAS", "DIRETORIA TELEFONIA CELULAR"]:
         print(f"\n🔄 CONSOLIDAÇÃO DE FILIAIS:")
         filial_1401_count = df_filtrado.filter(F.col("CdFilial") == 1401).count()
         
@@ -387,7 +387,7 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
             F.when(F.col("CdFilial") == 1401, 14).otherwise(F.col("CdFilial"))
         )
         
-        print(f"  • CdFilial 1401 → 14")
+        print(f"  • CdFilial 1401 → 14 (apenas {categoria})")
         print(f"  • Registros consolidados: {filial_1401_count:,}")
     
     # Agregar por CdSku + CdFilial
@@ -851,10 +851,13 @@ def exportar_excel_validacao_grupo_necessidade(categoria: str, data_exportacao: 
             "CdSku", "CdFilial", "grupo_de_necessidade", "NmPorteLoja",
             (100 * F.col(coluna_merecimento)).alias("Merecimento_ONLINE")
         )
-        # Aplicar regra CdFilial 1401 → 14
+        # Aplicar regra CdFilial 1401 → 14 (apenas para TELAS e TELEFONIA)
         .withColumn(
             "CdFilial", 
-            F.when(F.col("CdFilial") == 1401, 14).otherwise(F.col("CdFilial"))
+            F.when(
+                F.col("CdFilial") == 1401 and categoria in ["DIRETORIA DE TELAS", "DIRETORIA TELEFONIA CELULAR"], 
+                14
+            ).otherwise(F.col("CdFilial"))
         )
         # Identificar se é CD, Outlet ou Loja
         # CD: NmPorteLoja NULL E não é Outlet (2528, 3604)
