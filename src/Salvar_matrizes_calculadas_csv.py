@@ -493,36 +493,61 @@ def adicionar_informacoes_filial(df: DataFrame) -> DataFrame:
     """
     Adiciona informações de filiais e cria coluna LOJA formatada.
     
+    Lógica de identificação:
+    1. Join com CDs ativos: databox.logistica_comum.roteirizacaocentrodistribuicao
+    2. Join com lojas ativas: data_engineering_prd.app_operacoesloja.roteirizacaolojaativa
+    3. Se não está em nenhum dos dois: REMOVER (inativo)
+    4. Se está no primeiro: CD/Entreposto (NmTipoFilial define tipo)
+    5. Se está no segundo: Loja
+    
     Lógica LOJA:
     - OFFLINE: sempre 0021_0XXXX
-    - ONLINE + NmPorteLoja NULL: 0099_0XXXX (é CD)
-    - ONLINE + NmPorteLoja NOT NULL: 0021_0XXXX (é loja)
+    - ONLINE + CD: 0099_0XXXX
+    - ONLINE + Loja: 0021_0XXXX
     
     Args:
         df: DataFrame com CdFilial, CANAL
         
     Returns:
-        DataFrame com coluna LOJA adicionada
+        DataFrame com coluna LOJA adicionada e filiais inativas removidas
     """
     print("🔄 Adicionando informações de filiais...")
     
-    # Join com dados de filiais
-    df_filiais = (
-        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
-        .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica")
+    # Carregar tabelas de referência
+    print("  📋 Carregando tabelas de referência...")
+    
+    # CDs ativos
+    df_cds = (
+        spark.table('databox.logistica_comum.roteirizacaocentrodistribuicao')
+        .select("CdFilial", "NmFilial", "NmTipoFilial")
+        .withColumn("tipo_filial", F.lit("CD"))
     )
     
-    df_com_filiais = df.join(df_filiais, on="CdFilial", how="left")
+    # Lojas ativas
+    df_lojas = (
+        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+        .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica")
+        .withColumn("tipo_filial", F.lit("LOJA"))
+    )
     
-    # Criar coluna is_cd
+    print(f"    • CDs ativos: {df_cds.count():,}")
+    print(f"    • Lojas ativas: {df_lojas.count():,}")
+    
+    # Unir tabelas de referência
+    df_referencia = df_cds.union(df_lojas)
+    
+    # Join principal
+    df_com_filiais = df.join(df_referencia, on="CdFilial", how="inner")
+    
+    print(f"  🔍 Após join com referência: {df_com_filiais.count():,} registros")
+    
+    # Criar coluna is_cd baseada no tipo_filial
     df_com_tipo = (
         df_com_filiais
         .withColumn(
             "is_cd",
-            F.when(
-                (F.col("CANAL") == "ONLINE") & (F.col("NmPorteLoja").isNull()),
-                F.lit(True)
-            ).otherwise(F.lit(False))
+            F.when(F.col("tipo_filial") == "CD", F.lit(True))
+            .otherwise(F.lit(False))
         )
     )
     
@@ -536,10 +561,11 @@ def adicionar_informacoes_filial(df: DataFrame) -> DataFrame:
     df_com_loja = (
         df_com_tipo
         .withColumn("LOJA", formatar_loja_udf(F.col("CdFilial"), F.col("is_cd")))
-        .drop("is_cd", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica")
+        .drop("is_cd", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica", "NmTipoFilial", "tipo_filial")
     )
     
     print(f"✅ Informações adicionadas: {df_com_loja.count():,} registros")
+    print(f"  📊 Filiais inativas removidas automaticamente")
     
     return df_com_loja
 
