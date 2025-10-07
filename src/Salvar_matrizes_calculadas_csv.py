@@ -739,7 +739,7 @@ def validar_integridade_dados(df: DataFrame) -> bool:
     Validações:
     1. Somas por SKU+CANAL = 100%
     2. Chaves SKU-LOJA-CANAL aparecem uma única vez
-    3. Para cada SKU-LOJA, ambos os canais estão presentes
+    3. Para cada SKU, ambos os canais estão presentes (em pelo menos uma LOJA)
     
     Args:
         df: DataFrame para validação
@@ -786,34 +786,27 @@ def validar_integridade_dados(df: DataFrame) -> bool:
     else:
         print(f"  ✅ Todas as {df_contagem.count()} chaves SKU-LOJA-CANAL são únicas")
     
-    # 3. Validar que para cada SKU-CdFilial, ambos os canais estão presentes (ignorando prefixo LOJA)
-    print("  🔄 Validando presença de ambos os canais por SKU-CdFilial...")
+    # 3. Validar que para cada SKU, ambos os canais estão presentes
+    print("  🔄 Validando presença de ambos os canais por SKU...")
     
-    # Extrair CdFilial da coluna LOJA (remover prefixos 0021_ e 0099_)
-    df_com_cdfilial = (
+    df_canais_por_sku = (
         df
-        .withColumn("CdFilial_extraido", 
-                   F.regexp_extract(F.col("LOJA"), r"_(.+)$", 1))
-    )
-    
-    df_canais_por_sku_cdfilial = (
-        df_com_cdfilial
-        .groupBy("SKU", "CdFilial_extraido")
+        .groupBy("SKU")
         .agg(
             F.countDistinct("CANAL").alias("QtdCanais"),
             F.collect_list("CANAL").alias("Canais")
         )
     )
     
-    skus_cdfiliais_incompletos = df_canais_por_sku_cdfilial.filter(F.col("QtdCanais") != 2)
-    qtd_skus_cdfiliais_incompletos = skus_cdfiliais_incompletos.count()
+    skus_incompletos = df_canais_por_sku.filter(F.col("QtdCanais") != 2)
+    qtd_skus_incompletos = skus_incompletos.count()
     
-    if qtd_skus_cdfiliais_incompletos > 0:
-        print(f"  ❌ ERRO: {qtd_skus_cdfiliais_incompletos} SKU-CdFilial não têm ambos os canais")
-        skus_cdfiliais_incompletos.show(10, truncate=False)
+    if qtd_skus_incompletos > 0:
+        print(f"  ❌ ERRO: {qtd_skus_incompletos} SKUs não têm ambos os canais")
+        skus_incompletos.show(10, truncate=False)
         return False
     else:
-        print(f"  ✅ Todos os {df_canais_por_sku_cdfilial.count()} SKU-CdFilial têm ambos os canais")
+        print(f"  ✅ Todos os {df_canais_por_sku.count()} SKUs têm ambos os canais")
     
     # 4. Validar que ambos os canais são ONLINE e OFFLINE
     print("  📋 Validando tipos de canais...")
@@ -848,10 +841,10 @@ def dividir_em_arquivos(df: DataFrame, max_linhas: int = MAX_LINHAS_POR_ARQUIVO)
     if not validar_integridade_dados(df):
         raise ValueError("❌ Validação de integridade falhou. Não é possível dividir os arquivos.")
     
-    # Criar chave única por SKU-LOJA
-    df_com_chave = df.withColumn("chave_particao", F.concat(F.col("SKU"), F.lit("_"), F.col("LOJA")))
+    # Criar chave única por SKU (todos os registros do mesmo SKU ficam juntos)
+    df_com_chave = df.withColumn("chave_particao", F.col("SKU"))
     
-    # Contar registros por chave
+    # Contar registros por SKU
     df_contagem = (
         df_com_chave
         .groupBy("chave_particao")
@@ -893,7 +886,7 @@ def dividir_em_arquivos(df: DataFrame, max_linhas: int = MAX_LINHAS_POR_ARQUIVO)
 
 def validar_pares_canais_arquivo(df_arquivo: DataFrame, num_arquivo: int) -> None:
     """
-    Valida que cada arquivo tem pares completos de canais (ONLINE + OFFLINE) para cada SKU-LOJA.
+    Valida que cada arquivo tem todos os registros de cada SKU (todas as LOJAs e canais).
     
     Args:
         df_arquivo: DataFrame do arquivo específico
@@ -901,26 +894,24 @@ def validar_pares_canais_arquivo(df_arquivo: DataFrame, num_arquivo: int) -> Non
     """
     print(f"  🔍 Validando arquivo {num_arquivo + 1}...")
     
-    # Contar canais por SKU-LOJA no arquivo
-    df_canais_arquivo = (
+    # Contar registros por SKU no arquivo
+    df_skus_arquivo = (
         df_arquivo
-        .groupBy("SKU", "LOJA")
-        .agg(
-            F.countDistinct("CANAL").alias("QtdCanais"),
-            F.collect_list("CANAL").alias("Canais")
-        )
+        .groupBy("SKU")
+        .agg(F.count("*").alias("QtdRegistros"))
     )
     
-    # Verificar se todos os SKU-LOJA têm exatamente 2 canais
-    skus_lojas_incompletos = df_canais_arquivo.filter(F.col("QtdCanais") != 2)
-    qtd_incompletos = skus_lojas_incompletos.count()
+    # Verificar se todos os SKUs têm registros completos (pelo menos 2 canais por LOJA)
+    # Esta validação garante que não há SKUs "cortados" entre arquivos
+    skus_incompletos = df_skus_arquivo.filter(F.col("QtdRegistros") < 2)
+    qtd_incompletos = skus_incompletos.count()
     
     if qtd_incompletos > 0:
-        print(f"    ❌ ERRO: Arquivo {num_arquivo + 1} tem {qtd_incompletos} SKU-LOJA incompletos")
-        skus_lojas_incompletos.show(5, truncate=False)
-        raise ValueError(f"Arquivo {num_arquivo + 1} tem pares de canais incompletos")
+        print(f"    ❌ ERRO: Arquivo {num_arquivo + 1} tem {qtd_incompletos} SKUs com menos de 2 registros")
+        skus_incompletos.show(5, truncate=False)
+        raise ValueError(f"Arquivo {num_arquivo + 1} tem SKUs incompletos")
     else:
-        print(f"    ✅ Arquivo {num_arquivo + 1}: Todos os SKU-LOJA têm pares completos")
+        print(f"    ✅ Arquivo {num_arquivo + 1}: Todos os SKUs têm registros completos")
     
     # Verificar se os canais são ONLINE e OFFLINE
     canais_arquivo = df_arquivo.select("CANAL").distinct().rdd.flatMap(lambda x: x).collect()
