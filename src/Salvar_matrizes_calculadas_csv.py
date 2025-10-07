@@ -718,26 +718,34 @@ def validar_integridade_dados(df: DataFrame) -> bool:
     else:
         print(f"  ✅ Todas as {df_contagem.count()} chaves SKU-LOJA-CANAL são únicas")
     
-    # 3. Validar que para cada SKU-LOJA, ambos os canais estão presentes
-    print("  🔄 Validando presença de ambos os canais por SKU-LOJA...")
-    df_canais_por_sku_loja = (
+    # 3. Validar que para cada SKU-CdFilial, ambos os canais estão presentes (ignorando prefixo LOJA)
+    print("  🔄 Validando presença de ambos os canais por SKU-CdFilial...")
+    
+    # Extrair CdFilial da coluna LOJA (remover prefixos 0021_ e 0099_)
+    df_com_cdfilial = (
         df
-        .groupBy("SKU", "LOJA")
+        .withColumn("CdFilial_extraido", 
+                   F.regexp_extract(F.col("LOJA"), r"_(.+)$", 1))
+    )
+    
+    df_canais_por_sku_cdfilial = (
+        df_com_cdfilial
+        .groupBy("SKU", "CdFilial_extraido")
         .agg(
             F.countDistinct("CANAL").alias("QtdCanais"),
             F.collect_list("CANAL").alias("Canais")
         )
     )
     
-    skus_lojas_incompletos = df_canais_por_sku_loja.filter(F.col("QtdCanais") != 2)
-    qtd_skus_lojas_incompletos = skus_lojas_incompletos.count()
+    skus_cdfiliais_incompletos = df_canais_por_sku_cdfilial.filter(F.col("QtdCanais") != 2)
+    qtd_skus_cdfiliais_incompletos = skus_cdfiliais_incompletos.count()
     
-    if qtd_skus_lojas_incompletos > 0:
-        print(f"  ❌ ERRO: {qtd_skus_lojas_incompletos} SKU-LOJA não têm ambos os canais")
-        skus_lojas_incompletos.show(10, truncate=False)
+    if qtd_skus_cdfiliais_incompletos > 0:
+        print(f"  ❌ ERRO: {qtd_skus_cdfiliais_incompletos} SKU-CdFilial não têm ambos os canais")
+        skus_cdfiliais_incompletos.show(10, truncate=False)
         return False
     else:
-        print(f"  ✅ Todos os {df_canais_por_sku_loja.count()} SKU-LOJA têm ambos os canais")
+        print(f"  ✅ Todos os {df_canais_por_sku_cdfilial.count()} SKU-CdFilial têm ambos os canais")
     
     # 4. Validar que ambos os canais são ONLINE e OFFLINE
     print("  📋 Validando tipos de canais...")
