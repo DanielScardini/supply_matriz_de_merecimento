@@ -70,6 +70,8 @@ def carregar_de_para_gemeos_tecnologia() -> pd.DataFrame:
                 de_para_df = de_para_df.rename(columns={'sku': 'CdSku'})
             elif 'cdsku' in de_para_df.columns and 'gemeos' in de_para_df.columns:
                 de_para_df = de_para_df.rename(columns={'cdsku': 'CdSku'})
+            elif 'SKU' in de_para_df.columns and 'gemeos' in de_para_df.columns:
+                de_para_df = de_para_df.rename(columns={'SKU': 'CdSku'})
             else:
                 raise ValueError(f"Colunas não encontradas. Disponíveis: {list(de_para_df.columns)}")
             
