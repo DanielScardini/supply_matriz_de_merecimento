@@ -133,8 +133,27 @@ def analisar_receita_por_grupo_necessidade(categoria: str) -> DataFrame:
     
     print(f"📦 Dados base carregados: {df_base.count():,} registros")
     
-    # Determinar grupo de necessidade
-    df_com_grupo = determinar_grupo_necessidade(categoria, df_base)
+    # Para categorias que usam "gemeos", fazer join com tabela de de-para
+    if categoria in ["DIRETORIA DE TELAS", "DIRETORIA TELEFONIA CELULAR"]:
+        print(f"🔗 Fazendo join com tabela de de-para para {categoria}...")
+        
+        # Carregar tabela de de-para
+        df_de_para = spark.table('databox.bcg_comum.supply_de_para_modelos_gemeos_tecnologia')
+        
+        # Join com dados base
+        df_base_com_gemeos = df_base.join(
+            df_de_para.select("CdSku", "gemeos"),
+            on="CdSku",
+            how="left"
+        )
+        
+        print(f"📊 Após join com de-para: {df_base_com_gemeos.count():,} registros")
+        
+        # Determinar grupo de necessidade
+        df_com_grupo = determinar_grupo_necessidade(categoria, df_base_com_gemeos)
+    else:
+        # Para outras categorias, usar dados base diretamente
+        df_com_grupo = determinar_grupo_necessidade(categoria, df_base)
     
     # Agregar por grupo de necessidade
     df_agregado = (
