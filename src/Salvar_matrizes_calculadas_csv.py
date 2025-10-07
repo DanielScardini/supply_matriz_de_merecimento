@@ -491,57 +491,19 @@ def normalizar_para_100_exato(df: DataFrame) -> DataFrame:
 
 def adicionar_informacoes_filial(df: DataFrame) -> DataFrame:
     """
-    Adiciona informações de filiais e cria coluna LOJA formatada.
-    
-    Lógica LOJA:
-    - OFFLINE: sempre 0021_0XXXX
-    - ONLINE + NmPorteLoja NULL: 0099_0XXXX (é CD)
-    - ONLINE + NmPorteLoja NOT NULL: 0021_0XXXX (é loja)
+    Retorna DataFrame sem modificações (LOJA e CD removidos).
     
     Args:
         df: DataFrame com CdFilial, CANAL
         
     Returns:
-        DataFrame com coluna LOJA adicionada
+        DataFrame sem modificações
     """
-    print("🔄 Adicionando informações de filiais...")
+    print("🔄 Passando dados sem modificações...")
     
-    # Join com dados de filiais
-    df_filiais = (
-        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
-        .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica")
-    )
+    print(f"✅ Dados mantidos: {df.count():,} registros")
     
-    df_com_filiais = df.join(df_filiais, on="CdFilial", how="left")
-    
-    # Criar coluna is_cd
-    df_com_tipo = (
-        df_com_filiais
-        .withColumn(
-            "is_cd",
-            F.when(
-                (F.col("CANAL") == "ONLINE") & (F.col("NmPorteLoja").isNull()),
-                F.lit(True)
-            ).otherwise(F.lit(False))
-        )
-    )
-    
-    # UDF para formatar loja
-    from pyspark.sql.types import StringType
-    formatar_loja_udf = F.udf(
-        lambda cdfilial, is_cd: formatar_codigo_loja(int(cdfilial), bool(is_cd)),
-        StringType()
-    )
-    
-    df_com_loja = (
-        df_com_tipo
-        .withColumn("LOJA", formatar_loja_udf(F.col("CdFilial"), F.col("is_cd")))
-        .drop("is_cd", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica")
-    )
-    
-    print(f"✅ Informações adicionadas: {df_com_loja.count():,} registros")
-    
-    return df_com_loja
+    return df
 
 # COMMAND ----------
 
@@ -549,10 +511,10 @@ def criar_dataframe_final(df: DataFrame) -> DataFrame:
     """
     Cria DataFrame final com todas as colunas no formato do sistema.
     
-    Colunas finais: SKU, CANAL, LOJA, DATA FIM, PERCENTUAL
+    Colunas finais: SKU, CANAL, CdFilial, DATA FIM, PERCENTUAL
     
     Args:
-        df: DataFrame com CdSku, CANAL, LOJA, PERCENTUAL
+        df: DataFrame com CdSku, CANAL, CdFilial, PERCENTUAL
         
     Returns:
         DataFrame formatado
@@ -564,8 +526,8 @@ def criar_dataframe_final(df: DataFrame) -> DataFrame:
         .withColumn("SKU", F.col("CdSku").cast("string"))
         .withColumn("DATA FIM", F.lit(DATA_FIM_INT))
         .withColumn("PERCENTUAL", F.round(F.col("PERCENTUAL"), 3).cast("double"))
-        .select("SKU", "CANAL", "LOJA", "DATA FIM", "PERCENTUAL")
-        .orderBy("SKU", "LOJA", "CANAL")
+        .select("SKU", "CANAL", "CdFilial", "DATA FIM", "PERCENTUAL")
+        .orderBy("SKU", "CdFilial", "CANAL")
     )
     
     print(f"✅ DataFrame final criado: {df_final.count():,} registros")
@@ -576,9 +538,9 @@ def criar_dataframe_final(df: DataFrame) -> DataFrame:
 
 def dividir_em_arquivos(df: DataFrame, max_linhas: int = MAX_LINHAS_POR_ARQUIVO) -> List[DataFrame]:
     """
-    Divide DataFrame em arquivos garantindo que SKU-LOJA fique junto (ambos canais).
+    Divide DataFrame em arquivos garantindo que SKU-CdFilial fique junto (ambos canais).
     
-    Regra: Cada SKU-LOJA tem 2 registros (ONLINE + OFFLINE) que devem ficar no mesmo arquivo.
+    Regra: Cada SKU-CdFilial tem 2 registros (ONLINE + OFFLINE) que devem ficar no mesmo arquivo.
     
     Args:
         df: DataFrame completo
@@ -589,8 +551,8 @@ def dividir_em_arquivos(df: DataFrame, max_linhas: int = MAX_LINHAS_POR_ARQUIVO)
     """
     print(f"🔄 Dividindo em arquivos (máx {max_linhas:,} linhas cada)...")
     
-    # Criar chave única por SKU-LOJA
-    df_com_chave = df.withColumn("chave_particao", F.concat(F.col("SKU"), F.lit("_"), F.col("LOJA")))
+    # Criar chave única por SKU-CdFilial
+    df_com_chave = df.withColumn("chave_particao", F.concat(F.col("SKU"), F.lit("_"), F.col("CdFilial")))
     
     # Contar registros por chave
     df_contagem = (
@@ -859,14 +821,6 @@ def exportar_excel_validacao_grupo_necessidade(categoria: str, data_exportacao: 
                 14
             ).otherwise(F.col("CdFilial"))
         )
-        # Identificar se é CD, Outlet ou Loja
-        # CD: NmPorteLoja NULL E não é Outlet (2528, 3604)
-        .withColumn(
-            "Tipo_Filial",
-            F.when(F.col("CdFilial").isin([2528, 3604]), F.lit("OUTLET"))
-            .when(F.col("NmPorteLoja").isNull(), F.lit("CD"))
-            .otherwise(F.lit("LOJA"))
-        )
         .drop("NmPorteLoja")
     )
     
@@ -878,24 +832,13 @@ def exportar_excel_validacao_grupo_necessidade(categoria: str, data_exportacao: 
         print(f"  ✅ ONLINE: {df_online.count():,} registros")
     
     # Agregar por grupo_de_necessidade + CdFilial (first merecimento, não soma)
-    # Manter Tipo_Filial usando first()
     df_online_agg = (
         df_online
         .groupBy("grupo_de_necessidade", "CdFilial")
-        .agg(
-            F.first("Merecimento_ONLINE").alias("Merecimento_ONLINE"),
-            F.first("Tipo_Filial").alias("Tipo_Filial")
-        )
+        .agg(F.first("Merecimento_ONLINE").alias("Merecimento_ONLINE"))
     )
     
-    # Contar CDs, Outlets e Lojas
-    cds_count = df_online_agg.filter(F.col("Tipo_Filial") == "CD").count()
-    outlets_count = df_online_agg.filter(F.col("Tipo_Filial") == "OUTLET").count()
-    lojas_count = df_online_agg.filter(F.col("Tipo_Filial") == "LOJA").count()
     print(f"  ✅ ONLINE agregado: {df_online_agg.count():,} registros (grupo + filial)")
-    print(f"     • {cds_count:,} CDs")
-    print(f"     • {outlets_count:,} Outlets")
-    print(f"     • {lojas_count:,} Lojas")
     
     # 3. Fazer FULL OUTER JOIN
     print("\n🔗 Fazendo outer join...")
@@ -907,34 +850,16 @@ def exportar_excel_validacao_grupo_necessidade(categoria: str, data_exportacao: 
         )
         # Fill NULLs com 0.00 para merecimentos
         .fillna(0.00, subset=["Merecimento_OFFLINE", "Merecimento_ONLINE"])
-        # Fill NULLs para Tipo_Filial (se só existe em OFFLINE, é LOJA)
-        .fillna("LOJA", subset=["Tipo_Filial"])
-        # Ordenar: CDs primeiro, depois Outlets, depois Lojas
-        # Criar coluna auxiliar para ordenação
-        .withColumn(
-            "ordem_tipo",
-            F.when(F.col("Tipo_Filial") == "CD", 1)
-            .when(F.col("Tipo_Filial") == "OUTLET", 2)
-            .otherwise(3)
-        )
-        .orderBy("ordem_tipo", "grupo_de_necessidade", "CdFilial")
-        .drop("ordem_tipo")
+        .orderBy("grupo_de_necessidade", "CdFilial")
     )
     print(f"  ✅ Join: {df_joined.count():,} registros")
-    
-    # Contar CDs que só aparecem no ONLINE
-    cds_apenas_online = df_joined.filter(
-        (F.col("Tipo_Filial") == "CD") & (F.col("Merecimento_OFFLINE") == 0.00)
-    ).count()
-    if cds_apenas_online > 0:
-        print(f"  📊 {cds_apenas_online:,} CDs aparecem APENAS no ONLINE (Merecimento_OFFLINE = 0.00)")
     
     # 4. Converter para Pandas e salvar Excel
     print("\n💾 Salvando Excel...")
     df_pandas = df_joined.toPandas()
     
     # Reordenar colunas para melhor visualização
-    colunas_ordenadas = ["grupo_de_necessidade", "CdFilial", "Tipo_Filial", "Merecimento_OFFLINE", "Merecimento_ONLINE"]
+    colunas_ordenadas = ["grupo_de_necessidade", "CdFilial", "Merecimento_OFFLINE", "Merecimento_ONLINE"]
     df_pandas = df_pandas[colunas_ordenadas]
     
     # Arredondar merecimentos para 3 casas decimais
