@@ -41,14 +41,16 @@ FILIAIS_OUTLET = [2528, 3604]
 # Flag para escolher fonte do de-para
 USAR_DE_PARA_EXCEL = True  # True = Excel, False = CSV antigo
 
-def carregar_de_para_gemeos_tecnologia() -> pd.DataFrame:
+# COMMAND ----------
+
+def carregar_de_para_gemeos_tecnologia(flag_excel=True) -> pd.DataFrame:
     """
     Carrega o de-para de gêmeos tecnologia baseado no flag USAR_DE_PARA_EXCEL.
     
     Returns:
         DataFrame com colunas: CdSku, gemeos
     """
-    if USAR_DE_PARA_EXCEL:
+    if flag_excel:
         print("📋 Carregando de-para do Excel (de_para_gemeos_tecnologia.xlsx)...")
         try:
             de_para_df = pd.read_excel(
@@ -153,7 +155,7 @@ data_calculo_auto = True
 
 if data_calculo_auto:
     DATA_CALCULO = hoje - timedelta(days=1)
-    DATA_CALCULO = DATA_CALCULO.strftime("%Y-%m-%d") 
+    DATA_CALCULO = DATA_CALCULO.strftime("%Y-%m-%d")
 
 # COMMAND ----------
 
@@ -1526,7 +1528,7 @@ categorias = [
     "DIRETORIA DE TELAS",
     "DIRETORIA TELEFONIA CELULAR", 
     #"DIRETORIA DE LINHA BRANCA",
-    #"DIRETORIA LINHA LEVE",
+    "DIRETORIA LINHA LEVE",
     # "DIRETORIA INFO/PERIFERICOS"
 ]
 
@@ -1552,7 +1554,7 @@ for categoria in categorias:
             .upper()
         )
         
-        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste0410"
+        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste0710"
         
         print(f"💾 Salvando matriz de merecimento para: {categoria}")
         print(f"📊 Tabela: {nome_tabela}")
@@ -1600,11 +1602,6 @@ print("\n" + "=" * 80)
 print("🎯 SCRIPT DE CÁLCULO CONCLUÍDO!")
 print("📋 Próximo passo: Executar script de análise de factual e comparações")
 print("=" * 80)
-
-# COMMAND ----------
-
-# MAGIC %sql SELECT * FROM databox.bcg_comum.supply_matriz_merecimento_LINHA_LEVE_teste0410
-# MAGIC
 
 # COMMAND ----------
 
