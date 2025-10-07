@@ -566,18 +566,18 @@ def adicionar_cds_offline_com_merecimento_zero(df_offline: DataFrame, df_online:
     """
     print("  🔍 Identificando CDs que existem apenas no ONLINE...")
     
-    # Identificar CDs no ONLINE (prefixo 0099_)
+    # Identificar CDs no ONLINE (NmPorteLoja é null)
     df_cds_online = (
         df_online
-        .filter(F.col("LOJA").startswith("0099_"))
+        .filter(F.col("NmPorteLoja").isNull())
         .select("CdSku", "CdFilial")
         .distinct()
     )
     
-    # Identificar CDs no OFFLINE (prefixo 0021_)
+    # Identificar CDs no OFFLINE (NmPorteLoja é null)
     df_cds_offline = (
         df_offline
-        .filter(F.col("LOJA").startswith("0021_"))
+        .filter(F.col("NmPorteLoja").isNull())
         .select("CdSku", "CdFilial")
         .distinct()
     )
@@ -601,15 +601,13 @@ def adicionar_cds_offline_com_merecimento_zero(df_offline: DataFrame, df_online:
     # Obter estrutura de exemplo do OFFLINE
     df_exemplo_offline = df_offline.limit(1)
     
-    # Criar registros de CDs para OFFLINE
+    # Criar registros de CDs para OFFLINE usando a mesma estrutura do OFFLINE
     df_cds_offline_novos = (
         df_cds_apenas_online
         .withColumn("CANAL", F.lit("OFFLINE"))
         .withColumn("Merecimento", F.lit(0.0))
-        .withColumn("LOJA", F.concat(F.lit("0021_"), F.lpad(F.col("CdFilial").cast("string"), 5, "0")))
-        .withColumn("DATA FIM", F.lit(DATA_FIM_INT))
-        .withColumn("PERCENTUAL", F.lit(0.0))
-        .select("CdSku", "CdFilial", "CANAL", "Merecimento", "LOJA", "DATA FIM", "PERCENTUAL")
+        .withColumn("NmPorteLoja", F.lit(None).cast("string"))  # CDs têm NmPorteLoja null
+        .select("CdSku", "CdFilial", "CANAL", "Merecimento", "NmPorteLoja")
     )
     
     # Unir com OFFLINE original
