@@ -22,6 +22,8 @@ import os
 import pandas as pd
 from typing import List, Dict, Tuple
 
+!pip install openpyxl
+
 # Inicialização
 spark = SparkSession.builder.appName("salvar_matrizes_csv_sistema").getOrCreate()
 
@@ -143,7 +145,7 @@ COLUNAS_MERECIMENTO = {
 FILTROS_GRUPO_REMOCAO = {
     "DIRETORIA DE TELAS": ["FORA DE LINHA", "SEM_GN"],
     "DIRETORIA TELEFONIA CELULAR": ["FORA DE LINHA", "SEM_GN"],
-    "DIRETORIA LINHA LEVE": ["FORA DE LINHA", "SEM_GN"],
+    "DIRETORIA LINHA LEVE": ["FORA DE LINHA", "SEM_GN", "ASPIRADOR DE PO_BIV"],
 }
 
 FLAG_SELECAO_REMOCAO = {
@@ -755,7 +757,7 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None, formato: st
     print(f"✅ Exportação concluída: {categoria}")
     print(f"📁 Total de arquivos: {len(arquivos_salvos)}")
         
-        return arquivos_salvos
+    return arquivos_salvos
 
 # COMMAND ----------
 
