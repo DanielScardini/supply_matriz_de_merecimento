@@ -520,15 +520,13 @@ def adicionar_informacoes_filial(df: DataFrame) -> DataFrame:
     df_cds = (
         spark.table('databox.logistica_comum.roteirizacaocentrodistribuicao')
         .select("CdFilial", "NmFilial", "NmTipoFilial")
-        .withColumn("NmPorteLoja", F.lit(None).cast("string"))
-        .withColumn("NmRegiaoGeografica", F.lit(None).cast("string"))
-        .withColumn("tipo_filial", F.lit("CD"))
+        .withColumn("tipo_filial", F.col("NmTipoFilial"))
     )
     
     # Lojas ativas
     df_lojas = (
         spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
-        .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica")
+        .select("CdFilial", "NmFilial")
         .withColumn("NmTipoFilial", F.lit(None).cast("string"))
         .withColumn("tipo_filial", F.lit("LOJA"))
     )
@@ -549,7 +547,7 @@ def adicionar_informacoes_filial(df: DataFrame) -> DataFrame:
         df_com_filiais
         .withColumn(
             "is_cd",
-            F.when(F.col("tipo_filial") == "CD", F.lit(True))
+            F.when(F.col("tipo_filial").isin(["CD", "ENTREPOSTO"]), F.lit(True))
             .otherwise(F.lit(False))
         )
     )
@@ -564,7 +562,7 @@ def adicionar_informacoes_filial(df: DataFrame) -> DataFrame:
     df_com_loja = (
         df_com_tipo
         .withColumn("LOJA", formatar_loja_udf(F.col("CdFilial"), F.col("is_cd")))
-        .drop("is_cd", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica", "NmTipoFilial", "tipo_filial")
+        .drop("is_cd", "NmFilial", "NmTipoFilial", "tipo_filial")
     )
     
     print(f"✅ Informações adicionadas: {df_com_loja.count():,} registros")
