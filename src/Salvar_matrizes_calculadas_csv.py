@@ -568,7 +568,7 @@ def criar_dataframe_final(df: DataFrame) -> DataFrame:
         df
         .withColumn("SKU", F.col("CdSku").cast("string"))
         .withColumn("DATA FIM", F.lit(DATA_FIM_INT))
-        .withColumn("PERCENTUAL", F.round(F.col("PERCENTUAL"), 3))
+        .withColumn("PERCENTUAL", F.round(F.col("PERCENTUAL"), 3).cast("double"))
         .select("SKU", "CANAL", "LOJA", "DATA FIM", "PERCENTUAL")
         .orderBy("SKU", "LOJA", "CANAL")
     )
@@ -700,20 +700,29 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None) -> List[str
     print()
     dfs_arquivos = dividir_em_arquivos(df_final)
     
-    # 7. Salvar CSVs
-    print(f"\n💾 Salvando arquivos CSV...")
+    # 7. Salvar CSVs e XLSX
+    print(f"\n💾 Salvando arquivos CSV e XLSX...")
     arquivos_salvos = []
     
     for idx, df_arquivo in enumerate(dfs_arquivos, start=1):
-        nome_arquivo = f"matriz_merecimento_{grupo_apelido}_{data_exportacao}_parte{idx}.csv"
-        caminho_completo = f"{pasta_data}/{nome_arquivo}"
+        nome_base = f"matriz_merecimento_{grupo_apelido}_{data_exportacao}_parte{idx}"
         
-        # Salvar CSV
+        # Converter para Pandas
         df_pandas = df_arquivo.toPandas()
-        df_pandas.to_csv(caminho_completo, index=False, sep=",", encoding="utf-8")
         
-        print(f"  ✅ Parte {idx}: {nome_arquivo} ({len(df_pandas):,} linhas)")
-        arquivos_salvos.append(caminho_completo)
+        # Garantir que PERCENTUAL seja float com vírgula como separador decimal
+        df_pandas["PERCENTUAL"] = df_pandas["PERCENTUAL"].astype(float)
+        
+        # Salvar CSV com vírgula como separador decimal
+        caminho_csv = f"{pasta_data}/{nome_base}.csv"
+        df_pandas.to_csv(caminho_csv, index=False, sep=";", decimal=",", encoding="utf-8")
+        
+        # Salvar XLSX
+        caminho_xlsx = f"{pasta_data}/{nome_base}.xlsx"
+        df_pandas.to_excel(caminho_xlsx, index=False, engine="openpyxl")
+        
+        print(f"  ✅ Parte {idx}: {nome_base}.csv + {nome_base}.xlsx ({len(df_pandas):,} linhas)")
+        arquivos_salvos.extend([caminho_csv, caminho_xlsx])
         
         print("\n" + "=" * 80)
     print(f"✅ Exportação concluída: {categoria}")
