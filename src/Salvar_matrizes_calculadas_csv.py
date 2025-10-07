@@ -550,74 +550,6 @@ def garantir_soma_exata_100(df: DataFrame) -> DataFrame:
     
     return df_corrigido
 
-def adicionar_cds_offline_com_merecimento_zero(df_offline: DataFrame, df_online: DataFrame) -> DataFrame:
-    """
-    Adiciona registros de CDs no OFFLINE com merecimento 0 para garantir pares completos.
-    
-    Identifica CDs que existem apenas no ONLINE e cria registros correspondentes
-    no OFFLINE com prefixo 0021_ e merecimento 0.
-    
-    Args:
-        df_offline: DataFrame do canal offline
-        df_online: DataFrame do canal online
-        
-    Returns:
-        DataFrame offline com CDs adicionados
-    """
-    print("  🔍 Identificando CDs que existem apenas no ONLINE...")
-    
-    # Identificar CDs no ONLINE (NmPorteLoja é null)
-    df_cds_online = (
-        df_online
-        .filter(F.col("NmPorteLoja").isNull())
-        .select("CdSku", "CdFilial")
-        .distinct()
-    )
-    
-    # Identificar CDs no OFFLINE (NmPorteLoja é null)
-    df_cds_offline = (
-        df_offline
-        .filter(F.col("NmPorteLoja").isNull())
-        .select("CdSku", "CdFilial")
-        .distinct()
-    )
-    
-    # CDs que existem apenas no ONLINE
-    df_cds_apenas_online = (
-        df_cds_online
-        .join(df_cds_offline, on=["CdSku", "CdFilial"], how="left_anti")
-    )
-    
-    qtd_cds_apenas_online = df_cds_apenas_online.count()
-    print(f"  📊 CDs apenas no ONLINE: {qtd_cds_apenas_online:,}")
-    
-    if qtd_cds_apenas_online == 0:
-        print("  ✅ Todos os CDs já existem no OFFLINE")
-        return df_offline
-    
-    # Criar registros de CDs para OFFLINE com merecimento 0
-    print("  🔧 Criando registros de CDs para OFFLINE com merecimento 0...")
-    
-    # Obter estrutura de exemplo do OFFLINE
-    df_exemplo_offline = df_offline.limit(1)
-    
-    # Criar registros de CDs para OFFLINE usando a mesma estrutura do OFFLINE
-    df_cds_offline_novos = (
-        df_cds_apenas_online
-        .withColumn("CANAL", F.lit("OFFLINE"))
-        .withColumn("Merecimento", F.lit(0.0))
-        .withColumn("NmPorteLoja", F.lit(None).cast("string"))  # CDs têm NmPorteLoja null
-        .select("CdSku", "CdFilial", "CANAL", "Merecimento", "NmPorteLoja")
-    )
-    
-    # Unir com OFFLINE original
-    df_offline_com_cds = df_offline.union(df_cds_offline_novos)
-    
-    print(f"  ✅ CDs adicionados: {qtd_cds_apenas_online:,} registros")
-    print(f"  📊 Total OFFLINE: {df_offline_com_cds.count():,} registros")
-    
-    return df_offline_com_cds
-
 # COMMAND ----------
 
 def adicionar_informacoes_filial(df: DataFrame) -> DataFrame:
@@ -969,32 +901,28 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None, formato: st
     # 1.5. Diagnóstico de diferenças
     diagnosticar_diferenca_canais(df_offline, df_online, categoria)
     
-    # 2. Adicionar CDs no OFFLINE com merecimento 0
-    print("\n🔄 Adicionando CDs no OFFLINE com merecimento 0...")
-    df_offline_com_cds = adicionar_cds_offline_com_merecimento_zero(df_offline, df_online)
-    
-    # 3. União
+    # 2. União
     print("\n🔗 Unindo canais...")
-    df_union = df_offline_com_cds.union(df_online)
+    df_union = df_offline.union(df_online)
     print(f"  ✅ União: {df_union.count():,} registros")
     
-    # 4. Normalizar para 100.00%
+    # 3. Normalizar para 100.00%
     print()
     df_normalizado = normalizar_para_100_exato(df_union)
     
-    # 5. Adicionar informações
+    # 4. Adicionar informações
     print()
     df_com_filiais = adicionar_informacoes_filial(df_normalizado)
     
-    # 6. Criar DataFrame final
+    # 5. Criar DataFrame final
     print()
     df_final = criar_dataframe_final(df_com_filiais)
     
-    # 7. Dividir em arquivos
+    # 6. Dividir em arquivos
     print()
     dfs_arquivos = dividir_em_arquivos(df_final)
     
-    # 8. Salvar arquivos no formato escolhido
+    # 7. Salvar arquivos no formato escolhido
     print(f"\n💾 Salvando arquivos {formato.upper()}...")
     arquivos_salvos = []
     
@@ -1025,7 +953,7 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None, formato: st
     print(f"✅ Exportação concluída: {categoria}")
     print(f"📁 Total de arquivos: {len(arquivos_salvos)}")
         
-    return arquivos_salvos
+        return arquivos_salvos
 
 # COMMAND ----------
 
