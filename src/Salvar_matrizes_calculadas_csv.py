@@ -855,7 +855,7 @@ def exportar_excel_validacao_grupo_necessidade(categoria: str, data_exportacao: 
         .withColumn(
             "CdFilial", 
             F.when(
-                F.col("CdFilial") == 1401 and categoria in ["DIRETORIA DE TELAS", "DIRETORIA TELEFONIA CELULAR"], 
+                (F.col("CdFilial") == 1401) & (F.lit(categoria).isin(["DIRETORIA DE TELAS", "DIRETORIA TELEFONIA CELULAR"])), 
                 14
             ).otherwise(F.col("CdFilial"))
         )
