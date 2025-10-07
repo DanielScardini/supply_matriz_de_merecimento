@@ -22,7 +22,7 @@ import os
 import pandas as pd
 from typing import List, Dict, Tuple
 
-!pip install openpyxl
+# pip install openpyxl
 
 # Inicialização
 spark = SparkSession.builder.appName("salvar_matrizes_csv_sistema").getOrCreate()
@@ -453,21 +453,21 @@ def normalizar_para_100_exato(df: DataFrame) -> DataFrame:
         .withColumn("rank", F.row_number().over(window_rank))
     )
     
-    # 3. Calcular diferença para 100.00 com precisão melhorada
+    # 3. Calcular diferença para 100.00 com precisão de 3 casas decimais
     df_com_diferenca = (
         df_com_rank
         .withColumn("soma_proporcional", F.sum("Merecimento_proporcional").over(window_sku_canal))
-        .withColumn("diferenca_100", F.round(100.0 - F.col("soma_proporcional"), 6))
+        .withColumn("diferenca_100", F.round(100.0 - F.col("soma_proporcional"), 3))
     )
     
-    # 4. Ajustar apenas o maior merecimento (rank = 1) com precisão
+    # 4. Ajustar apenas o maior merecimento (rank = 1) com precisão de 3 casas
     df_ajustado = (
         df_com_diferenca
         .withColumn(
             "PERCENTUAL",
             F.when(F.col("rank") == 1, 
-                   F.round(F.col("Merecimento_proporcional") + F.col("diferenca_100"), 6))
-            .otherwise(F.round(F.col("Merecimento_proporcional"), 6))
+                   F.round(F.col("Merecimento_proporcional") + F.col("diferenca_100"), 3))
+            .otherwise(F.round(F.col("Merecimento_proporcional"), 3))
         )
         .select("CdSku", "CdFilial", "CANAL", "PERCENTUAL")
     )
@@ -508,11 +508,11 @@ def garantir_normalizacao_exata(df: DataFrame) -> DataFrame:
     window_sku_canal = W.partitionBy("CdSku", "CANAL")
     window_rank = W.partitionBy("CdSku", "CANAL").orderBy(F.desc("PERCENTUAL"))
     
-    # Calcular soma atual e diferença
+    # Calcular soma atual e diferença com 3 casas decimais
     df_com_soma = (
         df
         .withColumn("soma_atual", F.sum("PERCENTUAL").over(window_sku_canal))
-        .withColumn("diferenca_exata", F.round(100.0 - F.col("soma_atual"), 6))
+        .withColumn("diferenca_exata", F.round(100.0 - F.col("soma_atual"), 3))
     )
     
     # Aplicar correção no maior merecimento de cada grupo
@@ -526,8 +526,8 @@ def garantir_normalizacao_exata(df: DataFrame) -> DataFrame:
         .withColumn(
             "PERCENTUAL",
             F.when(F.col("rank") == 1, 
-                   F.round(F.col("PERCENTUAL") + F.col("diferenca_exata"), 6))
-            .otherwise(F.round(F.col("PERCENTUAL"), 6))
+                   F.round(F.col("PERCENTUAL") + F.col("diferenca_exata"), 3))
+            .otherwise(F.round(F.col("PERCENTUAL"), 3))
         )
         .select("CdSku", "CdFilial", "CANAL", "PERCENTUAL")
     )
@@ -671,6 +671,8 @@ def validar_integridade_dados(df: DataFrame) -> bool:
     1. Somas por SKU+CANAL = 100%
     2. Chaves SKU-LOJA-CANAL aparecem uma única vez
     3. Para cada SKU-LOJA, ambos os canais estão presentes
+    4. Verificar duplicidade específica de SKU-LOJA-CANAL
+    5. Verificar que duplas SKU-LOJA estão completas
     
     Args:
         df: DataFrame para validação
@@ -749,6 +751,42 @@ def validar_integridade_dados(df: DataFrame) -> bool:
     else:
         print(f"  ✅ Canais corretos: {canais_unicos}")
     
+    # 5. Validação específica de duplicidade SKU-LOJA-CANAL
+    print("  🔍 Verificando duplicidade específica SKU-LOJA-CANAL...")
+    total_registros = df.count()
+    registros_unicos = df.select("SKU", "LOJA", "CANAL").distinct().count()
+    
+    if total_registros != registros_unicos:
+        print(f"  ❌ ERRO: Duplicidade detectada! Total: {total_registros}, Únicos: {registros_unicos}")
+        return False
+    else:
+        print(f"  ✅ Sem duplicidade: {total_registros} registros = {registros_unicos} únicos")
+    
+    # 6. Validação de duplas SKU-LOJA completas
+    print("  👥 Verificando duplas SKU-LOJA completas...")
+    df_duplas = (
+        df
+        .groupBy("SKU", "LOJA")
+        .agg(
+            F.count("*").alias("QtdRegistros"),
+            F.collect_set("CANAL").alias("Canais")
+        )
+    )
+    
+    duplas_incompletas = df_duplas.filter(
+        (F.col("QtdRegistros") != 2) | 
+        (~F.array_contains(F.col("Canais"), "ONLINE")) |
+        (~F.array_contains(F.col("Canais"), "OFFLINE"))
+    )
+    qtd_duplas_incompletas = duplas_incompletas.count()
+    
+    if qtd_duplas_incompletas > 0:
+        print(f"  ❌ ERRO: {qtd_duplas_incompletas} duplas SKU-LOJA incompletas")
+        duplas_incompletas.show(10, truncate=False)
+        return False
+    else:
+        print(f"  ✅ Todas as {df_duplas.count()} duplas SKU-LOJA estão completas")
+    
     print("  ✅ Todas as validações passaram!")
     return True
 
@@ -812,7 +850,78 @@ def dividir_em_arquivos(df: DataFrame, max_linhas: int = MAX_LINHAS_POR_ARQUIVO)
         print(f"    - Parte {i+1}: {qtd:,} linhas")
         dfs_separados.append(df_arquivo)
     
+    # Validação final: verificar se duplas SKU-LOJA estão no mesmo arquivo
+    print("  🔍 Verificando se duplas SKU-LOJA estão no mesmo arquivo...")
+    validar_duplas_no_mesmo_arquivo(dfs_separados)
+    
     return dfs_separados
+
+def validar_duplas_no_mesmo_arquivo(dfs_arquivos: List[DataFrame]) -> None:
+    """
+    Valida que todas as duplas SKU-LOJA estão no mesmo arquivo.
+    
+    Args:
+        dfs_arquivos: Lista de DataFrames dos arquivos
+    """
+    print("    🔍 Verificando duplas SKU-LOJA no mesmo arquivo...")
+    
+    # Criar DataFrame com informações de arquivo para cada SKU-LOJA
+    df_arquivos_info = []
+    
+    for i, df_arquivo in enumerate(dfs_arquivos):
+        if df_arquivo.count() > 0:
+            df_info = (
+                df_arquivo
+                .select("SKU", "LOJA", "CANAL")
+                .distinct()
+                .withColumn("arquivo", F.lit(i))
+            )
+            df_arquivos_info.append(df_info)
+    
+    if not df_arquivos_info:
+        print("    ⚠️ Nenhum arquivo com dados encontrado")
+        return
+    
+    # Unir informações de todos os arquivos
+    df_todos_arquivos = df_arquivos_info[0]
+    for df_info in df_arquivos_info[1:]:
+        df_todos_arquivos = df_todos_arquivos.union(df_info)
+    
+    # Verificar se cada SKU-LOJA aparece em apenas um arquivo
+    df_sku_loja_arquivos = (
+        df_todos_arquivos
+        .groupBy("SKU", "LOJA")
+        .agg(
+            F.countDistinct("arquivo").alias("QtdArquivos"),
+            F.collect_list("arquivo").alias("Arquivos"),
+            F.collect_list("CANAL").alias("Canais")
+        )
+    )
+    
+    duplas_em_multiplos_arquivos = df_sku_loja_arquivos.filter(F.col("QtdArquivos") > 1)
+    qtd_duplas_separadas = duplas_em_multiplos_arquivos.count()
+    
+    if qtd_duplas_separadas > 0:
+        print(f"    ❌ ERRO: {qtd_duplas_separadas} duplas SKU-LOJA estão em múltiplos arquivos")
+        duplas_em_multiplos_arquivos.show(10, truncate=False)
+        raise ValueError(f"{qtd_duplas_separadas} duplas SKU-LOJA foram separadas entre arquivos")
+    else:
+        print(f"    ✅ Todas as {df_sku_loja_arquivos.count()} duplas SKU-LOJA estão no mesmo arquivo")
+    
+    # Verificar se cada dupla tem exatamente 2 canais no mesmo arquivo
+    duplas_incompletas = df_sku_loja_arquivos.filter(
+        (F.size(F.col("Canais")) != 2) |
+        (~F.array_contains(F.col("Canais"), "ONLINE")) |
+        (~F.array_contains(F.col("Canais"), "OFFLINE"))
+    )
+    qtd_duplas_incompletas = duplas_incompletas.count()
+    
+    if qtd_duplas_incompletas > 0:
+        print(f"    ❌ ERRO: {qtd_duplas_incompletas} duplas incompletas nos arquivos")
+        duplas_incompletas.show(5, truncate=False)
+        raise ValueError(f"{qtd_duplas_incompletas} duplas SKU-LOJA estão incompletas nos arquivos")
+    else:
+        print(f"    ✅ Todas as duplas estão completas nos arquivos")
 
 def validar_pares_canais_arquivo(df_arquivo: DataFrame, num_arquivo: int) -> None:
     """
@@ -952,8 +1061,8 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None, formato: st
         print("\n" + "=" * 80)
     print(f"✅ Exportação concluída: {categoria}")
     print(f"📁 Total de arquivos: {len(arquivos_salvos)}")
-        
-        return arquivos_salvos
+    
+    return arquivos_salvos
 
 # COMMAND ----------
 
