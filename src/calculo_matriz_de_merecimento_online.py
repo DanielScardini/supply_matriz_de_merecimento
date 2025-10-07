@@ -67,14 +67,14 @@ def carregar_de_para_gemeos_tecnologia() -> pd.DataFrame:
             
             # Mapear colunas para o formato esperado
             if 'sku' in de_para_df.columns and 'gemeos' in de_para_df.columns:
-                de_para_df = de_para_df.rename(columns={'sku': 'cdsku'})
+                de_para_df = de_para_df.rename(columns={'sku': 'CdSku'})
             elif 'cdsku' in de_para_df.columns and 'gemeos' in de_para_df.columns:
-                pass  # Já está no formato correto
+                de_para_df = de_para_df.rename(columns={'cdsku': 'CdSku'})
             else:
                 raise ValueError(f"Colunas não encontradas. Disponíveis: {list(de_para_df.columns)}")
             
             # Garantir que CdSku seja string
-            de_para_df['cdsku'] = de_para_df['cdsku'].astype(str)
+            de_para_df['CdSku'] = de_para_df['CdSku'].astype(str)
             
             # Remover duplicatas
             de_para_df = de_para_df.drop_duplicates()
