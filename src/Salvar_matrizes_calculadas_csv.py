@@ -43,9 +43,11 @@ print(f"📅 Data fim (+60 dias): {DATA_FIM.strftime('%Y-%m-%d')} → {DATA_FIM_
 dt_inicio = "2025-08-01"
 dt_fim = "2025-10-01"
 
-df_demanda = (
+# Calcular top 80% por ESPÉCIE (SKUs)
+df_demanda_especie = (
   spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
   .filter(F.col("NmSetorGerencial") == "PORTATEIS")
+  .filter(F.col("NmAgrupamentoDiretoriaSetor") == "LINHA LEVE")
   .filter(F.col("DtAtual") >= dt_inicio)
   .filter(F.col("DtAtual") < dt_fim)
   .groupBy("NmEspecieGerencial")
@@ -53,7 +55,20 @@ df_demanda = (
     F.sum(F.col("QtMercadoria")).alias("QtDemanda"),
     F.sum(F.col("Receita")).alias("Receita")
   )
+)
 
+# Calcular top 80% por GRUPO DE NECESSIDADE
+df_demanda_grupo = (
+  spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
+  .filter(F.col("NmSetorGerencial") == "PORTATEIS")
+  .filter(F.col("NmAgrupamentoDiretoriaSetor") == "LINHA LEVE")
+  .filter(F.col("DtAtual") >= dt_inicio)
+  .filter(F.col("DtAtual") < dt_fim)
+  .groupBy("grupo_de_necessidade")
+  .agg(
+    F.sum(F.col("QtMercadoria")).alias("QtDemanda"),
+    F.sum(F.col("Receita")).alias("Receita")
+  )
 )
 
 # calcular totais com window
@@ -62,8 +77,9 @@ w_total = W.rowsBetween(W.unboundedPreceding, W.unboundedFollowing)
 # window para cumulativo
 w_cum = W.orderBy(F.col("PercDemanda").desc()).rowsBetween(W.unboundedPreceding, 0)
 
-df_demanda = (
-    df_demanda
+# TOP 80% POR ESPÉCIE (SKUs)
+df_demanda_especie = (
+    df_demanda_especie
     .withColumn("TotalDemanda", F.sum("QtDemanda").over(w_total))
     .withColumn("TotalReceita", F.sum("Receita").over(w_total))
     .withColumn("PercDemanda", F.round((F.col("QtDemanda") / F.col("TotalDemanda")) * 100, 0))
@@ -71,31 +87,46 @@ df_demanda = (
     .drop("TotalDemanda", "TotalReceita")
     .withColumn("PercDemandaCumulativo", F.sum("PercDemanda").over(w_cum))
     .withColumn("PercReceitaCumulativo", F.sum("PercReceita").over(w_cum))
-
 )
 
 especies_top80 = (
-    df_demanda
+    df_demanda_especie
     .filter(F.col("PercDemandaCumulativo") <= 80)
     .select("NmEspecieGerencial")
     .rdd.flatMap(lambda x: x)
     .collect()
 )
 
+# TOP 80% POR GRUPO DE NECESSIDADE
+df_demanda_grupo = (
+    df_demanda_grupo
+    .withColumn("TotalDemanda", F.sum("QtDemanda").over(w_total))
+    .withColumn("TotalReceita", F.sum("Receita").over(w_total))
+    .withColumn("PercDemanda", F.round((F.col("QtDemanda") / F.col("TotalDemanda")) * 100, 0))
+    .withColumn("PercReceita", F.round((F.col("Receita") / F.col("TotalReceita")) * 100, 0))
+    .drop("TotalDemanda", "TotalReceita")
+    .withColumn("PercDemandaCumulativo", F.sum("PercDemanda").over(w_cum))
+    .withColumn("PercReceitaCumulativo", F.sum("PercReceita").over(w_cum))
+)
 
+grupos_top80 = (
+    df_demanda_grupo
+    .filter(F.col("PercDemandaCumulativo") <= 80)
+    .select("grupo_de_necessidade")
+    .rdd.flatMap(lambda x: x)
+    .collect()
+)
+
+
+print("🔝 ESPÉCIES TOP 80%:")
 print(especies_top80)
+print(f"Total de espécies: {len(especies_top80)}")
 
+print("\n🔝 GRUPOS DE NECESSIDADE TOP 80%:")
+print(grupos_top80)
+print(f"Total de grupos: {len(grupos_top80)}")
 
-especies_boas = [
-    "LIQUIDIFICADORES 350 A 1000 W",
-    "FERROS DE PASSAR A SECO",
-    "LIQUIDIFICADORES ACIMA 1001 W.",
-    "PANELAS ELETRICAS DE ARROZ",
-    "FRITADEIRA ELETRICA (CAPSULA)",
-    "FERROS PAS. ROUPA VAPOR/SPRAY",
-    "CAFETEIRA ELETRICA (FILTRO)"
-]
-
+# SKUs das espécies top 80%
 skus_especies_top80 = (
     spark.table('data_engineering_prd.app_venda.mercadoria')
     .select(
@@ -109,7 +140,15 @@ skus_especies_top80 = (
     .collect()
 )
 
-df_demanda.filter(F.col("NmEspecieGerencial").isin(especies_top80)).agg(F.sum("PercDemanda")).display()
+print(f"\n📊 SKUs das espécies top 80%: {len(skus_especies_top80)} SKUs")
+
+# Validação dos percentuais
+print("\n📈 VALIDAÇÃO PERCENTUAIS:")
+print("ESPÉCIES:")
+df_demanda_especie.filter(F.col("NmEspecieGerencial").isin(especies_top80)).agg(F.sum("PercDemanda")).show()
+
+print("GRUPOS DE NECESSIDADE:")
+df_demanda_grupo.filter(F.col("grupo_de_necessidade").isin(grupos_top80)).agg(F.sum("PercDemanda")).show()
 
 # COMMAND ----------
 
@@ -728,7 +767,7 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None) -> List[str
     print(f"✅ Exportação concluída: {categoria}")
     print(f"📁 Total de arquivos: {len(arquivos_salvos)}")
         
-    return arquivos_salvos
+        return arquivos_salvos
 
 # COMMAND ----------
 
