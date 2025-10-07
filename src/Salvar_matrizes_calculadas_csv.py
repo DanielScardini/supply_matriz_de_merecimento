@@ -678,9 +678,9 @@ def dividir_em_arquivos(df: DataFrame, max_linhas: int = MAX_LINHAS_POR_ARQUIVO)
 
 # COMMAND ----------
 
-def exportar_matriz_csv(categoria: str, data_exportacao: str = None) -> List[str]:
+def exportar_matriz_csv(categoria: str, data_exportacao: str = None, formato: str = "xlsx") -> List[str]:
     """
-    Exporta matriz de merecimento em formato CSV para uma categoria.
+    Exporta matriz de merecimento em formato CSV ou XLSX para uma categoria.
     
     Processo completo:
     1. Carregar OFFLINE e ONLINE
@@ -689,11 +689,12 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None) -> List[str
     4. Adicionar informações de filiais
     5. Criar DataFrame final formatado
     6. Dividir em arquivos (max 200k linhas)
-    7. Salvar CSVs
+    7. Salvar arquivos no formato escolhido
     
     Args:
         categoria: Nome da categoria
         data_exportacao: Data de exportação (padrão: hoje)
+        formato: Formato de exportação - "csv" ou "xlsx" (padrão: "xlsx")
         
     Returns:
         Lista de caminhos dos arquivos salvos
@@ -738,8 +739,8 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None) -> List[str
     print()
     dfs_arquivos = dividir_em_arquivos(df_final)
     
-    # 7. Salvar CSVs e XLSX
-    print(f"\n💾 Salvando arquivos CSV e XLSX...")
+    # 7. Salvar arquivos no formato escolhido
+    print(f"\n💾 Salvando arquivos {formato.upper()}...")
     arquivos_salvos = []
     
     for idx, df_arquivo in enumerate(dfs_arquivos, start=1):
@@ -748,19 +749,22 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None) -> List[str
         # Converter para Pandas
         df_pandas = df_arquivo.toPandas()
         
-        # Garantir que PERCENTUAL seja float com vírgula como separador decimal
+        # Garantir que PERCENTUAL seja float
         df_pandas["PERCENTUAL"] = df_pandas["PERCENTUAL"].astype(float)
         
-        # Salvar CSV com vírgula como separador decimal
-        caminho_csv = f"{pasta_data}/{nome_base}.csv"
-        df_pandas.to_csv(caminho_csv, index=False, sep=";", decimal=",", encoding="utf-8")
+        if formato.lower() == "csv":
+            # Salvar CSV com vírgula como separador decimal
+            caminho_arquivo = f"{pasta_data}/{nome_base}.csv"
+            df_pandas.to_csv(caminho_arquivo, index=False, sep=";", decimal=",", encoding="utf-8")
+        elif formato.lower() == "xlsx":
+            # Salvar XLSX
+            caminho_arquivo = f"{pasta_data}/{nome_base}.xlsx"
+            df_pandas.to_excel(caminho_arquivo, index=False, engine="openpyxl")
+        else:
+            raise ValueError(f"Formato '{formato}' não suportado. Use 'csv' ou 'xlsx'.")
         
-        # Salvar XLSX
-        caminho_xlsx = f"{pasta_data}/{nome_base}.xlsx"
-        df_pandas.to_excel(caminho_xlsx, index=False, engine="openpyxl")
-        
-        print(f"  ✅ Parte {idx}: {nome_base}.csv + {nome_base}.xlsx ({len(df_pandas):,} linhas)")
-        arquivos_salvos.extend([caminho_csv, caminho_xlsx])
+        print(f"  ✅ Parte {idx}: {nome_base}.{formato.lower()} ({len(df_pandas):,} linhas)")
+        arquivos_salvos.append(caminho_arquivo)
         
         print("\n" + "=" * 80)
     print(f"✅ Exportação concluída: {categoria}")
@@ -775,12 +779,13 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None) -> List[str
 
 # COMMAND ----------
 
-def exportar_todas_categorias(data_exportacao: str = None) -> Dict[str, List[str]]:
+def exportar_todas_categorias(data_exportacao: str = None, formato: str = "xlsx") -> Dict[str, List[str]]:
     """
-    Exporta matrizes CSV para todas as categorias.
+    Exporta matrizes para todas as categorias no formato escolhido.
     
     Args:
         data_exportacao: Data de exportação (padrão: hoje)
+        formato: Formato de exportação - "csv" ou "xlsx" (padrão: "xlsx")
         
     Returns:
         Dicionário com listas de arquivos por categoria
@@ -795,7 +800,7 @@ def exportar_todas_categorias(data_exportacao: str = None) -> Dict[str, List[str
         print("-" * 60)
         
         try:
-            arquivos = exportar_matriz_csv(categoria, data_exportacao)
+            arquivos = exportar_matriz_csv(categoria, data_exportacao, formato)
             resultados[categoria] = arquivos
         except Exception as e:
             print(f"❌ Erro: {str(e)}")
