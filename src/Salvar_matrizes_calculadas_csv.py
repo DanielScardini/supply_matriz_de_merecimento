@@ -824,11 +824,11 @@ def exportar_excel_validacao_grupo_necessidade(categoria: str, data_exportacao: 
     else:
         print(f"  ✅ OFFLINE: {df_offline.count():,} registros")
     
-    # Agregar por grupo_de_necessidade + CdFilial (soma merecimentos)
+    # Agregar por grupo_de_necessidade + CdFilial (first merecimento, não soma)
     df_offline_agg = (
         df_offline
         .groupBy("grupo_de_necessidade", "CdFilial")
-        .agg(F.sum("Merecimento_OFFLINE").alias("Merecimento_OFFLINE"))
+        .agg(F.first("Merecimento_OFFLINE").alias("Merecimento_OFFLINE"))
     )
     print(f"  ✅ OFFLINE agregado: {df_offline_agg.count():,} registros (grupo + filial)")
     
@@ -865,13 +865,13 @@ def exportar_excel_validacao_grupo_necessidade(categoria: str, data_exportacao: 
     else:
         print(f"  ✅ ONLINE: {df_online.count():,} registros")
     
-    # Agregar por grupo_de_necessidade + CdFilial (soma merecimentos)
+    # Agregar por grupo_de_necessidade + CdFilial (first merecimento, não soma)
     # Manter Tipo_Filial usando first()
     df_online_agg = (
         df_online
         .groupBy("grupo_de_necessidade", "CdFilial")
         .agg(
-            F.sum("Merecimento_ONLINE").alias("Merecimento_ONLINE"),
+            F.first("Merecimento_ONLINE").alias("Merecimento_ONLINE"),
             F.first("Tipo_Filial").alias("Tipo_Filial")
         )
     )
