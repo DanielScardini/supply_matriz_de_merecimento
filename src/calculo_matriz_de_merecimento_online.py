@@ -527,7 +527,7 @@ def carregar_mapeamentos_produtos(categoria: str) -> tuple:
     
     return (
         de_para_modelos_tecnologia.rename(columns={"codigo_item": "CdSku"})[['CdSku', 'modelos']], 
-        de_para_gemeos_tecnologia.rename(columns={"sku_loja": "CdSku"})[['CdSku', 'gemeos']] if de_para_gemeos_tecnologia is not None else None
+        de_para_gemeos_tecnologia[['CdSku', 'gemeos']] if de_para_gemeos_tecnologia is not None else None
     )
 
 # COMMAND ----------
