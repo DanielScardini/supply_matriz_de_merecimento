@@ -316,6 +316,11 @@ def determinar_grupo_necessidade(categoria: str, df: DataFrame) -> DataFrame:
         print(f"  • Coluna origem: {coluna_origem} + DsVoltagem")
         print(f"  • Valores copiados: {df_com_grupo.select('grupo_de_necessidade').distinct().count()} grupos únicos")
         
+        # Mostrar amostra dos grupos de necessidade
+        grupos_amostra = df_com_grupo.select("grupo_de_necessidade").distinct().limit(10).collect()
+        grupos_lista = [row.grupo_de_necessidade for row in grupos_amostra]
+        print(f"  • Amostra dos grupos: {grupos_lista}")
+        
     else:
         # Para outras categorias, mantém o comportamento original
         df_com_grupo = df.withColumn(
@@ -329,6 +334,11 @@ def determinar_grupo_necessidade(categoria: str, df: DataFrame) -> DataFrame:
         print(f"✅ Grupo de necessidade definido para '{categoria}':")
         print(f"  • Coluna origem: {coluna_origem}")
         print(f"  • Valores copiados: {df_com_grupo.select('grupo_de_necessidade').distinct().count()} grupos únicos")
+        
+        # Mostrar amostra dos grupos de necessidade
+        grupos_amostra = df_com_grupo.select("grupo_de_necessidade").distinct().limit(10).collect()
+        grupos_lista = [row.grupo_de_necessidade for row in grupos_amostra]
+        print(f"  • Amostra dos grupos: {grupos_lista}")
     
     return df_com_grupo
 
