@@ -610,7 +610,7 @@ def adicionar_informacoes_filial(df: DataFrame) -> DataFrame:
         df_com_filiais
         .withColumn(
             "is_cd",
-            F.when(F.col("tipo_filial").isin(["CD", "ENTREPOSTO"]), F.lit(True))
+            F.when(F.col("tipo_filial").isin(["CD", "Entreposto", "TERMINAL"]), F.lit(True))
             .otherwise(F.lit(False))
         )
     )
@@ -953,7 +953,7 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None, formato: st
     print(f"✅ Exportação concluída: {categoria}")
     print(f"📁 Total de arquivos: {len(arquivos_salvos)}")
         
-        return arquivos_salvos
+    return arquivos_salvos
 
 # COMMAND ----------
 
