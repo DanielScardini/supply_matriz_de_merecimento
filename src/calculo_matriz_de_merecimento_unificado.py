@@ -29,6 +29,8 @@ from datetime import datetime, timedelta, date
 import pandas as pd
 from typing import List, Optional, Dict, Any
 
+!pip install openpyxl
+
 # Inicialização do Spark
 spark = SparkSession.builder.appName("calculo_matriz_merecimento_unificado").getOrCreate()
 
