@@ -520,6 +520,8 @@ def adicionar_informacoes_filial(df: DataFrame) -> DataFrame:
     df_cds = (
         spark.table('databox.logistica_comum.roteirizacaocentrodistribuicao')
         .select("CdFilial", "NmFilial", "NmTipoFilial")
+        .withColumn("NmPorteLoja", F.lit(None).cast("string"))
+        .withColumn("NmRegiaoGeografica", F.lit(None).cast("string"))
         .withColumn("tipo_filial", F.lit("CD"))
     )
     
@@ -527,6 +529,7 @@ def adicionar_informacoes_filial(df: DataFrame) -> DataFrame:
     df_lojas = (
         spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
         .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica")
+        .withColumn("NmTipoFilial", F.lit(None).cast("string"))
         .withColumn("tipo_filial", F.lit("LOJA"))
     )
     
