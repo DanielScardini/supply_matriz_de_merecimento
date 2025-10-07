@@ -479,12 +479,12 @@ def normalizar_para_100_exato(df: DataFrame) -> DataFrame:
         .agg(F.sum("PERCENTUAL").alias("soma_total"))
     )
     
-    nao_100 = soma_validacao.filter((F.col("soma_total") < 99.99) | (F.col("soma_total") > 100.01)).count()
+    nao_100 = soma_validacao.filter((F.col("soma_total") < 99.9) | (F.col("soma_total") > 100.1)).count()
     
     if nao_100 > 0:
-        print(f"  ⚠️ ATENÇÃO: {nao_100} grupos não somam 100.00%")
+        print(f"  ⚠️ ATENÇÃO: {nao_100} grupos não somam 100.00% (tolerância 0.1%)")
     else:
-        print(f"  ✅ Todos os grupos somam 100.00%")
+        print(f"  ✅ Todos os grupos somam 100.00% (tolerância 0.1%)")
     
     print(f"✅ Normalização concluída: {df_ajustado.count():,} registros")
     
@@ -629,16 +629,16 @@ def validar_integridade_dados(df: DataFrame) -> bool:
         .agg(F.sum("PERCENTUAL").alias("SomaPercentual"))
     )
     
-    # Verificar se todas as somas são 100%
-    somas_invalidas = df_somas.filter(F.abs(F.col("SomaPercentual") - 100.0) > 0.01)
+    # Verificar se todas as somas são 100% (tolerância 0.1% para precisão de 3 casas decimais)
+    somas_invalidas = df_somas.filter(F.abs(F.col("SomaPercentual") - 100.0) > 0.1)
     qtd_somas_invalidas = somas_invalidas.count()
     
     if qtd_somas_invalidas > 0:
-        print(f"  ❌ ERRO: {qtd_somas_invalidas} combinações SKU+CANAL não somam 100%")
+        print(f"  ❌ ERRO: {qtd_somas_invalidas} combinações SKU+CANAL não somam 100% (tolerância 0.1%)")
         somas_invalidas.show(10, truncate=False)
         return False
     else:
-        print(f"  ✅ Todas as {df_somas.count()} combinações SKU+CANAL somam 100%")
+        print(f"  ✅ Todas as {df_somas.count()} combinações SKU+CANAL somam 100% (tolerância 0.1%)")
     
     # 2. Validar unicidade de chaves SKU-LOJA-CANAL
     print("  🔑 Validando unicidade de chaves SKU-LOJA-CANAL...")
