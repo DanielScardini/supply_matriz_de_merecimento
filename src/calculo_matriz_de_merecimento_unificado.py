@@ -43,6 +43,83 @@ FILIAIS_OUTLET = [2528, 3604]
 # Flag para escolher fonte do de-para
 USAR_DE_PARA_EXCEL = True  # True = Excel, False = CSV antigo
 
+def criar_tabela_de_para_grupo_necessidade_direto(hoje: datetime, usar_excel: bool = True) -> int:
+    """
+    Lê diretamente do arquivo de de-para, trata os dados e salva na tabela.
+    
+    Args:
+        hoje: Data/hora atual para timestamp
+        usar_excel: True para Excel, False para CSV antigo
+        
+    Returns:
+        int: Número de registros salvos
+    """
+    
+    try:
+        if usar_excel:
+            # Carregar do Excel
+            print("📁 Carregando de-para do Excel (de_para_gemeos_tecnologia.xlsx)...")
+            de_para_df = pd.read_excel(
+                "/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/dados_analise/de_para_gemeos_tecnologia.xlsx",
+                sheet_name="de_para"
+            )
+        else:
+            # Carregar do CSV antigo
+            print("📁 Carregando de-para do CSV antigo (ITENS_GEMEOS 2.csv)...")
+            de_para_df = pd.read_csv(
+                "/dbfs/mnt/datalake/bcg_comum/ITENS_GEMEOS 2.csv",
+                sep=";",
+                encoding="utf-8"
+            )
+        
+        print(f"  ✅ Arquivo carregado: {len(de_para_df)} registros")
+        
+        # Padronizar nomes das colunas
+        de_para_df.columns = (
+            de_para_df.columns
+            .str.lower()
+            .str.replace(r"[^\w]+", "_", regex=True)
+            .str.strip("_")
+        )
+        
+        # Mapear colunas para o formato esperado
+        if 'sku' in de_para_df.columns and 'gemeos' in de_para_df.columns:
+            de_para_df = de_para_df.rename(columns={'sku': 'CdSku', 'gemeos': 'grupo_de_necessidade'})
+        elif 'cdsku' in de_para_df.columns and 'gemeos' in de_para_df.columns:
+            de_para_df = de_para_df.rename(columns={'cdsku': 'CdSku', 'gemeos': 'grupo_de_necessidade'})
+        elif 'sku' in de_para_df.columns and 'gemeos' in de_para_df.columns:
+            de_para_df = de_para_df.rename(columns={'sku': 'CdSku', 'gemeos': 'grupo_de_necessidade'})
+        else:
+            raise ValueError(f"Colunas não encontradas. Disponíveis: {list(de_para_df.columns)}")
+        
+        # Garantir que CdSku seja string
+        de_para_df['CdSku'] = de_para_df['CdSku'].astype(str)
+        
+        # Remover duplicatas e valores nulos
+        de_para_df = de_para_df.dropna(subset=['CdSku', 'grupo_de_necessidade'])
+        de_para_df = de_para_df.drop_duplicates(subset=['CdSku'])
+        
+        # Adicionar timestamp
+        de_para_df['DtAtualizacao'] = hoje
+        
+        # Converter para Spark DataFrame
+        df_spark = spark.createDataFrame(de_para_df)
+        
+        # Salvar tabela em modo overwrite
+        df_spark.write \
+            .mode("overwrite") \
+            .option("overwriteSchema", "true") \
+            .saveAsTable("databox.bcg_comum.supply_de_para_modelos_gemeos_tecnologia")
+        
+        count_registros = len(de_para_df)
+        print(f"✅ Tabela supply_de_para_modelos_gemeos_tecnologia atualizada com {count_registros} registros")
+        
+        return count_registros
+        
+    except Exception as e:
+        print(f"❌ Erro ao criar tabela de de-para: {str(e)}")
+        raise
+
 # COMMAND ----------
 
 def carregar_de_para_gemeos_tecnologia(flag_excel=True) -> pd.DataFrame:
@@ -1431,21 +1508,7 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         df_com_grupo.cache()
 
         # 5.0. Criar tabela de de-para grupo de necessidade
-        print(f"📊 Criando tabela de de-para grupo de necessidade para {categoria}...")
-        df_de_para_grupo = (
-            df_com_grupo
-            .select("CdSku", "grupo_de_necessidade")
-            .distinct()
-            .withColumn("DtAtualizacao", F.lit(hoje).cast("timestamp"))
-        )
-        
-        # Salvar tabela em modo overwrite
-        df_de_para_grupo.write \
-            .mode("overwrite") \
-            .option("overwriteSchema", "true") \
-            .saveAsTable("databox.bcg_comum.supply_de_para_modelos_gemeos_tecnologia")
-        
-        print(f"✅ Tabela supply_de_para_modelos_gemeos_tecnologia atualizada com {df_de_para_grupo.count()} registros")
+        count_registros = criar_tabela_de_para_grupo_necessidade_direto(hoje, usar_excel=USAR_DE_PARA_EXCEL)
 
         df_agregado = (
             df_com_grupo
