@@ -1447,6 +1447,23 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         # )
         df_com_grupo.cache()
 
+        # 5.0. Criar tabela de de-para grupo de necessidade
+        print(f"📊 Criando tabela de de-para grupo de necessidade para {categoria}...")
+        df_de_para_grupo = (
+            df_com_grupo
+            .select("CdSku", "grupo_de_necessidade")
+            .distinct()
+            .withColumn("DtAtualizacao", F.lit(hoje).cast("timestamp"))
+        )
+        
+        # Salvar tabela em modo overwrite
+        df_de_para_grupo.write \
+            .mode("overwrite") \
+            .option("overwriteSchema", "true") \
+            .saveAsTable("databox.bcg_comum.supply_de_para_modelos_gemeos_tecnologia")
+        
+        print(f"✅ Tabela supply_de_para_modelos_gemeos_tecnologia atualizada com {df_de_para_grupo.count()} registros")
+
         # 5.1. Agregação por grupo_de_necessidade (somando SKUs)
         df_agregado = (
             df_com_grupo
