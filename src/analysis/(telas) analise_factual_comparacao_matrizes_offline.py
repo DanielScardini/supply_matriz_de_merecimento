@@ -40,6 +40,7 @@ GRUPOS_TESTE = [
      ]
 print(GRUPOS_TESTE)
 
+GRUPOS_REMOVER = ['Chip', 'FORA DE LINHA', 'SEM_GN']
 
 data_inicio = "2025-08-29"
 fim_baseline = "2025-09-05"
@@ -77,7 +78,7 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     
     for categoria in categorias:
         try:
-            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_teste2509"
+            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_teste0710"
             df_matriz = spark.table(nome_tabela)
             
             matrizes[categoria] = df_matriz
@@ -153,7 +154,7 @@ from pyspark.sql import Window
 
 # === Janela dinâmica: últimos 30 dias até ontem ===
 fim_janela = F.date_sub(F.current_date(), 2)
-inicio_janela = F.date_sub(fim_janela, 47)
+inicio_janela = F.date_sub(fim_janela, 32)
 
 # Log das datas (yyyy-MM-dd)
 _row = (
@@ -178,7 +179,8 @@ df_proporcao_factual = (
         how="inner",
         on="CdSku"
     )
-    .filter(F.col("grupo_de_necessidade").isin(GRUPOS_TESTE))
+    #.filter(F.col("grupo_de_necessidade").isin(GRUPOS_TESTE))
+    .filter(~F.col("grupo_de_necessidade").isin(GRUPOS_REMOVER))
     .dropna(subset='grupo_de_necessidade')
     .groupBy('CdFilial', 'grupo_de_necessidade')
     .agg(F.round(F.sum('QtDemanda'), 0).alias('QtDemanda'))

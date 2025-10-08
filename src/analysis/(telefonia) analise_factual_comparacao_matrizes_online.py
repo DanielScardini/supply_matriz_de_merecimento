@@ -35,6 +35,9 @@ GRUPOS_TESTE = ['Telef pp', 'Telef Medio 128GB', 'Telef Medio 256GB', 'Telef Alt
 print(GRUPOS_TESTE)
 
 
+GRUPOS_REMOVER = ['Chip', 'FORA DE LINHA', 'SEM_GN']
+
+
 data_inicio = "2025-08-29"
 fim_baseline = "2025-09-05"
 
@@ -71,7 +74,7 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     
     for categoria in categorias:
         try:
-            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste2609"
+            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste0710"
             df_matriz = spark.table(nome_tabela)
             
             matrizes[categoria] = df_matriz
@@ -170,7 +173,8 @@ df_proporcao_factual = (
         how="inner",
         on="CdSku"
     )
-    .filter(F.col("grupo_de_necessidade").isin(GRUPOS_TESTE))
+    #.filter(F.col("grupo_de_necessidade").isin(GRUPOS_TESTE))
+    .filter(~F.col("grupo_de_necessidade").isin(GRUPOS_REMOVER))
     .dropna(subset='grupo_de_necessidade')
     .groupBy('CdFilial', 'grupo_de_necessidade')
     .agg(F.round(F.sum('QtDemanda'), 0).alias('QtDemanda'))

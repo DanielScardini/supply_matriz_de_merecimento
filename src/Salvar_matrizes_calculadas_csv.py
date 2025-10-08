@@ -161,7 +161,7 @@ FILTROS_GRUPO_SELECAO = {
 }
 
 # Limite de linhas por arquivo
-MAX_LINHAS_POR_ARQUIVO = 200000
+MAX_LINHAS_POR_ARQUIVO = 150000
 
 print("✅ Configurações carregadas")
 

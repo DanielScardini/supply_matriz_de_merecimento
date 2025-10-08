@@ -33,6 +33,7 @@ hoje_int = int(hoje.strftime("%Y%m%d"))
 
 GRUPOS_TESTE = ['Telef pp', 'TV 50 ALTO P', 'TV 55 ALTO P']
 print(GRUPOS_TESTE)
+GRUPOS_REMOVER = ['Chip', 'FORA DE LINHA', 'SEM_GN']
 
 
 data_inicio = "2025-08-29"
@@ -42,16 +43,6 @@ inicio_teste = "2025-09-05"
 
 categorias_teste = ['DE_TELAS']
 
-
-# COMMAND ----------
-
-(
-    spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste2309')
-    .join(
-        spark.table('databox.bcg_comum.supply_de_para_modelos_gemeos_tecnologia'),
-        how="inner",
-        on="CdSku"
-).display()
 
 # COMMAND ----------
 
@@ -81,7 +72,7 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     
     for categoria in categorias:
         try:
-            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_online_teste2309"
+            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_online_teste0710"
             df_matriz = spark.table(nome_tabela)
             
             matrizes[categoria] = df_matriz
@@ -154,8 +145,8 @@ from pyspark.sql import functions as F
 from pyspark.sql import Window
 
 # === Janela dinâmica: últimos 30 dias até ontem ===
-fim_janela = F.date_sub(F.current_date(), 1)
-inicio_janela = F.date_sub(fim_janela, 29)
+fim_janela = F.date_sub(F.current_date(), 2)
+inicio_janela = F.date_sub(fim_janela, 32)
 
 # Log das datas (yyyy-MM-dd)
 _row = (
@@ -180,7 +171,8 @@ df_proporcao_factual = (
         how="inner",
         on="CdSku"
     )
-    .filter(F.col("grupo_de_necessidade").isin(GRUPOS_TESTE))
+    #.filter(F.col("grupo_de_necessidade").isin(GRUPOS_TESTE))
+    .filter(~F.col("grupo_de_necessidade").isin(GRUPOS_REMOVER))
     .dropna(subset='grupo_de_necessidade')
     .groupBy('CdFilial', 'grupo_de_necessidade')
     .agg(F.round(F.sum('QtDemanda'), 0).alias('QtDemanda'))
@@ -340,7 +332,7 @@ for categoria in categorias_teste:
     df_tmp = (
         df_base
         .withColumn("merecimento_percentual",
-                    F.col("Merecimento_Final_Media1800_Qt_venda_sem_ruptura"))
+                    F.col("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura"))
         .join(
             spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
             .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),

@@ -34,7 +34,7 @@ hoje_int = int(hoje.strftime("%Y%m%d"))
 GRUPOS_TESTE = ['Telef pp', 'TV 50 ALTO P', 'TV 55 ALTO P']
 print(GRUPOS_TESTE)
 
-GRUPOS_REMOVER = ['Chip', 'FORA DE LINHA']
+GRUPOS_REMOVER = ['Chip', 'FORA DE LINHA', 'SEM_GN']
 
 data_inicio = "2025-08-29"
 fim_baseline = "2025-09-05"
@@ -43,10 +43,6 @@ inicio_teste = "2025-09-05"
 
 categorias_teste = ['TELEFONIA_CELULAR']
 
-
-# COMMAND ----------
-
-# MAGIC %sql SELECT DISTINCT grupo_de_necessidade from databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste2509
 
 # COMMAND ----------
 
@@ -76,7 +72,7 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     
     for categoria in categorias:
         try:
-            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_teste2509"
+            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_teste0710"
             df_matriz = spark.table(nome_tabela)
             
             matrizes[categoria] = df_matriz
