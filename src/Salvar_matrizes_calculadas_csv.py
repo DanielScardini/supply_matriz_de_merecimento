@@ -529,7 +529,7 @@ def garantir_soma_exata_100(df: DataFrame) -> DataFrame:
             .otherwise(F.col("PERCENTUAL"))
         )
         .withColumn("PERCENTUAL", F.round(F.col("PERCENTUAL"), 3))
-        .select("CdSku", "CdFilial", "CANAL", "PERCENTUAL")
+        .select("CdSku", "CdFilial", "CANAL", "LOJA", "PERCENTUAL")
     )
     
     # Validação final rigorosa
