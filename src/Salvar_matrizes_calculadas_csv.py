@@ -379,11 +379,18 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
     print(f"  • Grupos restantes após filtro: {len(grupos_restantes)}")
     print(f"  • Lista dos grupos restantes: {sorted(grupos_restantes)}")
     
-    # Verificar se SEM_GN ainda está presente
-    if "SEM_GN" in grupos_restantes:
-        print(f"  ⚠️ ATENÇÃO: SEM_GN ainda está presente após filtro!")
-        registros_sem_gn = df_filtrado.filter(F.col("grupo_de_necessidade") == "SEM_GN").count()
-        print(f"  • Registros com SEM_GN: {registros_sem_gn:,}")
+    # Verificar se grupos solicitados para remoção ainda estão presentes
+    grupos_nao_removidos = [g for g in filtros_remocao if g in grupos_restantes]
+    if grupos_nao_removidos:
+        print(f"  ❌ ERRO: Grupos solicitados para remoção ainda estão presentes: {grupos_nao_removidos}")
+        for grupo in grupos_nao_removidos:
+            registros_grupo = df_filtrado.filter(F.col("grupo_de_necessidade") == grupo).count()
+            print(f"    • {grupo}: {registros_grupo:,} registros")
+        print(f"  ⚠️ CORREÇÃO: Aplicando filtro adicional para remover grupos restantes...")
+        df_filtrado = df_filtrado.filter(~F.col("grupo_de_necessidade").isin(grupos_nao_removidos))
+        print(f"  ✅ Grupos removidos com filtro adicional")
+    else:
+        print(f"  ✅ Todos os grupos solicitados para remoção foram removidos com sucesso")
     
     # Filtro especial para Linha Leve: apenas SKUs das espécies top 80% de PORTATEIS
     if categoria == "DIRETORIA LINHA LEVE":
