@@ -947,17 +947,17 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None, formato: st
     df_union = df_offline.union(df_online)
     print(f"  ✅ União: {df_union.count():,} registros")
     
-    # 3. Normalizar para 100.00%
+    # 3. Adicionar informações de filiais (remover inativas)
     print()
-    df_normalizado = normalizar_para_100_exato(df_union)
+    df_com_filiais = adicionar_informacoes_filial(df_union)
     
-    # 4. Adicionar informações
+    # 4. Normalizar para 100.00% APÓS remoção de filiais
     print()
-    df_com_filiais = adicionar_informacoes_filial(df_normalizado)
+    df_normalizado = normalizar_para_100_exato(df_com_filiais)
     
     # 5. Criar DataFrame final
     print()
-    df_final = criar_dataframe_final(df_com_filiais)
+    df_final = criar_dataframe_final(df_normalizado)
     
     # 6. Dividir em arquivos
     print()
