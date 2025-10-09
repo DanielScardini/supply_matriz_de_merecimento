@@ -764,7 +764,26 @@ def validar_integridade_dados(df: DataFrame) -> bool:
     
     if qtd_somas_invalidas > 0:
         print(f"  ❌ ERRO: {qtd_somas_invalidas} combinações SKU+CANAL não somam exatamente 100.000%")
-        somas_invalidas.show(10, truncate=False)
+        
+        # Adicionar informações de filiais para diagnóstico
+        print("  📋 Diagnóstico com informações de filiais:")
+        df_lojas_info = (
+            spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+            .select("CdFilial", "NmFilial", "NmPorteLoja")
+        )
+        
+        # Extrair CdFilial da coluna LOJA (formato: 0021_0XXXX ou 0099_0XXXX)
+        df_com_diagnostico = (
+            somas_invalidas
+            .join(df, on=["SKU", "CANAL"], how="inner")
+            .withColumn("CdFilial", F.regexp_extract(F.col("LOJA"), r"(\d+)$", 1).cast("int"))
+            .join(df_lojas_info, on="CdFilial", how="left")
+            .select("SKU", "CANAL", "SomaPercentual", "CdFilial", "NmFilial", "NmPorteLoja", "LOJA")
+            .distinct()
+            .orderBy("SKU", "CANAL")
+        )
+        
+        df_com_diagnostico.show(10, truncate=False)
         return False
     else:
         print(f"  ✅ Todas as {df_somas.count()} combinações SKU+CANAL somam exatamente 100.000%")
