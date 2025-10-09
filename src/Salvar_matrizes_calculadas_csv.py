@@ -635,16 +635,16 @@ def adicionar_informacoes_filial(df: DataFrame) -> DataFrame:
         print("    • Lista das filiais:")
         filiais_removidas.show(20, truncate=False)
         
-        # Grupos de necessidade com maior merecimento nos removidos
-        grupos_removidos = (
+        # SKUs com maior merecimento nos removidos
+        skus_removidos = (
             df_removidos
-            .groupBy("grupo_de_necessidade")
+            .groupBy("CdSku")
             .agg(F.sum("PERCENTUAL").alias("total_merecimento"))
             .orderBy(F.desc("total_merecimento"))
             .limit(10)
         )
-        print(f"    • Top 10 grupos de necessidade removidos:")
-        grupos_removidos.show(10, truncate=False)
+        print(f"    • Top 10 SKUs removidos:")
+        skus_removidos.show(10, truncate=False)
     
     # Processar apenas os elegíveis
     df_com_tipo = (
