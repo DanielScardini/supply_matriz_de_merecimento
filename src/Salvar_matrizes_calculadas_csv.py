@@ -374,6 +374,17 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
     print(f"  • SKUs após filtro: {skus_pos_grupo:,} ({skus_pos_grupo - skus_inicial:+,})")
     print(f"  • Registros após filtro: {registros_pos_grupo:,} ({registros_pos_grupo - registros_inicial:+,})")
     
+    # Verificar grupos restantes após filtro
+    grupos_restantes = df_filtrado.select("grupo_de_necessidade").distinct().rdd.flatMap(lambda x: x).collect()
+    print(f"  • Grupos restantes após filtro: {len(grupos_restantes)}")
+    print(f"  • Lista dos grupos restantes: {sorted(grupos_restantes)}")
+    
+    # Verificar se SEM_GN ainda está presente
+    if "SEM_GN" in grupos_restantes:
+        print(f"  ⚠️ ATENÇÃO: SEM_GN ainda está presente após filtro!")
+        registros_sem_gn = df_filtrado.filter(F.col("grupo_de_necessidade") == "SEM_GN").count()
+        print(f"  • Registros com SEM_GN: {registros_sem_gn:,}")
+    
     # Filtro especial para Linha Leve: apenas SKUs das espécies top 80% de PORTATEIS
     if categoria == "DIRETORIA LINHA LEVE":
         print(f"\n🔝 FILTRO TOP 80% ESPÉCIES PORTATEIS:")
