@@ -340,16 +340,33 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
     print(f"  • Registros: {registros_inicial:,}")
     print(f"  • SKUs únicos: {skus_inicial:,}")
     
+    # Mostrar grupos disponíveis antes do filtro
+    grupos_disponiveis = df_base.select("grupo_de_necessidade").distinct().rdd.flatMap(lambda x: x).collect()
+    print(f"\n📋 GRUPOS DISPONÍVEIS:")
+    print(f"  • Total: {len(grupos_disponiveis)} grupos")
+    print(f"  • Lista: {sorted(grupos_disponiveis)}")
+    
     # Aplicar filtros de grupo
     print(f"\n🎯 FILTRO DE GRUPOS DE NECESSIDADE:")
     if flag_tipo == "SELEÇÃO":
         df_filtrado = df_base.filter(F.col("grupo_de_necessidade").isin(filtros_selecao))
         print(f"  • Tipo: SELEÇÃO")
         print(f"  • Grupos selecionados: {len(filtros_selecao)}")
+        print(f"  • Grupos solicitados: {filtros_selecao}")
     else:
         df_filtrado = df_base.filter(~F.col("grupo_de_necessidade").isin(filtros_remocao))
         print(f"  • Tipo: REMOÇÃO")
         print(f"  • Grupos removidos: {len(filtros_remocao)}")
+        print(f"  • Grupos solicitados para remoção: {filtros_remocao}")
+        
+        # Verificar quais grupos solicitados realmente existem
+        grupos_existentes = [g for g in filtros_remocao if g in grupos_disponiveis]
+        grupos_inexistentes = [g for g in filtros_remocao if g not in grupos_disponiveis]
+        
+        if grupos_inexistentes:
+            print(f"  ⚠️ Grupos solicitados mas NÃO EXISTENTES: {grupos_inexistentes}")
+        if grupos_existentes:
+            print(f"  ✅ Grupos que SERÃO removidos: {grupos_existentes}")
     
     # CHECKPOINT 2: Após filtro de grupos
     skus_pos_grupo = df_filtrado.select("CdSku").distinct().count()
