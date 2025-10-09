@@ -470,7 +470,7 @@ def normalizar_para_100_exato(df: DataFrame) -> DataFrame:
             .otherwise(F.col("Merecimento_proporcional"))
         )
         .withColumn("PERCENTUAL", F.round(F.col("PERCENTUAL"), 3))
-        .select("CdSku", "CdFilial", "CANAL", "PERCENTUAL")
+        .select("CdSku", "CdFilial", "CANAL", "LOJA", "PERCENTUAL")
     )
     
     # Validação
