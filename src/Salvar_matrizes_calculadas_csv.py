@@ -556,25 +556,23 @@ def adicionar_informacoes_filial(df: DataFrame) -> DataFrame:
     """
     Adiciona informações de filiais e cria coluna LOJA formatada.
     
-    Lógica de identificação:
-    1. Join com CDs ativos: databox.logistica_comum.roteirizacaocentrodistribuicao
-    2. Join com lojas ativas: data_engineering_prd.app_operacoesloja.roteirizacaolojaativa
-    3. Se não está em nenhum dos dois: REMOVER (inativo)
-    4. Se está no primeiro: CD/Entreposto (NmTipoFilial define tipo)
-    5. Se está no segundo: Loja
-    
-    Lógica LOJA:
-    - OFFLINE: sempre 0021_0XXXX
-    - ONLINE + CD: 0099_0XXXX
-    - ONLINE + Loja: 0021_0XXXX
+    Nova lógica de preservação:
+    1. CD 14: SEMPRE PRESERVAR (consolidado)
+    2. CDs ativos: PRESERVAR
+    3. Lojas ativas: PRESERVAR
+    4. Outros: REMOVER com relatório detalhado
     
     Args:
         df: DataFrame com CdFilial, CANAL
         
     Returns:
-        DataFrame com coluna LOJA adicionada e filiais inativas removidas
+        DataFrame com coluna LOJA adicionada e filiais não elegíveis removidas
     """
     print("🔄 Adicionando informações de filiais...")
+    
+    # Contar registros antes
+    registros_antes = df.count()
+    print(f"  📊 Registros antes do filtro: {registros_antes:,}")
     
     # Carregar tabelas de referência
     print("  📋 Carregando tabelas de referência...")
@@ -600,17 +598,61 @@ def adicionar_informacoes_filial(df: DataFrame) -> DataFrame:
     # Unir tabelas de referência
     df_referencia = df_cds.union(df_lojas)
     
-    # Join principal
-    df_com_filiais = df.join(df_referencia, on="CdFilial", how="inner")
+    # Identificar filiais elegíveis (CD 14 + CDs ativos + lojas ativas)
+    df_com_status = (
+        df
+        .join(df_referencia, on="CdFilial", how="left")
+        .withColumn(
+            "elegivel",
+            F.when(F.col("CdFilial") == 14, F.lit(True))  # CD 14 sempre elegível
+            .when(F.col("NmFilial").isNotNull(), F.lit(True))  # Está na referência
+            .otherwise(F.lit(False))
+        )
+    )
     
-    print(f"  🔍 Após join com referência: {df_com_filiais.count():,} registros")
+    # Separar elegíveis e não elegíveis
+    df_elegiveis = df_com_status.filter(F.col("elegivel") == True)
+    df_removidos = df_com_status.filter(F.col("elegivel") == False)
     
-    # Criar coluna is_cd baseada no tipo_filial
+    registros_elegiveis = df_elegiveis.count()
+    registros_removidos = df_removidos.count()
+    
+    print(f"  ✅ Filiais elegíveis: {registros_elegiveis:,} registros")
+    print(f"  ❌ Filiais removidas: {registros_removidos:,} registros")
+    
+    # Relatório detalhado dos removidos
+    if registros_removidos > 0:
+        print(f"\n  📋 RELATÓRIO DE FILIAIS REMOVIDAS:")
+        
+        # Filiais removidas
+        filiais_removidas = (
+            df_removidos
+            .select("CdFilial")
+            .distinct()
+            .orderBy("CdFilial")
+        )
+        print(f"    • Filiais removidas: {filiais_removidas.count()}")
+        print("    • Lista das filiais:")
+        filiais_removidas.show(20, truncate=False)
+        
+        # Grupos de necessidade com maior merecimento nos removidos
+        grupos_removidos = (
+            df_removidos
+            .groupBy("grupo_de_necessidade")
+            .agg(F.sum("PERCENTUAL").alias("total_merecimento"))
+            .orderBy(F.desc("total_merecimento"))
+            .limit(10)
+        )
+        print(f"    • Top 10 grupos de necessidade removidos:")
+        grupos_removidos.show(10, truncate=False)
+    
+    # Processar apenas os elegíveis
     df_com_tipo = (
-        df_com_filiais
+        df_elegiveis
         .withColumn(
             "is_cd",
-            F.when(F.col("tipo_filial").isin(["CD", "Entreposto", "TERMINAL"]), F.lit(True))
+            F.when(F.col("CdFilial") == 14, F.lit(True))  # CD 14 é CD
+            .when(F.col("tipo_filial").isin(["CD", "Entreposto", "TERMINAL"]), F.lit(True))
             .otherwise(F.lit(False))
         )
     )
@@ -625,11 +667,10 @@ def adicionar_informacoes_filial(df: DataFrame) -> DataFrame:
     df_com_loja = (
         df_com_tipo
         .withColumn("LOJA", formatar_loja_udf(F.col("CdFilial"), F.col("is_cd")))
-        .drop("is_cd", "NmFilial", "NmTipoFilial", "tipo_filial")
+        .drop("is_cd", "NmFilial", "NmTipoFilial", "tipo_filial", "elegivel")
     )
     
     print(f"✅ Informações adicionadas: {df_com_loja.count():,} registros")
-    print(f"  📊 Filiais inativas removidas automaticamente")
     
     return df_com_loja
 
@@ -953,7 +994,7 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None, formato: st
     print(f"✅ Exportação concluída: {categoria}")
     print(f"📁 Total de arquivos: {len(arquivos_salvos)}")
         
-    return arquivos_salvos
+        return arquivos_salvos
 
 # COMMAND ----------
 
