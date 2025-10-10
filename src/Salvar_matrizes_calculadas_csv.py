@@ -950,7 +950,7 @@ def validar_integridade_dados_com_filtros(df: DataFrame, categoria: str) -> bool
         # Aplicar filtro ao DataFrame de validação
         df_filtrado = (
             df
-            .join(df_produtos_filtrados, on="SKU", how="inner")
+            .join(df_produtos_filtrados, df.SKU == df_produtos_filtrados.CdSku, how="inner")
             .select("SKU", "CANAL", "LOJA", "PERCENTUAL")
         )
         
