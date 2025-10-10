@@ -390,20 +390,79 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
             .distinct()
         )
         
+        # Log inicial da tabela mercadoria
+        total_produtos_inicial = df_mercadoria.count()
+        print(f"  📊 Produtos na tabela mercadoria: {total_produtos_inicial:,}")
+        
+        # Mostrar distribuição por tipificação de entrega
+        print(f"  📋 Tipificações de entrega disponíveis:")
+        tipificacoes_disponiveis = (
+            df_mercadoria
+            .groupBy("StTipificacaoEntrega")
+            .count()
+            .orderBy(F.desc("count"))
+        )
+        tipificacoes_disponiveis.show(10, truncate=False)
+        
+        # Mostrar distribuição por marca (top 10)
+        print(f"  🏷️ Top 10 marcas disponíveis:")
+        marcas_disponiveis = (
+            df_mercadoria
+            .groupBy("NmMarca")
+            .count()
+            .orderBy(F.desc("count"))
+            .limit(10)
+        )
+        marcas_disponiveis.show(10, truncate=False)
+        
         # Aplicar filtros de produto
         df_produtos_filtrados = df_mercadoria
         
         # Filtro por tipificação de entrega
         if filtros_produtos["tipificacao_entrega"]:
+            produtos_antes_tipificacao = df_produtos_filtrados.count()
             df_produtos_filtrados = df_produtos_filtrados.filter(
                 F.col("StTipificacaoEntrega").isin(filtros_produtos["tipificacao_entrega"])
             )
+            produtos_apos_tipificacao = df_produtos_filtrados.count()
+            print(f"  ✅ Filtro tipificação: {produtos_antes_tipificacao:,} → {produtos_apos_tipificacao:,} (-{produtos_antes_tipificacao - produtos_apos_tipificacao:,})")
+            
+            # Verificar se filtro funcionou
+            tipificacoes_restantes = (
+                df_produtos_filtrados
+                .select("StTipificacaoEntrega")
+                .distinct()
+                .rdd.flatMap(lambda x: x)
+                .collect()
+            )
+            print(f"  🔍 Tipificações restantes: {sorted(tipificacoes_restantes)}")
         
         # Filtro por marcas excluídas
         if filtros_produtos["marcas_excluidas"]:
+            produtos_antes_marca = df_produtos_filtrados.count()
             df_produtos_filtrados = df_produtos_filtrados.filter(
                 ~F.col("NmMarca").isin(filtros_produtos["marcas_excluidas"])
             )
+            produtos_apos_marca = df_produtos_filtrados.count()
+            print(f"  ✅ Filtro marcas: {produtos_antes_marca:,} → {produtos_apos_marca:,} (-{produtos_antes_marca - produtos_apos_marca:,})")
+            
+            # Verificar se marcas excluídas foram removidas
+            marcas_restantes = (
+                df_produtos_filtrados
+                .select("NmMarca")
+                .distinct()
+                .rdd.flatMap(lambda x: x)
+                .collect()
+            )
+            marcas_excluidas_encontradas = [m for m in filtros_produtos["marcas_excluidas"] if m in marcas_restantes]
+            if marcas_excluidas_encontradas:
+                print(f"  ⚠️ ATENÇÃO: Marcas que deveriam ser excluídas ainda estão presentes: {marcas_excluidas_encontradas}")
+            else:
+                print(f"  ✅ Marcas excluídas removidas com sucesso: {filtros_produtos['marcas_excluidas']}")
+        
+        # Log final dos produtos filtrados
+        total_produtos_final = df_produtos_filtrados.count()
+        print(f"  📊 Produtos após filtros: {total_produtos_final:,} (-{total_produtos_inicial - total_produtos_final:,})")
     else:
         print(f"\n🏷️ FILTRO DE PRODUTOS:")
         print(f"  • Filtro desabilitado para {categoria}")
