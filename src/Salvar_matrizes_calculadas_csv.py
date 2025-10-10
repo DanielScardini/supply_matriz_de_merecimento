@@ -144,28 +144,28 @@ COLUNAS_MERECIMENTO = {
 # Filtros
 FILTROS_GRUPO_REMOCAO = {
     "DIRETORIA DE TELAS": ["FORA DE LINHA", 
-                           "SEM_GN"
-                            "TV 40 MEDIO P",
-                            "TV 43 QLED ALTO",
-                            "TV 50 ESP - QLED / MINI LED",
-                            "TV 55 ESP MEDIO",
-                            "TV 55 QLED / OLED ALTO",
-                            "TV 55 QLED PP",
-                            "TV 60 ALTO P",
-                            "TV 65 MINI LED MEDIO",
-                            "TV 65 NEO QLED ALTO",
-                            "TV 65 QLED / OLED ALTO",
-                            "TV 65 QLED / OLED PP",
-                            "TV 65 QNED ALTO",
-                            "TV 65 QNED MEDIO",
-                            "TV 65 QNED PP",
-                            "TV 70 ALTO P",
-                            "TV 75 NEO QLED ALTO",
-                            "TV 75 PP",
-                            "TV 75 QLED / OLED ALTO",
-                            "TV 75 QLED PP",
-                            "TV 75 QNED ALTO",
-                            "TV 75 QNED MEDIO",],
+                           "SEM_GN",
+                           "TV 40 MEDIO P",
+                           "TV 43 QLED ALTO",
+                           "TV 50 ESP - QLED / MINI LED",
+                           "TV 55 ESP MEDIO",
+                           "TV 55 QLED / OLED ALTO",
+                           "TV 55 QLED PP",
+                           "TV 60 ALTO P",
+                           "TV 65 MINI LED MEDIO",
+                           "TV 65 NEO QLED ALTO",
+                           "TV 65 QLED / OLED ALTO",
+                           "TV 65 QLED / OLED PP",
+                           "TV 65 QNED ALTO",
+                           "TV 65 QNED MEDIO",
+                           "TV 65 QNED PP",
+                           "TV 70 ALTO P",
+                           "TV 75 NEO QLED ALTO",
+                           "TV 75 PP",
+                           "TV 75 QLED / OLED ALTO",
+                           "TV 75 QLED PP",
+                           "TV 75 QNED ALTO",
+                           "TV 75 QNED MEDIO"],
     
     "DIRETORIA TELEFONIA CELULAR": ["FORA DE LINHA", "SEM_GN", ">4000", "3001 a 3500"],
     "DIRETORIA LINHA LEVE": ["FORA DE LINHA", "SEM_GN", "ASPIRADOR DE PO_BIV"],
@@ -913,8 +913,8 @@ def validar_integridade_dados_com_filtros(df: DataFrame, categoria: str) -> bool
     """
     Valida integridade dos dados aplicando os mesmos filtros da exportação.
     
-    Aplica os mesmos filtros de produtos que são usados na exportação para garantir
-    que estamos validando exatamente o que será gerado.
+    Aplica os mesmos filtros de produtos E grupos de necessidade que são usados na exportação 
+    para garantir que estamos validando exatamente o que será gerado.
     
     Args:
         df: DataFrame para validação
@@ -925,7 +925,9 @@ def validar_integridade_dados_com_filtros(df: DataFrame, categoria: str) -> bool
     """
     print("🔍 Validando integridade dos dados com filtros aplicados...")
     
-    # Aplicar os mesmos filtros de produtos da exportação
+    df_validacao = df
+    
+    # 1. Aplicar filtros de produtos
     filtros_produtos = FILTROS_PRODUTOS.get(categoria, FILTROS_PRODUTOS_GLOBAL)
     
     if filtros_produtos.get("aplicar_filtro", False):
@@ -960,22 +962,53 @@ def validar_integridade_dados_com_filtros(df: DataFrame, categoria: str) -> bool
             )
         
         # Aplicar filtro ao DataFrame de validação
-        df_filtrado = (
-            df
-            .join(df_produtos_filtrados, df.SKU == df_produtos_filtrados.CdSku, how="inner")
+        df_validacao = (
+            df_validacao
+            .join(df_produtos_filtrados, df_validacao.SKU == df_produtos_filtrados.CdSku, how="inner")
             .select("SKU", "CANAL", "LOJA", "PERCENTUAL")
         )
         
         registros_antes = df.count()
-        registros_apos = df_filtrado.count()
-        print(f"    • Registros antes do filtro: {registros_antes:,}")
-        print(f"    • Registros após filtro: {registros_apos:,} (-{registros_antes - registros_apos:,})")
-        
-        # Usar DataFrame filtrado para validação
-        df_validacao = df_filtrado
+        registros_apos = df_validacao.count()
+        print(f"    • Registros antes do filtro de produtos: {registros_antes:,}")
+        print(f"    • Registros após filtro de produtos: {registros_apos:,} (-{registros_antes - registros_apos:,})")
     else:
         print(f"  🏷️ Filtros de produtos desabilitados para {categoria}")
-        df_validacao = df
+    
+    # 2. Aplicar filtros de grupos de necessidade
+    print(f"  📋 Aplicando filtros de grupos de necessidade para validação:")
+    
+    # Carregar informações de grupos de necessidade da tabela de matriz
+    tabela_offline = TABELAS_MATRIZ_MERECIMENTO[categoria]["offline"]
+    df_grupos = (
+        spark.table(tabela_offline)
+        .select("CdSku", "grupo_de_necessidade")
+        .distinct()
+    )
+    
+    # Aplicar filtros de grupos
+    flag_tipo = FLAG_SELECAO_REMOCAO[categoria]
+    filtros_remocao = FILTROS_GRUPO_REMOCAO[categoria]
+    filtros_selecao = FILTROS_GRUPO_SELECAO[categoria]
+    
+    if flag_tipo == "SELEÇÃO":
+        df_grupos_filtrados = df_grupos.filter(F.col("grupo_de_necessidade").isin(filtros_selecao))
+        print(f"    • Tipo: SELEÇÃO - Grupos selecionados: {filtros_selecao}")
+    else:
+        df_grupos_filtrados = df_grupos.filter(~F.col("grupo_de_necessidade").isin(filtros_remocao))
+        print(f"    • Tipo: REMOÇÃO - Grupos removidos: {filtros_remocao}")
+    
+    # Aplicar filtro de grupos ao DataFrame de validação
+    df_validacao = (
+        df_validacao
+        .join(df_grupos_filtrados, df_validacao.SKU == df_grupos_filtrados.CdSku, how="inner")
+        .select("SKU", "CANAL", "LOJA", "PERCENTUAL")
+    )
+    
+    registros_antes_grupos = df_validacao.count() if filtros_produtos.get("aplicar_filtro", False) else df.count()
+    registros_apos_grupos = df_validacao.count()
+    print(f"    • Registros antes do filtro de grupos: {registros_antes_grupos:,}")
+    print(f"    • Registros após filtro de grupos: {registros_apos_grupos:,} (-{registros_antes_grupos - registros_apos_grupos:,})")
     
     # Chamar validação original com DataFrame filtrado
     return validar_integridade_dados(df_validacao)
@@ -1288,7 +1321,7 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None, formato: st
     print(f"✅ Exportação concluída: {categoria}")
     print(f"📁 Total de arquivos: {len(arquivos_salvos)}")
         
-    return arquivos_salvos
+        return arquivos_salvos
         
 
 # COMMAND ----------
@@ -1321,7 +1354,7 @@ def exportar_todas_categorias(data_exportacao: str = None, formato: str = "xlsx"
         try:
             arquivos = exportar_matriz_csv(categoria, data_exportacao, formato)
             resultados[categoria] = arquivos
-        except Exception as e:
+    except Exception as e:
             print(f"❌ Erro: {str(e)}")
             resultados[categoria] = []
     
