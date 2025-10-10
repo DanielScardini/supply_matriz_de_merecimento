@@ -897,6 +897,77 @@ def criar_dataframe_final(df: DataFrame) -> DataFrame:
 
 # COMMAND ----------
 
+def validar_integridade_dados_com_filtros(df: DataFrame, categoria: str) -> bool:
+    """
+    Valida integridade dos dados aplicando os mesmos filtros da exportação.
+    
+    Aplica os mesmos filtros de produtos que são usados na exportação para garantir
+    que estamos validando exatamente o que será gerado.
+    
+    Args:
+        df: DataFrame para validação
+        categoria: Categoria sendo processada
+        
+    Returns:
+        True se todas as validações passaram
+    """
+    print("🔍 Validando integridade dos dados com filtros aplicados...")
+    
+    # Aplicar os mesmos filtros de produtos da exportação
+    filtros_produtos = FILTROS_PRODUTOS.get(categoria, FILTROS_PRODUTOS_GLOBAL)
+    
+    if filtros_produtos.get("aplicar_filtro", False):
+        print(f"  🏷️ Aplicando filtros de produtos para validação:")
+        print(f"    • Incluir apenas: {filtros_produtos['tipificacao_entrega']}")
+        print(f"    • Excluir marcas: {filtros_produtos['marcas_excluidas']}")
+        
+        # Carregar informações de produtos da tabela mercadoria
+        df_mercadoria = (
+            spark.table('data_engineering_prd.app_venda.mercadoria')
+            .select(
+                F.col("CdSkuLoja").alias("CdSku"),
+                "StTipificacaoEntrega", 
+                "NmMarca"
+            )
+            .distinct()
+        )
+        
+        # Aplicar filtros de produto
+        df_produtos_filtrados = df_mercadoria
+        
+        # Filtro por tipificação de entrega
+        if filtros_produtos["tipificacao_entrega"]:
+            df_produtos_filtrados = df_produtos_filtrados.filter(
+                F.col("StTipificacaoEntrega").isin(filtros_produtos["tipificacao_entrega"])
+            )
+        
+        # Filtro por marcas excluídas
+        if filtros_produtos["marcas_excluidas"]:
+            df_produtos_filtrados = df_produtos_filtrados.filter(
+                ~F.col("NmMarca").isin(filtros_produtos["marcas_excluidas"])
+            )
+        
+        # Aplicar filtro ao DataFrame de validação
+        df_filtrado = (
+            df
+            .join(df_produtos_filtrados, on="SKU", how="inner")
+            .select("SKU", "CANAL", "LOJA", "PERCENTUAL")
+        )
+        
+        registros_antes = df.count()
+        registros_apos = df_filtrado.count()
+        print(f"    • Registros antes do filtro: {registros_antes:,}")
+        print(f"    • Registros após filtro: {registros_apos:,} (-{registros_antes - registros_apos:,})")
+        
+        # Usar DataFrame filtrado para validação
+        df_validacao = df_filtrado
+    else:
+        print(f"  🏷️ Filtros de produtos desabilitados para {categoria}")
+        df_validacao = df
+    
+    # Chamar validação original com DataFrame filtrado
+    return validar_integridade_dados(df_validacao)
+
 def validar_integridade_dados(df: DataFrame) -> bool:
     """
     Valida integridade dos dados antes de dividir em arquivos.
@@ -1006,7 +1077,7 @@ def validar_integridade_dados(df: DataFrame) -> bool:
     print("  ✅ Todas as validações passaram!")
     return True
 
-def dividir_em_arquivos(df: DataFrame, max_linhas: int = MAX_LINHAS_POR_ARQUIVO) -> List[DataFrame]:
+def dividir_em_arquivos(df: DataFrame, categoria: str, max_linhas: int = MAX_LINHAS_POR_ARQUIVO) -> List[DataFrame]:
     """
     Divide DataFrame em arquivos garantindo que SKU-LOJA fique junto (ambos canais).
     
@@ -1021,8 +1092,8 @@ def dividir_em_arquivos(df: DataFrame, max_linhas: int = MAX_LINHAS_POR_ARQUIVO)
     """
     print(f"🔄 Dividindo em arquivos (máx {max_linhas:,} linhas cada)...")
     
-    # Validar integridade antes de dividir
-    if not validar_integridade_dados(df):
+    # Validar integridade antes de dividir (com filtros aplicados)
+    if not validar_integridade_dados_com_filtros(df, categoria):
         raise ValueError("❌ Validação de integridade falhou. Não é possível dividir os arquivos.")
     
     # Criar chave única por SKU (todos os registros do mesmo SKU ficam juntos)
@@ -1172,7 +1243,7 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None, formato: st
     
     # 6. Dividir em arquivos
     print()
-    dfs_arquivos = dividir_em_arquivos(df_final)
+    dfs_arquivos = dividir_em_arquivos(df_final, categoria)
     
     # 7. Salvar arquivos no formato escolhido
     print(f"\n💾 Salvando arquivos {formato.upper()}...")
