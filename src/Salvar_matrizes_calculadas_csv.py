@@ -350,7 +350,7 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
         spark.table('data_engineering_prd.app_venda.mercadoria')
         .select(
             F.col("CdSkuLoja").alias("CdSku"),
-            "TipoSaida", 
+            "StTipificacaoEntrega", 
             "NmMarca"
         )
         .distinct()
@@ -359,7 +359,7 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
     # Aplicar filtros de produto
     df_produtos_filtrados = (
         df_mercadoria
-        .filter(F.col("TipoSaida") == "SL")  # Apenas SL (Sai Loja)
+        .filter(F.col("StTipificacaoEntrega") == "SL")  # Apenas SL (Sai Loja)
         .filter(F.col("NmMarca") != "APPLE")  # Excluir APPLE
     )
     
