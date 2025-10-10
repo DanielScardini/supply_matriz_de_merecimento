@@ -31,7 +31,7 @@ hoje_str = hoje.strftime("%Y-%m-%d")
 hoje_int = int(hoje.strftime("%Y%m%d"))
 
 
-GRUPOS_TESTE = ['Telef pp', 'TV 50 ALTO P', 'TV 55 ALTO P']
+GRUPOS_TESTE = ['3001 a 3500', '>4000',]
 print(GRUPOS_TESTE)
 
 GRUPOS_REMOVER = ['Chip', 'FORA DE LINHA', 'SEM_GN']
@@ -146,7 +146,7 @@ from pyspark.sql import Window
 
 # === Janela dinâmica: últimos 30 dias até ontem ===
 fim_janela = F.date_sub(F.current_date(), 2)
-inicio_janela = F.date_sub(fim_janela, 47)
+inicio_janela = F.date_sub(fim_janela, 92)
 
 # Log das datas (yyyy-MM-dd)
 _row = (
@@ -171,7 +171,7 @@ df_proporcao_factual = (
         how="inner",
         on="CdSku"
     )
-    #.filter(F.col("grupo_de_necessidade").isin(GRUPOS_TESTE))
+    .filter(F.col("grupo_de_necessidade").isin(GRUPOS_TESTE))
     .filter(~F.col("grupo_de_necessidade").isin(GRUPOS_REMOVER))
     .dropna(subset='grupo_de_necessidade')
     .groupBy('CdFilial', 'grupo_de_necessidade')
@@ -489,7 +489,7 @@ def make_scatter(df, y_col, y_label, categoria):
         paper_bgcolor="#f2f2f2",
         plot_bgcolor="#f2f2f2",
         margin=dict(l=40, r=40, t=60, b=40),
-        xaxis=dict(showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)", zeroline=False, range=[0,0.6]),
+        xaxis=dict(showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)", zeroline=False, range=[0,3]),
         yaxis=dict(showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)", zeroline=False, range=[0,2]),
         legend=dict(title="Região Geográfica", orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5),
         width=1200,

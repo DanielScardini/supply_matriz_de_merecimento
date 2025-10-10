@@ -24,13 +24,13 @@ hoje_str = hoje.strftime("%Y-%m-%d")
 hoje_int = int(hoje.strftime("%Y%m%d"))
 
 GRUPOS_TESTE = [
-    "Telef pp",
+    #"Telef pp",
     "TV 50 ALTO P",
     "TV 55 ALTO P",
     "TV 43 PP",
     "Telef Alto",
-    "Telef Medio 256GB",
-    "Telef Medio 128GB"+
+    #"Telef Medio 256GB",
+    #"Telef Medio 128GB"+
 ]
 print(GRUPOS_TESTE)
 
@@ -39,7 +39,10 @@ fim_baseline = "2025-09-08"
 
 inicio_teste = "2025-09-25"
 
-categorias_teste = ['TELAS', 'TELEFONIA']
+categorias_teste = [
+  'TELAS', 
+  'TELEFONIA'
+  ]
 
 dict_diretorias = {
   'TELAS': 'TVS',
@@ -1467,7 +1470,6 @@ df_proporcao_factual = (
           how='inner',
           on='CdSku')
     .dropna(subset='grupo_de_necessidade')
-    .withColumn('grupo_de_necessidade', F.col("gemeos"))
     .groupBy('CdFilial', 'grupo_de_necessidade')
     .agg(
         F.round(F.sum('QtDemanda'), 0).alias('QtDemanda'),
@@ -1597,6 +1599,7 @@ for categoria in categorias_teste:
 
 # COMMAND ----------
 
+
 from pyspark.sql import functions as F
 
 df_porte_percentual = {}
@@ -1659,6 +1662,9 @@ for categoria in categorias_teste:
     df_por_regiao.display()
 
 # COMMAND ----------
+
+
+
 
 # === Plotly scatters ===
 import plotly.express as px
@@ -2193,36 +2199,36 @@ codigos = (
 
 # COMMAND ----------
 
-import pandas as pd
-import pyspark.sql.functions as F
-from pyspark.sql import Window
+# import pandas as pd
+# import pyspark.sql.functions as F
+# from pyspark.sql import Window
 
-# Leitura e transformações
-df_envios_manuais_TELAS_teste = (
-    spark.createDataFrame(
-        pd.read_excel(
-            '/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/dados_analise/(DRP)_INDICADOR_DE_PROGRAMAÇÕES_20250916134135.xlsx',
-            skiprows=1
-        )
-    )
-    .filter(F.col("DIR_OPERACIONAL") != 'ONLINE')
-    .filter(F.col("DATA_PROGRAMACAO") > 20250905)
-    .filter(F.col("ATIVIDADE_PRINCIPAL") == 'L')
-    .filter(F.col("DIRETORIA") == 'TELEFONIA')
-    #.filter(F.col("CHIP") == 'NAO')
-    .groupBy("DIRETORIA", "TIPO DE PEDIDO")
-    .agg(
-        F.sum("QUANTIDADE_PEDIDA").alias("QtdPedida")
-    )
-)
+# # Leitura e transformações
+# df_envios_manuais_TELAS_teste = (
+#     spark.createDataFrame(
+#         pd.read_excel(
+#             '/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/dados_analise/(DRP)_INDICADOR_DE_PROGRAMAÇÕES_20250916134135.xlsx',
+#             skiprows=1
+#         )
+#     )
+#     .filter(F.col("DIR_OPERACIONAL") != 'ONLINE')
+#     .filter(F.col("DATA_PROGRAMACAO") > 20250905)
+#     .filter(F.col("ATIVIDADE_PRINCIPAL") == 'L')
+#     .filter(F.col("DIRETORIA") == 'TELEFONIA')
+#     #.filter(F.col("CHIP") == 'NAO')
+#     .groupBy("DIRETORIA", "TIPO DE PEDIDO")
+#     .agg(
+#         F.sum("QUANTIDADE_PEDIDA").alias("QtdPedida")
+#     )
+# )
 
-# Define janela por diretoria
-w = Window.partitionBy("DIRETORIA")
+# # Define janela por diretoria
+# w = Window.partitionBy("DIRETORIA")
 
-# Percentual dentro de cada diretoria
-df_envios_manuais_TELAS_teste = df_envios_manuais_TELAS_teste.withColumn(
-    "Percentual", (F.col("QtdPedida") / F.sum("QtdPedida").over(w)) * 100
-)
+# # Percentual dentro de cada diretoria
+# df_envios_manuais_TELAS_teste = df_envios_manuais_TELAS_teste.withColumn(
+#     "Percentual", (F.col("QtdPedida") / F.sum("QtdPedida").over(w)) * 100
+# )
 
-# Exibe
-df_envios_manuais_TELAS_teste.display()
+# # Exibe
+# df_envios_manuais_TELAS_teste.display()
