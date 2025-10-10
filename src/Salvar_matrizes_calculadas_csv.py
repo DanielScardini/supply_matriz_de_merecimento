@@ -340,6 +340,45 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
     print(f"  • Registros: {registros_inicial:,}")
     print(f"  • SKUs únicos: {skus_inicial:,}")
     
+    # FILTRO DE PRODUTOS: SL (Sai Loja) apenas, excluir SD (Sai Depósito) e APPLE
+    print(f"\n🏷️ FILTRO DE PRODUTOS:")
+    print(f"  • Incluir apenas: SL (Sai Loja)")
+    print(f"  • Excluir: SD (Sai Depósito) e marca APPLE")
+    
+    # Carregar informações de produtos da tabela mercadoria
+    df_mercadoria = (
+        spark.table('data_engineering_prd.app_venda.mercadoria')
+        .select(
+            F.col("CdSkuLoja").alias("CdSku"),
+            "TipoSaida", 
+            "NmMarca"
+        )
+        .distinct()
+    )
+    
+    # Aplicar filtros de produto
+    df_produtos_filtrados = (
+        df_mercadoria
+        .filter(F.col("TipoSaida") == "SL")  # Apenas SL (Sai Loja)
+        .filter(F.col("NmMarca") != "APPLE")  # Excluir APPLE
+    )
+    
+    # Fazer join com dados base para aplicar filtro
+    df_base_filtrado = (
+        df_base
+        .join(df_produtos_filtrados, on="CdSku", how="inner")
+        .select("CdFilial", "CdSku", "grupo_de_necessidade", "Merecimento_raw")
+    )
+    
+    # CHECKPOINT 2: Após filtro de produtos
+    skus_pos_produto = df_base_filtrado.select("CdSku").distinct().count()
+    registros_pos_produto = df_base_filtrado.count()
+    print(f"  • SKUs após filtro de produtos: {skus_pos_produto:,} ({skus_pos_produto - skus_inicial:+,})")
+    print(f"  • Registros após filtro de produtos: {registros_pos_produto:,} ({registros_pos_produto - registros_inicial:+,})")
+    
+    # Usar dados filtrados como base para próximos filtros
+    df_base = df_base_filtrado
+    
     # Mostrar grupos disponíveis antes do filtro
     grupos_disponiveis = df_base.select("grupo_de_necessidade").distinct().rdd.flatMap(lambda x: x).collect()
     print(f"\n📋 GRUPOS DISPONÍVEIS:")
