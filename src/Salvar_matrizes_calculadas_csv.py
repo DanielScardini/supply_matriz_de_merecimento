@@ -504,6 +504,7 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
         print(f"\n🔄 CONSOLIDAÇÃO DE FILIAIS:")
         filial_1401_count = df_filtrado.filter(F.col("CdFilial") == 1401).count()
         
+        # Aplicar consolidação 1401 → 14
         df_filtrado = df_filtrado.withColumn(
             "CdFilial", 
             F.when(F.col("CdFilial") == 1401, 14).otherwise(F.col("CdFilial"))
@@ -511,8 +512,16 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
         
         print(f"  • CdFilial 1401 → 14 (apenas {categoria})")
         print(f"  • Registros consolidados: {filial_1401_count:,}")
+        
+        # Agregar por CdSku + CdFilial + grupo_de_necessidade para somar merecimentos
+        print(f"  • Agregando merecimentos após consolidação...")
+        df_filtrado = (
+            df_filtrado
+            .groupBy("CdSku", "CdFilial", "grupo_de_necessidade")
+            .agg(F.sum("Merecimento_raw").alias("Merecimento_raw"))
+        )
     
-    # Agregar por CdSku + CdFilial
+    # Agregar por CdSku + CdFilial (agregação final)
     print(f"\n📊 AGREGAÇÃO FINAL:")
     df_agregado = (
         df_filtrado
