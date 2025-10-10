@@ -763,7 +763,7 @@ def adicionar_informacoes_filial(df: DataFrame) -> DataFrame:
         skus_removidos = (
             df_removidos
             .groupBy("CdSku")
-            .agg(F.sum("Merecimento").alias("total_merecimento"))
+            .agg(F.sum("Merecimento_raw").alias("total_merecimento"))
             .orderBy(F.desc("total_merecimento"))
             .limit(10)
         )
