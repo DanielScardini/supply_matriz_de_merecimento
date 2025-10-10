@@ -163,6 +163,37 @@ FILTROS_GRUPO_SELECAO = {
 # Limite de linhas por arquivo
 MAX_LINHAS_POR_ARQUIVO = 150000
 
+# Configurações de filtros de produtos por categoria
+FILTROS_PRODUTOS = {
+    "DIRETORIA DE TELAS": {
+        "tipificacao_entrega": ["SL"],  # Apenas SL (Sai Loja)
+        "marcas_excluidas": ["APPLE"],  # Excluir marca APPLE
+        "aplicar_filtro": True
+    },
+    "DIRETORIA TELEFONIA CELULAR": {
+        "tipificacao_entrega": ["SL"],  # Apenas SL (Sai Loja)
+        "marcas_excluidas": ["APPLE"],  # Excluir marca APPLE
+        "aplicar_filtro": True
+    },
+    "DIRETORIA LINHA LEVE": {
+        "tipificacao_entrega": ["SL"],  # Apenas SL (Sai Loja)
+        "marcas_excluidas": ["APPLE"],  # Excluir marca APPLE
+        "aplicar_filtro": True
+    },
+    "DIRETORIA LINHA BRANCA": {
+        "tipificacao_entrega": ["SL"],  # Apenas SL (Sai Loja)
+        "marcas_excluidas": ["APPLE"],  # Excluir marca APPLE
+        "aplicar_filtro": True
+    }
+}
+
+# Configuração global de filtros de produtos (fallback)
+FILTROS_PRODUTOS_GLOBAL = {
+    "tipificacao_entrega": ["SL"],  # Apenas SL (Sai Loja)
+    "marcas_excluidas": ["APPLE"],  # Excluir marca APPLE
+    "aplicar_filtro": True
+}
+
 print("✅ Configurações carregadas")
 
 # COMMAND ----------
@@ -340,44 +371,63 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
     print(f"  • Registros: {registros_inicial:,}")
     print(f"  • SKUs únicos: {skus_inicial:,}")
     
-    # FILTRO DE PRODUTOS: SL (Sai Loja) apenas, excluir SD (Sai Depósito) e APPLE
-    print(f"\n🏷️ FILTRO DE PRODUTOS:")
-    print(f"  • Incluir apenas: SL (Sai Loja)")
-    print(f"  • Excluir: SD (Sai Depósito) e marca APPLE")
+    # FILTRO DE PRODUTOS: Configurável por categoria
+    filtros_produtos = FILTROS_PRODUTOS.get(categoria, FILTROS_PRODUTOS_GLOBAL)
     
-    # Carregar informações de produtos da tabela mercadoria
-    df_mercadoria = (
-        spark.table('data_engineering_prd.app_venda.mercadoria')
-        .select(
-            F.col("CdSkuLoja").alias("CdSku"),
-            "StTipificacaoEntrega", 
-            "NmMarca"
+    if filtros_produtos.get("aplicar_filtro", False):
+        print(f"\n🏷️ FILTRO DE PRODUTOS:")
+        print(f"  • Incluir apenas: {filtros_produtos['tipificacao_entrega']}")
+        print(f"  • Excluir marcas: {filtros_produtos['marcas_excluidas']}")
+        
+        # Carregar informações de produtos da tabela mercadoria
+        df_mercadoria = (
+            spark.table('data_engineering_prd.app_venda.mercadoria')
+            .select(
+                F.col("CdSkuLoja").alias("CdSku"),
+                "StTipificacaoEntrega", 
+                "NmMarca"
+            )
+            .distinct()
         )
-        .distinct()
-    )
+        
+        # Aplicar filtros de produto
+        df_produtos_filtrados = df_mercadoria
+        
+        # Filtro por tipificação de entrega
+        if filtros_produtos["tipificacao_entrega"]:
+            df_produtos_filtrados = df_produtos_filtrados.filter(
+                F.col("StTipificacaoEntrega").isin(filtros_produtos["tipificacao_entrega"])
+            )
+        
+        # Filtro por marcas excluídas
+        if filtros_produtos["marcas_excluidas"]:
+            df_produtos_filtrados = df_produtos_filtrados.filter(
+                ~F.col("NmMarca").isin(filtros_produtos["marcas_excluidas"])
+            )
+    else:
+        print(f"\n🏷️ FILTRO DE PRODUTOS:")
+        print(f"  • Filtro desabilitado para {categoria}")
+        df_produtos_filtrados = None
     
-    # Aplicar filtros de produto
-    df_produtos_filtrados = (
-        df_mercadoria
-        .filter(F.col("StTipificacaoEntrega") == "SL")  # Apenas SL (Sai Loja)
-        .filter(F.col("NmMarca") != "APPLE")  # Excluir APPLE
-    )
-    
-    # Fazer join com dados base para aplicar filtro
-    df_base_filtrado = (
-        df_base
-        .join(df_produtos_filtrados, on="CdSku", how="inner")
-        .select("CdFilial", "CdSku", "grupo_de_necessidade", "Merecimento_raw")
-    )
-    
-    # CHECKPOINT 2: Após filtro de produtos
-    skus_pos_produto = df_base_filtrado.select("CdSku").distinct().count()
-    registros_pos_produto = df_base_filtrado.count()
-    print(f"  • SKUs após filtro de produtos: {skus_pos_produto:,} ({skus_pos_produto - skus_inicial:+,})")
-    print(f"  • Registros após filtro de produtos: {registros_pos_produto:,} ({registros_pos_produto - registros_inicial:+,})")
-    
-    # Usar dados filtrados como base para próximos filtros
-    df_base = df_base_filtrado
+    # Aplicar filtro de produtos se habilitado
+    if df_produtos_filtrados is not None:
+        # Fazer join com dados base para aplicar filtro
+        df_base_filtrado = (
+            df_base
+            .join(df_produtos_filtrados, on="CdSku", how="inner")
+            .select("CdFilial", "CdSku", "grupo_de_necessidade", "Merecimento_raw")
+        )
+        
+        # CHECKPOINT 2: Após filtro de produtos
+        skus_pos_produto = df_base_filtrado.select("CdSku").distinct().count()
+        registros_pos_produto = df_base_filtrado.count()
+        print(f"  • SKUs após filtro de produtos: {skus_pos_produto:,} ({skus_pos_produto - skus_inicial:+,})")
+        print(f"  • Registros após filtro de produtos: {registros_pos_produto:,} ({registros_pos_produto - registros_inicial:+,})")
+        
+        # Usar dados filtrados como base para próximos filtros
+        df_base = df_base_filtrado
+    else:
+        print(f"  • Filtro de produtos não aplicado - usando dados originais")
     
     # Mostrar grupos disponíveis antes do filtro
     grupos_disponiveis = df_base.select("grupo_de_necessidade").distinct().rdd.flatMap(lambda x: x).collect()
@@ -1088,7 +1138,7 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None, formato: st
     print(f"📁 Total de arquivos: {len(arquivos_salvos)}")
         
         return arquivos_salvos
-
+        
 # COMMAND ----------
 
 # MAGIC %md
@@ -1119,7 +1169,7 @@ def exportar_todas_categorias(data_exportacao: str = None, formato: str = "xlsx"
         try:
             arquivos = exportar_matriz_csv(categoria, data_exportacao, formato)
             resultados[categoria] = arquivos
-        except Exception as e:
+    except Exception as e:
             print(f"❌ Erro: {str(e)}")
             resultados[categoria] = []
     
