@@ -909,29 +909,31 @@ def criar_dataframe_final(df: DataFrame) -> DataFrame:
 
 # COMMAND ----------
 
-def validar_integridade_dados_com_filtros(df: DataFrame, categoria: str) -> bool:
+def aplicar_filtros_finais(df: DataFrame, categoria: str) -> DataFrame:
     """
-    Valida integridade dos dados aplicando os mesmos filtros da exportação.
+    Aplica todos os filtros finais ANTES da normalização.
     
-    Aplica os mesmos filtros de produtos E grupos de necessidade que são usados na exportação 
-    para garantir que estamos validando exatamente o que será gerado.
+    Filtros aplicados:
+    1. Filtros de produtos (SL apenas, excluir marcas)
+    2. Filtros de grupos de necessidade (remover grupos específicos)
     
     Args:
-        df: DataFrame para validação
+        df: DataFrame unificado (OFFLINE + ONLINE)
         categoria: Categoria sendo processada
         
     Returns:
-        True se todas as validações passaram
+        DataFrame filtrado com apenas dados que serão exportados
     """
-    print("🔍 Validando integridade dos dados com filtros aplicados...")
+    print("🔍 Aplicando filtros finais antes da normalização...")
     
-    df_validacao = df
+    df_filtrado = df
+    registros_inicial = df.count()
     
     # 1. Aplicar filtros de produtos
     filtros_produtos = FILTROS_PRODUTOS.get(categoria, FILTROS_PRODUTOS_GLOBAL)
     
     if filtros_produtos.get("aplicar_filtro", False):
-        print(f"  🏷️ Aplicando filtros de produtos para validação:")
+        print(f"  🏷️ Aplicando filtros de produtos:")
         print(f"    • Incluir apenas: {filtros_produtos['tipificacao_entrega']}")
         print(f"    • Excluir marcas: {filtros_produtos['marcas_excluidas']}")
         
@@ -961,22 +963,20 @@ def validar_integridade_dados_com_filtros(df: DataFrame, categoria: str) -> bool
                 ~F.col("NmMarca").isin(filtros_produtos["marcas_excluidas"])
             )
         
-        # Aplicar filtro ao DataFrame de validação
-        df_validacao = (
-            df_validacao
-            .join(df_produtos_filtrados, df_validacao.SKU == df_produtos_filtrados.CdSku, how="inner")
-            .select("SKU", "CANAL", "LOJA", "PERCENTUAL")
+        # Aplicar filtro ao DataFrame
+        df_filtrado = (
+            df_filtrado
+            .join(df_produtos_filtrados, df_filtrado.CdSku == df_produtos_filtrados.CdSku, how="inner")
+            .select("CdSku", "CdFilial", "CANAL", "Merecimento")
         )
         
-        registros_antes = df.count()
-        registros_apos = df_validacao.count()
-        print(f"    • Registros antes do filtro de produtos: {registros_antes:,}")
-        print(f"    • Registros após filtro de produtos: {registros_apos:,} (-{registros_antes - registros_apos:,})")
+        registros_pos_produtos = df_filtrado.count()
+        print(f"    • Registros após filtro de produtos: {registros_pos_produtos:,} (-{registros_inicial - registros_pos_produtos:,})")
     else:
         print(f"  🏷️ Filtros de produtos desabilitados para {categoria}")
     
     # 2. Aplicar filtros de grupos de necessidade
-    print(f"  📋 Aplicando filtros de grupos de necessidade para validação:")
+    print(f"  📋 Aplicando filtros de grupos de necessidade:")
     
     # Carregar informações de grupos de necessidade da tabela de matriz
     tabela_offline = TABELAS_MATRIZ_MERECIMENTO[categoria]["offline"]
@@ -998,20 +998,37 @@ def validar_integridade_dados_com_filtros(df: DataFrame, categoria: str) -> bool
         df_grupos_filtrados = df_grupos.filter(~F.col("grupo_de_necessidade").isin(filtros_remocao))
         print(f"    • Tipo: REMOÇÃO - Grupos removidos: {filtros_remocao}")
     
-    # Aplicar filtro de grupos ao DataFrame de validação
-    df_validacao = (
-        df_validacao
-        .join(df_grupos_filtrados, df_validacao.SKU == df_grupos_filtrados.CdSku, how="inner")
-        .select("SKU", "CANAL", "LOJA", "PERCENTUAL")
+    # Aplicar filtro de grupos ao DataFrame
+    df_filtrado = (
+        df_filtrado
+        .join(df_grupos_filtrados, on="CdSku", how="inner")
+        .select("CdSku", "CdFilial", "CANAL", "Merecimento")
     )
     
-    registros_antes_grupos = df_validacao.count() if filtros_produtos.get("aplicar_filtro", False) else df.count()
-    registros_apos_grupos = df_validacao.count()
-    print(f"    • Registros antes do filtro de grupos: {registros_antes_grupos:,}")
-    print(f"    • Registros após filtro de grupos: {registros_apos_grupos:,} (-{registros_antes_grupos - registros_apos_grupos:,})")
+    registros_final = df_filtrado.count()
+    print(f"    • Registros após filtro de grupos: {registros_final:,} (-{registros_inicial - registros_final:,})")
+    print(f"  ✅ Filtros finais aplicados: {registros_inicial:,} → {registros_final:,} (-{registros_inicial - registros_final:,})")
     
-    # Chamar validação original com DataFrame filtrado
-    return validar_integridade_dados(df_validacao)
+    return df_filtrado
+
+def validar_integridade_dados_com_filtros(df: DataFrame, categoria: str) -> bool:
+    """
+    Valida integridade dos dados (filtros já aplicados anteriormente).
+    
+    Os filtros de produtos e grupos de necessidade já foram aplicados antes da normalização,
+    então esta função apenas executa as validações de integridade.
+    
+    Args:
+        df: DataFrame já filtrado
+        categoria: Categoria sendo processada
+        
+    Returns:
+        True se todas as validações passaram
+    """
+    print("🔍 Validando integridade dos dados (filtros já aplicados)...")
+    
+    # Chamar validação original (filtros já aplicados)
+    return validar_integridade_dados(df)
 
 def validar_integridade_dados(df: DataFrame) -> bool:
     """
@@ -1274,9 +1291,13 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None, formato: st
     df_union = df_offline.union(df_online)
     print(f"  ✅ União: {df_union.count():,} registros")
     
+    # 2.5. Aplicar filtros finais ANTES da normalização
+    print("\n🔍 Aplicando filtros finais antes da normalização...")
+    df_filtrado_final = aplicar_filtros_finais(df_union, categoria)
+    
     # 3. Adicionar informações de filiais (remover inativas)
     print()
-    df_com_filiais = adicionar_informacoes_filial(df_union)
+    df_com_filiais = adicionar_informacoes_filial(df_filtrado_final)
     
     # 4. Normalizar para 100.00% APÓS remoção de filiais
     print()
