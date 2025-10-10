@@ -50,7 +50,7 @@ dt_fim = "2025-10-01"
 
 df_demanda = (
   spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
-  .filter(F.col("NmSetorGerencial") == "PORTATEIS")
+  .filter(F.col("NmSetorGerencial") == "BELEZA & SAUDE")
   .filter(F.col("DtAtual") >= dt_inicio)
   .filter(F.col("DtAtual") < dt_fim)
   .groupBy("NmEspecieGerencial")
@@ -125,10 +125,6 @@ df_demanda.filter(F.col("NmEspecieGerencial").isin(especies_top80)).agg(F.sum("P
 
 # COMMAND ----------
 
-# MAGIC %sql SELECT * FROM databox.bcg_comum.supply_matriz_merecimento_linha_leve_teste1909_liq
-
-# COMMAND ----------
-
 def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     """
     Carrega todas as matrizes de merecimento calculadas para cada categoria.
@@ -150,7 +146,7 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     
     for categoria in categorias:
         try:
-            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_linha_leve_teste1909_liq"
+            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_linha_leve_teste0710"
             df_matriz = spark.table(nome_tabela)
             
             matrizes[categoria] = df_matriz
@@ -269,7 +265,7 @@ df_proporcao_factual = (
         how="left"
     )
     .dropna(subset='grupo_de_necessidade')
-    .filter(F.col("NmSetorGerencial") == 'PORTATEIS')
+    .filter(F.col("NmSetorGerencial") == 'BELEZA & SAUDE')
     .filter(~F.col("grupo_de_necessidade").isin('SEM_GN', 'FORA DE LINHA'))
     #.filter(F.col("CdSku").isin(skus_especies_top80))
     .groupBy('CdFilial', 'grupo_de_necessidade')

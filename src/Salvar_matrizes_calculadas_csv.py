@@ -114,21 +114,21 @@ df_demanda_especie.filter(F.col("NmEspecieGerencial").isin(especies_top80)).agg(
 
 # Tabelas por categoria
 TABELAS_MATRIZ_MERECIMENTO = {
-    # "DIRETORIA DE TELAS": {
-    #     "offline": "databox.bcg_comum.supply_matriz_merecimento_de_telas_teste2509",
-    #     "online": "databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste2609",
-    #     "grupo_apelido": "telas"
-    # },
+    "DIRETORIA DE TELAS": {
+        "offline": "databox.bcg_comum.supply_matriz_merecimento_de_telas_teste0710",
+        "online": "databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste0710",
+        "grupo_apelido": "telas"
+    },
     # "DIRETORIA TELEFONIA CELULAR": {
-    #     "offline": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste1009",
-    #     "online": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste0809",
+    #     "offline": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste0710",
+    #     "online": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste0710",
     #     "grupo_apelido": "telefonia"
     # },
-    "DIRETORIA LINHA LEVE": {
-        "offline": "databox.bcg_comum.supply_matriz_merecimento_LINHA_LEVE_teste0410",
-        "online": "databox.bcg_comum.supply_matriz_merecimento_LINHA_LEVE_online_teste0310",
-        "grupo_apelido": "linha_leve"
-    },
+    # "DIRETORIA LINHA LEVE": {
+    #     "offline": "databox.bcg_comum.supply_matriz_merecimento_LINHA_LEVE_teste0410",
+    #     "online": "databox.bcg_comum.supply_matriz_merecimento_LINHA_LEVE_online_teste0310",
+    #     "grupo_apelido": "linha_leve"
+    # },
 }
 
 # Pasta de saída
@@ -143,14 +143,37 @@ COLUNAS_MERECIMENTO = {
 
 # Filtros
 FILTROS_GRUPO_REMOCAO = {
-    "DIRETORIA DE TELAS": ["FORA DE LINHA", "SEM_GN"],
-    "DIRETORIA TELEFONIA CELULAR": ["FORA DE LINHA", "SEM_GN"],
+    "DIRETORIA DE TELAS": ["FORA DE LINHA", 
+                           "SEM_GN"
+                            "TV 40 MEDIO P",
+                            "TV 43 QLED ALTO",
+                            "TV 50 ESP - QLED / MINI LED",
+                            "TV 55 ESP MEDIO",
+                            "TV 55 QLED / OLED ALTO",
+                            "TV 55 QLED PP",
+                            "TV 60 ALTO P",
+                            "TV 65 MINI LED MEDIO",
+                            "TV 65 NEO QLED ALTO",
+                            "TV 65 QLED / OLED ALTO",
+                            "TV 65 QLED / OLED PP",
+                            "TV 65 QNED ALTO",
+                            "TV 65 QNED MEDIO",
+                            "TV 65 QNED PP",
+                            "TV 70 ALTO P",
+                            "TV 75 NEO QLED ALTO",
+                            "TV 75 PP",
+                            "TV 75 QLED / OLED ALTO",
+                            "TV 75 QLED PP",
+                            "TV 75 QNED ALTO",
+                            "TV 75 QNED MEDIO",],
+    
+    "DIRETORIA TELEFONIA CELULAR": ["FORA DE LINHA", "SEM_GN", ">4000", "3001 a 3500"],
     "DIRETORIA LINHA LEVE": ["FORA DE LINHA", "SEM_GN", "ASPIRADOR DE PO_BIV"],
 }
 
 FLAG_SELECAO_REMOCAO = {
     "DIRETORIA DE TELAS": "REMOÇÃO",
-    "DIRETORIA TELEFONIA CELULAR": "SELEÇÃO",
+    "DIRETORIA TELEFONIA CELULAR": "REMOÇÃO",
     "DIRETORIA LINHA LEVE": "REMOÇÃO",
 }
 
@@ -167,7 +190,7 @@ MAX_LINHAS_POR_ARQUIVO = 150000
 FILTROS_PRODUTOS = {
     "DIRETORIA DE TELAS": {
         "tipificacao_entrega": ["SL"],  # Apenas SL (Sai Loja)
-        "marcas_excluidas": ["APPLE"],  # Excluir marca APPLE
+        "marcas_excluidas": [],  # Excluir marca APPLE
         "aplicar_filtro": True
     },
     "DIRETORIA TELEFONIA CELULAR": {
@@ -403,17 +426,6 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
             .orderBy(F.desc("count"))
         )
         tipificacoes_disponiveis.show(10, truncate=False)
-        
-        # Mostrar distribuição por marca (top 10)
-        print(f"  🏷️ Top 10 marcas disponíveis:")
-        marcas_disponiveis = (
-            df_mercadoria
-            .groupBy("NmMarca")
-            .count()
-            .orderBy(F.desc("count"))
-            .limit(10)
-        )
-        marcas_disponiveis.show(10, truncate=False)
         
         # Aplicar filtros de produto
         df_produtos_filtrados = df_mercadoria
@@ -1276,8 +1288,9 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None, formato: st
     print(f"✅ Exportação concluída: {categoria}")
     print(f"📁 Total de arquivos: {len(arquivos_salvos)}")
         
-        return arquivos_salvos
+    return arquivos_salvos
         
+
 # COMMAND ----------
 
 # MAGIC %md
@@ -1308,7 +1321,7 @@ def exportar_todas_categorias(data_exportacao: str = None, formato: str = "xlsx"
         try:
             arquivos = exportar_matriz_csv(categoria, data_exportacao, formato)
             resultados[categoria] = arquivos
-    except Exception as e:
+        except Exception as e:
             print(f"❌ Erro: {str(e)}")
             resultados[categoria] = []
     
