@@ -255,6 +255,38 @@ print(f"📊 Categorias processadas: {len(resultados)}")
 
 # COMMAND ----------
 
+from pyspark.sql import functions as F
+
+df_agregado = (
+    spark.table("databox.bcg_comum.supply_base_merecimento_diario_v4")
+    .filter(F.col("DtAtual") >= dt_inicio)
+    .filter(F.col("DtAtual") < dt_fim)
+    .filter(F.col("TipoEntrega") == 'SL')
+    .groupBy("NmAgrupamentoDiretoriaSetor")
+    .agg(
+        F.sum("QtMercadoria").alias("QtDemanda"),
+        F.sum("Receita").alias("Receita"),
+        F.countDistinct("CdSku").alias("QtdSKUs"),
+        F.countDistinct("CdFilial").alias("QtdFiliais")
+    )
+)
+
+# Calcular percentual da receita
+total_receita = df_agregado.agg(F.sum("Receita").alias("TotalReceita")).collect()[0]["TotalReceita"]
+
+df_agregado = df_agregado.withColumn(
+    "PercReceita",
+    (F.col("Receita") / F.lit(total_receita)) * 100
+)
+
+df_agregado.display()
+
+# COMMAND ----------
+
+df_resultado.display()
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 4. Análise Detalhada de Categoria Específica
 

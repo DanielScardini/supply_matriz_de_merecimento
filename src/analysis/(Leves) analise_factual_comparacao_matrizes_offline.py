@@ -160,7 +160,7 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     return matrizes
 
 df_merecimento_offline = {}
-df_merecimento_offline['LINHA_LEVE'] = carregar_matrizes_merecimento_calculadas()['LINHA_LEVE']
+df_merecimento_offline['LINHA_LEVE'] = carregar_matrizes_merecimento_calculadas()['LINHA_LEVE'].filter(F.col("CdSku").isin(skus_especies_top80))
 
 df_merecimento_offline['LINHA_LEVE'].limit(1).display()
 
@@ -267,7 +267,7 @@ df_proporcao_factual = (
     .dropna(subset='grupo_de_necessidade')
     .filter(F.col("NmSetorGerencial") == 'BELEZA & SAUDE')
     .filter(~F.col("grupo_de_necessidade").isin('SEM_GN', 'FORA DE LINHA'))
-    #.filter(F.col("CdSku").isin(skus_especies_top80))
+    .filter(F.col("CdSku").isin(skus_especies_top80))
     .groupBy('CdFilial', 'grupo_de_necessidade')
     .agg(
         F.round(F.sum('QtDemanda'), 0).alias('QtDemanda'),
@@ -345,9 +345,6 @@ from functools import reduce
 # === Constantes ===
 COL_REAL = "Percentual_QtDemanda"
 COL_PESO = "QtDemanda"
-
-gdn_ruim = ['SANDUICHEIRAS_110', 'LIQUIDIFICADORES 350 A 1000 W_220', 'SANDUICHEIRAS_220', 
-            'CAFETEIRA ELETRICA (FILTRO)_220', 'PANELAS ELETRICAS DE ARROZ_220', 'FERROS DE PASSAR A SECO_220']
 
 # === Função utilitária: adiciona componentes sMAPE/WSMAPE para uma coluna de predição ===
 def add_smape_components(df, pred_col, real_col=COL_REAL, peso_col=COL_PESO, label=None):
@@ -450,7 +447,7 @@ def wmape_expr(pred_col, real_col=COL_REAL, peso_col=COL_PESO):
 wmape_all = None
 
 for categoria in categorias_teste:
-    df_cat = df_acuracia[categoria].filter(~F.col('grupo_de_necessidade').isin(gdn_ruim))
+    df_cat = df_acuracia[categoria]
     pred_cols = existing_pred_cols(df_cat, pred_cols_base, extras)
 
     # Volume por grupo via Window
@@ -521,7 +518,8 @@ df_filial_mean = {}
 pdf = {}
 
 for categoria in categorias_teste:
-    df_base = df_acuracia[categoria].filter(~F.col('grupo_de_necessidade').isin(gdn_ruim))
+    df_base = df_acuracia[categoria]
+
 
     # checa existência das colunas opcionais
     has_neogrid = "PercMatrizNeogrid_median" in df_base.columns
