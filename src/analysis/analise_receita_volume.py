@@ -353,4 +353,210 @@ print(f"📁 Arquivos salvos em: /tmp/analise_receita_*")
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## 6. Análise Específica: Participação da Apple na Diretoria Telefonia Celular
+# MAGIC 
+# MAGIC Esta análise calcula qual percentual da receita da Diretoria Telefonia Celular é representado pela marca Apple.
+# MAGIC Esta informação é crucial para entender a concentração de receita por marca nesta diretoria.
+
+# COMMAND ----------
+
+def analisar_participacao_apple_telefonia():
+    """
+    Analisa a participação da marca Apple na receita da Diretoria Telefonia Celular.
+    Calcula percentual de receita da Apple vs total da diretoria.
+    """
+    print("🍎 ANÁLISE DE PARTICIPAÇÃO DA APPLE NA DIRETORIA TELEFONIA CELULAR")
+    print("=" * 80)
+    
+    # Carregar dados base filtrados para Diretoria Telefonia Celular
+    df_telefonia = (
+        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
+        .filter(F.col("DtAtual") >= dt_inicio)
+        .filter(F.col("DtAtual") < dt_fim)
+        .filter(F.col("NmAgrupamentoDiretoriaSetor") == "DIRETORIA TELEFONIA CELULAR")
+    )
+    
+    print(f"📱 Dados carregados para Diretoria Telefonia Celular: {df_telefonia.count():,} registros")
+    
+    # Verificar se a coluna NmMarca existe
+    colunas_disponiveis = df_telefonia.columns
+    if "NmMarca" not in colunas_disponiveis:
+        print(f"❌ Coluna 'NmMarca' não encontrada. Colunas disponíveis: {colunas_disponiveis}")
+        return None
+    
+    # Agregar receita por marca
+    df_receita_por_marca = (
+        df_telefonia
+        .groupBy("NmMarca")
+        .agg(
+            F.sum("Receita").alias("ReceitaTotal"),
+            F.sum("QtMercadoria").alias("DemandaTotal"),
+            F.countDistinct("CdSku").alias("QtdSKUs"),
+            F.countDistinct("CdFilial").alias("QtdFiliais")
+        )
+        .orderBy(F.desc("ReceitaTotal"))
+    )
+    
+    # Calcular total da diretoria
+    totais_diretoria = df_receita_por_marca.agg(
+        F.sum("ReceitaTotal").alias("ReceitaTotalDiretoria"),
+        F.sum("DemandaTotal").alias("DemandaTotalDiretoria")
+    ).collect()[0]
+    
+    receita_total_diretoria = totais_diretoria["ReceitaTotalDiretoria"]
+    demanda_total_diretoria = totais_diretoria["DemandaTotalDiretoria"]
+    
+    print(f"\n📊 TOTAIS DA DIRETORIA TELEFONIA CELULAR:")
+    print(f"  • Receita total: R$ {receita_total_diretoria:,.2f}")
+    print(f"  • Demanda total: {demanda_total_diretoria:,.0f}")
+    
+    # Calcular percentuais por marca
+    df_percentuais_marca = (
+        df_receita_por_marca
+        .withColumn("PercReceita", F.round((F.col("ReceitaTotal") / receita_total_diretoria) * 100, 2))
+        .withColumn("PercDemanda", F.round((F.col("DemandaTotal") / demanda_total_diretoria) * 100, 2))
+        .withColumn("ReceitaPorSKU", F.round(F.col("ReceitaTotal") / F.col("QtdSKUs"), 2))
+    )
+    
+    # Filtrar especificamente a Apple
+    df_apple = df_percentuais_marca.filter(F.col("NmMarca") == "Apple")
+    
+    if df_apple.count() > 0:
+        apple_data = df_apple.collect()[0]
+        
+        print(f"\n🍎 DADOS DA MARCA APPLE:")
+        print(f"  • Receita Apple: R$ {apple_data['ReceitaTotal']:,.2f}")
+        print(f"  • Demanda Apple: {apple_data['DemandaTotal']:,.0f}")
+        print(f"  • SKUs Apple: {apple_data['QtdSKUs']}")
+        print(f"  • Filiais com Apple: {apple_data['QtdFiliais']}")
+        print(f"  • Receita por SKU: R$ {apple_data['ReceitaPorSKU']:,.2f}")
+        print(f"  • % Receita Apple: {apple_data['PercReceita']:.2f}%")
+        print(f"  • % Demanda Apple: {apple_data['PercDemanda']:.2f}%")
+        
+        # Resultado principal
+        print(f"\n🎯 RESULTADO PRINCIPAL:")
+        print(f"  • A marca Apple representa {apple_data['PercReceita']:.2f}% da receita da Diretoria Telefonia Celular")
+        
+    else:
+        print(f"\n❌ Marca 'Apple' não encontrada nos dados.")
+        print(f"📋 Marcas disponíveis:")
+        df_percentuais_marca.select("NmMarca").show(20, truncate=False)
+    
+    # Mostrar top 10 marcas por receita
+    print(f"\n🏆 TOP 10 MARCAS POR RECEITA (DIRETORIA TELEFONIA CELULAR):")
+    df_percentuais_marca.select(
+        "NmMarca",
+        "ReceitaTotal",
+        "PercReceita",
+        "DemandaTotal", 
+        "PercDemanda",
+        "QtdSKUs",
+        "ReceitaPorSKU"
+    ).show(10, truncate=False)
+    
+    # Análise de concentração de marcas
+    print(f"\n📈 ANÁLISE DE CONCENTRAÇÃO DE MARCAS:")
+    
+    # Top 3 marcas
+    top3_marcas = df_percentuais_marca.limit(3).collect()
+    receita_top3 = sum([row['PercReceita'] for row in top3_marcas])
+    
+    print(f"  • Top 3 marcas representam: {receita_top3:.2f}% da receita")
+    print(f"  • Total de marcas na diretoria: {df_percentuais_marca.count()}")
+    
+    # Salvar resultado
+    df_percentuais_marca.coalesce(1).write.mode("overwrite").option("header", True).csv("/tmp/analise_marcas_telefonia_celular")
+    print(f"\n💾 Resultado salvo em: /tmp/analise_marcas_telefonia_celular")
+    
+    return df_percentuais_marca
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Executar Análise da Apple
+
+# COMMAND ----------
+
+# Executar análise específica da Apple
+df_marcas_telefonia = analisar_participacao_apple_telefonia()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Análise Complementar: Evolução Temporal da Apple
+# MAGIC 
+# MAGIC Esta análise mostra como a participação da Apple na receita da Diretoria Telefonia Celular evoluiu ao longo do tempo.
+
+# COMMAND ----------
+
+def analisar_evolucao_temporal_apple():
+    """
+    Analisa a evolução temporal da participação da Apple na receita da Diretoria Telefonia Celular.
+    """
+    print("📅 ANÁLISE DE EVOLUÇÃO TEMPORAL DA APPLE")
+    print("=" * 60)
+    
+    # Carregar dados com agregação mensal
+    df_evolucao = (
+        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
+        .filter(F.col("DtAtual") >= dt_inicio)
+        .filter(F.col("DtAtual") < dt_fim)
+        .filter(F.col("NmAgrupamentoDiretoriaSetor") == "DIRETORIA TELEFONIA CELULAR")
+        .withColumn("AnoMes", F.date_format(F.col("DtAtual"), "yyyy-MM"))
+        .groupBy("AnoMes", "NmMarca")
+        .agg(F.sum("Receita").alias("ReceitaMes"))
+    )
+    
+    # Calcular total mensal da diretoria
+    df_total_mensal = (
+        df_evolucao
+        .groupBy("AnoMes")
+        .agg(F.sum("ReceitaMes").alias("ReceitaTotalMes"))
+    )
+    
+    # Join para calcular percentuais
+    df_percentuais_mensais = (
+        df_evolucao
+        .join(df_total_mensal, on="AnoMes", how="left")
+        .withColumn("PercReceitaMes", F.round((F.col("ReceitaMes") / F.col("ReceitaTotalMes")) * 100, 2))
+        .filter(F.col("NmMarca") == "Apple")
+        .orderBy("AnoMes")
+    )
+    
+    print(f"📊 EVOLUÇÃO MENSAL DA PARTICIPAÇÃO DA APPLE:")
+    df_percentuais_mensais.select(
+        "AnoMes",
+        "ReceitaMes", 
+        "ReceitaTotalMes",
+        "PercReceitaMes"
+    ).show(20, truncate=False)
+    
+    # Calcular estatísticas de evolução
+    stats_evolucao = df_percentuais_mensais.agg(
+        F.avg("PercReceitaMes").alias("MediaPercReceita"),
+        F.min("PercReceitaMes").alias("MinPercReceita"),
+        F.max("PercReceitaMes").alias("MaxPercReceita"),
+        F.stddev("PercReceitaMes").alias("DesvioPadraoPercReceita")
+    ).collect()[0]
+    
+    print(f"\n📈 ESTATÍSTICAS DE EVOLUÇÃO:")
+    print(f"  • % Receita médio: {stats_evolucao['MediaPercReceita']:.2f}%")
+    print(f"  • % Receita mínimo: {stats_evolucao['MinPercReceita']:.2f}%")
+    print(f"  • % Receita máximo: {stats_evolucao['MaxPercReceita']:.2f}%")
+    print(f"  • Desvio padrão: {stats_evolucao['DesvioPadraoPercReceita']:.2f}%")
+    
+    # Salvar evolução temporal
+    df_percentuais_mensais.coalesce(1).write.mode("overwrite").option("header", True).csv("/tmp/evolucao_apple_telefonia")
+    print(f"\n💾 Evolução temporal salva em: /tmp/evolucao_apple_telefonia")
+    
+    return df_percentuais_mensais
+
+# COMMAND ----------
+
+# Executar análise de evolução temporal
+df_evolucao_apple = analisar_evolucao_temporal_apple()
+
+# COMMAND ----------
+
 
