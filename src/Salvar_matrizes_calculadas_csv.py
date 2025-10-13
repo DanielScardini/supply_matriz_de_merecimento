@@ -48,7 +48,8 @@ dt_fim = "2025-10-01"
 # Calcular top 80% por ESPÉCIE (SKUs) - apenas PORTATEIS
 df_demanda_especie = (
   spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
-  .filter(F.col("NmSetorGerencial") == "PORTATEIS")
+  #.filter(F.col("NmSetorGerencial") == "PORTATEIS")
+  .filter(F.col("NmSetorGerencial") == "BELEZA & SAUDE")
   .filter(F.col("DtAtual") >= dt_inicio)
   .filter(F.col("DtAtual") < dt_fim)
   .groupBy("NmEspecieGerencial")
@@ -114,21 +115,21 @@ df_demanda_especie.filter(F.col("NmEspecieGerencial").isin(especies_top80)).agg(
 
 # Tabelas por categoria
 TABELAS_MATRIZ_MERECIMENTO = {
-    "DIRETORIA DE TELAS": {
-        "offline": "databox.bcg_comum.supply_matriz_merecimento_de_telas_teste0710",
-        "online": "databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste0710",
-        "grupo_apelido": "telas"
-    },
+    # "DIRETORIA DE TELAS": {
+    #     "offline": "databox.bcg_comum.supply_matriz_merecimento_de_telas_teste0710",
+    #     "online": "databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste0710",
+    #     "grupo_apelido": "telas"
+    # },
     # "DIRETORIA TELEFONIA CELULAR": {
     #     "offline": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste0710",
     #     "online": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste0710",
     #     "grupo_apelido": "telefonia"
     # },
-    # "DIRETORIA LINHA LEVE": {
-    #     "offline": "databox.bcg_comum.supply_matriz_merecimento_LINHA_LEVE_teste0410",
-    #     "online": "databox.bcg_comum.supply_matriz_merecimento_LINHA_LEVE_online_teste0310",
-    #     "grupo_apelido": "linha_leve"
-    # },
+    "DIRETORIA LINHA LEVE": {
+        "offline": "databox.bcg_comum.supply_matriz_merecimento_LINHA_LEVE_teste0710",
+        "online": "databox.bcg_comum.supply_matriz_merecimento_LINHA_LEVE_online_teste0710",
+        "grupo_apelido": "linha_leve"
+    },
 }
 
 # Pasta de saída
@@ -145,30 +146,30 @@ COLUNAS_MERECIMENTO = {
 FILTROS_GRUPO_REMOCAO = {
     "DIRETORIA DE TELAS": ["FORA DE LINHA", 
                            "SEM_GN",
-                           "TV 40 MEDIO P",
-                           "TV 43 QLED ALTO",
-                           "TV 50 ESP - QLED / MINI LED",
-                           "TV 55 ESP MEDIO",
-                           "TV 55 QLED / OLED ALTO",
-                           "TV 55 QLED PP",
-                           "TV 60 ALTO P",
-                           "TV 65 MINI LED MEDIO",
-                           "TV 65 NEO QLED ALTO",
-                           "TV 65 QLED / OLED ALTO",
-                           "TV 65 QLED / OLED PP",
-                           "TV 65 QNED ALTO",
-                           "TV 65 QNED MEDIO",
-                           "TV 65 QNED PP",
-                           "TV 70 ALTO P",
-                           "TV 75 NEO QLED ALTO",
-                           "TV 75 PP",
-                           "TV 75 QLED / OLED ALTO",
-                           "TV 75 QLED PP",
-                           "TV 75 QNED ALTO",
-                           "TV 75 QNED MEDIO"],
+                            "TV 40 MEDIO P",
+                            "TV 43 QLED ALTO",
+                            "TV 50 ESP - QLED / MINI LED",
+                            "TV 55 ESP MEDIO",
+                            "TV 55 QLED / OLED ALTO",
+                            "TV 55 QLED PP",
+                            "TV 60 ALTO P",
+                            "TV 65 MINI LED MEDIO",
+                            "TV 65 NEO QLED ALTO",
+                            "TV 65 QLED / OLED ALTO",
+                            "TV 65 QLED / OLED PP",
+                            "TV 65 QNED ALTO",
+                            "TV 65 QNED MEDIO",
+                            "TV 65 QNED PP",
+                            "TV 70 ALTO P",
+                            "TV 75 NEO QLED ALTO",
+                            "TV 75 PP",
+                            "TV 75 QLED / OLED ALTO",
+                            "TV 75 QLED PP",
+                            "TV 75 QNED ALTO",
+                            "TV 75 QNED MEDIO",],
     
-    "DIRETORIA TELEFONIA CELULAR": ["FORA DE LINHA", "SEM_GN", ">4000", "3001 a 3500"],
-    "DIRETORIA LINHA LEVE": ["FORA DE LINHA", "SEM_GN", "ASPIRADOR DE PO_BIV"],
+    "DIRETORIA TELEFONIA CELULAR": ["FORA DE LINHA", "SEM_GN", ">4000", "3001 a 3500", "Chip"],
+    "DIRETORIA LINHA LEVE": ["FORA DE LINHA", "SEM_GN", "ASPIRADOR DE PO_BIV", "APARADOR DE PELOS_110", "SECADORES DE CABELO_"],
 }
 
 FLAG_SELECAO_REMOCAO = {
@@ -909,31 +910,27 @@ def criar_dataframe_final(df: DataFrame) -> DataFrame:
 
 # COMMAND ----------
 
-def aplicar_filtros_finais(df: DataFrame, categoria: str) -> DataFrame:
+def validar_integridade_dados_com_filtros(df: DataFrame, categoria: str) -> bool:
     """
-    Aplica todos os filtros finais ANTES da normalização.
+    Valida integridade dos dados aplicando os mesmos filtros da exportação.
     
-    Filtros aplicados:
-    1. Filtros de produtos (SL apenas, excluir marcas)
-    2. Filtros de grupos de necessidade (remover grupos específicos)
+    Aplica os mesmos filtros de produtos que são usados na exportação para garantir
+    que estamos validando exatamente o que será gerado.
     
     Args:
-        df: DataFrame unificado (OFFLINE + ONLINE)
+        df: DataFrame para validação
         categoria: Categoria sendo processada
         
     Returns:
-        DataFrame filtrado com apenas dados que serão exportados
+        True se todas as validações passaram
     """
-    print("🔍 Aplicando filtros finais antes da normalização...")
+    print("🔍 Validando integridade dos dados com filtros aplicados...")
     
-    df_filtrado = df
-    registros_inicial = df.count()
-    
-    # 1. Aplicar filtros de produtos
+    # Aplicar os mesmos filtros de produtos da exportação
     filtros_produtos = FILTROS_PRODUTOS.get(categoria, FILTROS_PRODUTOS_GLOBAL)
     
     if filtros_produtos.get("aplicar_filtro", False):
-        print(f"  🏷️ Aplicando filtros de produtos:")
+        print(f"  🏷️ Aplicando filtros de produtos para validação:")
         print(f"    • Incluir apenas: {filtros_produtos['tipificacao_entrega']}")
         print(f"    • Excluir marcas: {filtros_produtos['marcas_excluidas']}")
         
@@ -963,72 +960,26 @@ def aplicar_filtros_finais(df: DataFrame, categoria: str) -> DataFrame:
                 ~F.col("NmMarca").isin(filtros_produtos["marcas_excluidas"])
             )
         
-        # Aplicar filtro ao DataFrame
+        # Aplicar filtro ao DataFrame de validação
         df_filtrado = (
-            df_filtrado
-            .join(df_produtos_filtrados, df_filtrado.CdSku == df_produtos_filtrados.CdSku, how="inner")
-            .select("CdSku", "CdFilial", "CANAL", "Merecimento")
+            df
+            .join(df_produtos_filtrados, df.SKU == df_produtos_filtrados.CdSku, how="inner")
+            .select("SKU", "CANAL", "LOJA", "PERCENTUAL")
         )
         
-        registros_pos_produtos = df_filtrado.count()
-        print(f"    • Registros após filtro de produtos: {registros_pos_produtos:,} (-{registros_inicial - registros_pos_produtos:,})")
+        registros_antes = df.count()
+        registros_apos = df_filtrado.count()
+        print(f"    • Registros antes do filtro: {registros_antes:,}")
+        print(f"    • Registros após filtro: {registros_apos:,} (-{registros_antes - registros_apos:,})")
+        
+        # Usar DataFrame filtrado para validação
+        df_validacao = df_filtrado
     else:
         print(f"  🏷️ Filtros de produtos desabilitados para {categoria}")
+        df_validacao = df
     
-    # 2. Aplicar filtros de grupos de necessidade
-    print(f"  📋 Aplicando filtros de grupos de necessidade:")
-    
-    # Carregar informações de grupos de necessidade da tabela de matriz
-    tabela_offline = TABELAS_MATRIZ_MERECIMENTO[categoria]["offline"]
-    df_grupos = (
-        spark.table(tabela_offline)
-        .select("CdSku", "grupo_de_necessidade")
-        .distinct()
-    )
-    
-    # Aplicar filtros de grupos
-    flag_tipo = FLAG_SELECAO_REMOCAO[categoria]
-    filtros_remocao = FILTROS_GRUPO_REMOCAO[categoria]
-    filtros_selecao = FILTROS_GRUPO_SELECAO[categoria]
-    
-    if flag_tipo == "SELEÇÃO":
-        df_grupos_filtrados = df_grupos.filter(F.col("grupo_de_necessidade").isin(filtros_selecao))
-        print(f"    • Tipo: SELEÇÃO - Grupos selecionados: {filtros_selecao}")
-    else:
-        df_grupos_filtrados = df_grupos.filter(~F.col("grupo_de_necessidade").isin(filtros_remocao))
-        print(f"    • Tipo: REMOÇÃO - Grupos removidos: {filtros_remocao}")
-    
-    # Aplicar filtro de grupos ao DataFrame
-    df_filtrado = (
-        df_filtrado
-        .join(df_grupos_filtrados, on="CdSku", how="inner")
-        .select("CdSku", "CdFilial", "CANAL", "Merecimento")
-    )
-    
-    registros_final = df_filtrado.count()
-    print(f"    • Registros após filtro de grupos: {registros_final:,} (-{registros_inicial - registros_final:,})")
-    print(f"  ✅ Filtros finais aplicados: {registros_inicial:,} → {registros_final:,} (-{registros_inicial - registros_final:,})")
-    
-    return df_filtrado
-
-def validar_integridade_dados_com_filtros(df: DataFrame, categoria: str) -> bool:
-    """
-    Valida integridade dos dados (filtros já aplicados anteriormente).
-    
-    Os filtros de produtos e grupos de necessidade já foram aplicados antes da normalização,
-    então esta função apenas executa as validações de integridade.
-    
-    Args:
-        df: DataFrame já filtrado
-        categoria: Categoria sendo processada
-        
-    Returns:
-        True se todas as validações passaram
-    """
-    print("🔍 Validando integridade dos dados (filtros já aplicados)...")
-    
-    # Chamar validação original (filtros já aplicados)
-    return validar_integridade_dados(df)
+    # Chamar validação original com DataFrame filtrado
+    return validar_integridade_dados(df_validacao)
 
 def validar_integridade_dados(df: DataFrame) -> bool:
     """
@@ -1291,13 +1242,9 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None, formato: st
     df_union = df_offline.union(df_online)
     print(f"  ✅ União: {df_union.count():,} registros")
     
-    # 2.5. Aplicar filtros finais ANTES da normalização
-    print("\n🔍 Aplicando filtros finais antes da normalização...")
-    df_filtrado_final = aplicar_filtros_finais(df_union, categoria)
-    
     # 3. Adicionar informações de filiais (remover inativas)
     print()
-    df_com_filiais = adicionar_informacoes_filial(df_filtrado_final)
+    df_com_filiais = adicionar_informacoes_filial(df_union)
     
     # 4. Normalizar para 100.00% APÓS remoção de filiais
     print()
@@ -1342,7 +1289,7 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None, formato: st
     print(f"✅ Exportação concluída: {categoria}")
     print(f"📁 Total de arquivos: {len(arquivos_salvos)}")
         
-        return arquivos_salvos
+    return arquivos_salvos
         
 
 # COMMAND ----------
@@ -1375,7 +1322,7 @@ def exportar_todas_categorias(data_exportacao: str = None, formato: str = "xlsx"
         try:
             arquivos = exportar_matriz_csv(categoria, data_exportacao, formato)
             resultados[categoria] = arquivos
-    except Exception as e:
+        except Exception as e:
             print(f"❌ Erro: {str(e)}")
             resultados[categoria] = []
     
