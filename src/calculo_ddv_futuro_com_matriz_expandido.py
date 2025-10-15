@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, date
 import pandas as pd
 from typing import List, Optional, Dict, Any
 import plotly.graph_objs as go
+import os
 
 # Inicialização do Spark
 spark = SparkSession.builder.appName("calculo_ddv_futuro_expandido").getOrCreate()
@@ -373,21 +374,13 @@ else:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Salvar Resultados em Excel
+# MAGIC ## Salvar Resultados em CSV
 
 # COMMAND ----------
 
 if 'df_final_consolidado' in locals():
-    print("💾 SALVANDO RESULTADOS EM EXCEL")
+    print("💾 SALVANDO RESULTADOS EM CSV")
     print("=" * 50)
-    
-    # Instalar openpyxl se necessário
-    import subprocess
-    try:
-        import openpyxl
-    except ImportError:
-        print("📦 Instalando openpyxl...")
-        subprocess.check_call(["pip", "install", "openpyxl"])
     
     # Converter para Pandas
     df_pandas = df_final_consolidado.toPandas()
@@ -403,24 +396,29 @@ if 'df_final_consolidado' in locals():
         if col in df_pandas.columns:
             df_pandas[col] = df_pandas[col].astype(float)
     
-    # Salvar em Excel
-    output_path = f"/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/analysis/ddv_futuro_expandido_{VERSAO_MERECIMENTO}_{hoje_str}.xlsx"
+    # Salvar em CSV (mais eficiente para grandes volumes)
+    output_dir = f"src/output/{hoje_str}/ddv_futuro/"
     
-    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-        # ABA 1: Planilha simplificada com apenas colunas essenciais
-        df_simplificado = df_pandas[['CdSku', 'CdFilial', 'DDV_final_total']].copy()
-        df_simplificado['Chave'] = df_simplificado['CdSku'].astype(str) + '-' + df_simplificado['CdFilial'].astype(str)
-        df_simplificado = df_simplificado[['CdSku', 'CdFilial', 'Chave', 'DDV_final_total']]
-        df_simplificado.to_excel(writer, sheet_name="DDV_Final", index=False)
-        
-        # ABA 2: Planilha completa com memorial de cálculo
-        df_pandas.to_excel(writer, sheet_name="Memorial_Calculo", index=False)
+    # Criar diretório se não existir
+    os.makedirs(output_dir, exist_ok=True)
     
-    print(f"✅ Arquivo salvo em: {output_path}")
+    # Arquivo 1: DDV Final simplificado
+    df_simplificado = df_pandas[['CdSku', 'CdFilial', 'DDV_final_total']].copy()
+    df_simplificado['Chave'] = df_simplificado['CdSku'].astype(str) + '-' + df_simplificado['CdFilial'].astype(str)
+    df_simplificado = df_simplificado[['CdSku', 'CdFilial', 'Chave', 'DDV_final_total']]
+    
+    output_path_simplificado = f"{output_dir}ddv_futuro_final_{VERSAO_MERECIMENTO}_{hoje_str}.csv"
+    df_simplificado.to_csv(output_path_simplificado, index=False, encoding='utf-8')
+    
+    # Arquivo 2: Memorial completo
+    output_path_completo = f"{output_dir}ddv_futuro_memorial_{VERSAO_MERECIMENTO}_{hoje_str}.csv"
+    df_pandas.to_csv(output_path_completo, index=False, encoding='utf-8')
+    
+    print(f"✅ Arquivos salvos em: {output_dir}")
     print(f"📊 Total de registros salvos: {len(df_pandas):,}")
-    print(f"📋 Estrutura do arquivo:")
-    print(f"  • ABA 1 - 'DDV_Final': CdSku, CdFilial, Chave, DDV_final_total")
-    print(f"  • ABA 2 - 'Memorial_Calculo': Todas as colunas com detalhes do cálculo")
+    print(f"📋 Arquivos gerados:")
+    print(f"  • DDV Final: ddv_futuro_final_{VERSAO_MERECIMENTO}_{hoje_str}.csv")
+    print(f"  • Memorial: ddv_futuro_memorial_{VERSAO_MERECIMENTO}_{hoje_str}.csv")
     
 else:
     print("❌ Nenhum resultado para salvar!")
