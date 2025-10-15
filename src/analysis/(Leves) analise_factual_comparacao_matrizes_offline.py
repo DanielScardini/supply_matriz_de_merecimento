@@ -58,7 +58,8 @@ dt_fim = "2025-10-01"
 
 df_demanda = (
   spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
-  .filter(F.col("NmSetorGerencial") == "BELEZA & SAUDE")
+  .filter(F.col("NmSetorGerencial")
+          .isin("BELEZA & SAUDE", "PORTATEIS"))
   .filter(F.col("DtAtual") >= dt_inicio)
   .filter(F.col("DtAtual") < dt_fim)
   .groupBy("NmEspecieGerencial")

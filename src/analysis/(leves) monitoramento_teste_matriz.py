@@ -23,8 +23,10 @@ hoje = datetime.now() - timedelta(days=1)
 hoje_str = hoje.strftime("%Y-%m-%d")
 hoje_int = int(hoje.strftime("%Y%m%d"))
 
-GRUPOS_TESTE = ['LIQUIDIFICADORES ACIMA 1001 W._110',
-                'LIQUIDIFICADORES ACIMA 1001 W._220']
+GRUPOS_TESTE = [
+  'LIQUIDIFICADORES ACIMA 1001 W._110',
+
+  'LIQUIDIFICADORES ACIMA 1001 W._220']
                 
 print(GRUPOS_TESTE)
 
