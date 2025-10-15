@@ -17,10 +17,32 @@ data_inicio = datetime.now() - timedelta(days=30)
 data_inicio_str = data_inicio.strftime("%Y-%m-%d")
 data_inicio_int = int(data_inicio.strftime("%Y%m%d"))
 
-GRUPOS_TESTE = ['TV 50 ALTO P', 'TV 55 ALTO P', 'TV 43 PP', 
-                'TV 43 ALTO P', 'TV 32 ALTO P', 'TV 50 MEDIO',
-                'TV 32 PP', 'TV 55 MEDIO', 'SUPORTES', 'TV 50 ALTO P',
-                'TV 55 ALTO P', 'TV 32 MEDIO']
+GRUPOS_TESTE = [
+    "TV 32 ALTO P",
+    "TV 32 MEDIO",
+    "TV 32 PP",
+    "TV 40 MEDIO P",
+    "TV 43 ALTO P",
+    "TV 43 MEDIO",
+    "TV 43 PP",
+    "TV 50 ALTO P",
+    "TV 50 MEDIO",
+    "TV 50 PP",
+    "TV 55 ALTO P",
+    "TV 55 MEDIO",
+    "TV 58 PP",
+    "TV 60 ALTO P",
+    "TV 65 ALTO P",
+    "TV 65 MEDIO"
+    "1200 a 1600",
+    "1601 a 2000",
+    "2001 a 2500",
+    "2501 a 3000",
+    "3001 a 3500",
+    "<1099",
+    "<799",
+    ">4000"
+    ]
 
 # COMMAND ----------
 
@@ -45,7 +67,7 @@ df_vendas_robustas_off = (
     #.filter(F.col("demanda_diarizada") > 1)
     .orderBy(F.desc("demanda_diarizada"))
     .join(
-        spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_teste0110')
+        spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_teste0710')
         .select(
             "CdSku", "CdFilial",
             F.col("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura").alias("merecimento_final")),
