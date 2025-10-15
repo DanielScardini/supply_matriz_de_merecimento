@@ -117,7 +117,8 @@ CATEGORIAS_CONFIG = {
         "de_para": "databox.bcg_comum.supply_de_para_modelos_gemeos_tecnologia",
         "proporcao_on": 0.235,  # 23.5%
         "proporcao_off": 0.765,  # Complementar
-        "tabela_base": "databox.bcg_comum.supply_base_merecimento_diario_v4"
+        "tabela_base_off": "databox.bcg_comum.supply_base_merecimento_diario_v4",
+        "tabela_base_on": "databox.bcg_comum.supply_base_merecimento_diario_v4_online"
     },
     "TELEFONIA": {
         "grupos_teste": GRUPOS_TESTE_TELEFONIA,
@@ -126,7 +127,8 @@ CATEGORIAS_CONFIG = {
         "de_para": "databox.bcg_comum.supply_de_para_modelos_gemeos_tecnologia",  # Mesmo de telas
         "proporcao_on": 0.235,  # 23.5%
         "proporcao_off": 0.765,  # Complementar
-        "tabela_base": "databox.bcg_comum.supply_base_merecimento_diario_v4"
+        "tabela_base_off": "databox.bcg_comum.supply_base_merecimento_diario_v4",
+        "tabela_base_on": "databox.bcg_comum.supply_base_merecimento_diario_v4_online"
     },
     "LINHA_LEVE": {
         "grupos_teste": GRUPOS_TESTE_LINHA_LEVE,
@@ -135,7 +137,8 @@ CATEGORIAS_CONFIG = {
         "de_para": "databox.bcg_comum.supply_grupo_de_necessidade_linha_leve",  # Mesma estrutura de colunas
         "proporcao_on": 0.235,  # 23.5%
         "proporcao_off": 0.765,  # Complementar
-        "tabela_base": "databox.bcg_comum.supply_base_merecimento_diario_v4"
+        "tabela_base_off": "databox.bcg_comum.supply_base_merecimento_diario_v4",
+        "tabela_base_on": "databox.bcg_comum.supply_base_merecimento_diario_v4_online"
     }
 }
 
@@ -179,12 +182,16 @@ def calcular_ddv_categoria(categoria: str, tipo_dados: str) -> DataFrame:
     # Determinar tabela de merecimento baseada no tipo
     if tipo_dados == 'off':
         tabela_merecimento = config['tabela_merecimento_off']
+        tabela_base = config['tabela_base_off']
     else:
         tabela_merecimento = config['tabela_merecimento_on']
+        tabela_base = config['tabela_base_on']
     
-    # Carregar dados base
+    print(f"  • Tabela base: {tabela_base}")
+    print(f"  • Tabela merecimento: {tabela_merecimento}")
+    
     df_base = (
-        spark.table(config['tabela_base'])
+        spark.table(tabela_base)
         .filter(F.col('DtAtual') >= data_inicio_str)
         .filter(F.col('DtAtual') <= hoje_str)
     )
