@@ -145,8 +145,7 @@ CATEGORIAS_CONFIG = {
 print("🔧 CONFIGURAÇÃO CARREGADA:")
 for categoria, config in CATEGORIAS_CONFIG.items():
     print(f"  • {categoria}: {len(config['grupos_teste'])} grupos teste")
-    print(f"    - Proporção ON: {config['proporcao_on']:.1%}")
-    print(f"    - Proporção OFF: {config['proporcao_off']:.1%}")
+    print(f"    - Proporções serão calculadas dinamicamente baseadas nos dados reais")
 
 # COMMAND ----------
 
@@ -314,21 +313,32 @@ print("=" * 80)
 dfs_consolidados = []
 
 for categoria, df_resultado in resultados_ddv.items():
-    config = CATEGORIAS_CONFIG[categoria]
-    proporcao_on = config['proporcao_on']
-    proporcao_off = config['proporcao_off']
-    
     print(f"\n📊 Processando {categoria}:")
-    print(f"  • Proporção ON: {proporcao_on:.1%}")
-    print(f"  • Proporção OFF: {proporcao_off:.1%}")
     
-    # Aplicar proporções flexíveis
+    # Calcular proporções reais baseadas nos dados das tabelas ON e OFF
+    total_on = df_resultado.agg(F.sum("DDV_futuro_filial_on")).collect()[0][0]
+    total_off = df_resultado.agg(F.sum("DDV_futuro_filial_off")).collect()[0][0]
+    total_geral = total_on + total_off
+    
+    if total_geral > 0:
+        proporcao_on_real = total_on / total_geral
+        proporcao_off_real = total_off / total_geral
+    else:
+        proporcao_on_real = 0.0
+        proporcao_off_real = 0.0
+    
+    print(f"  • Proporção ON real: {proporcao_on_real:.1%}")
+    print(f"  • Proporção OFF real: {proporcao_off_real:.1%}")
+    
+    # Aplicar proporções reais calculadas
     df_com_proporcoes = (
         df_resultado
-        .withColumn("DDV_final_on", F.round(F.col("DDV_futuro_filial_on") * proporcao_on, 3))
-        .withColumn("DDV_final_off", F.round(F.col("DDV_futuro_filial_off") * proporcao_off, 3))
+        .withColumn("DDV_final_on", F.round(F.col("DDV_futuro_filial_on") * proporcao_on_real, 3))
+        .withColumn("DDV_final_off", F.round(F.col("DDV_futuro_filial_off") * proporcao_off_real, 3))
         .withColumn("DDV_final_total", F.round(F.col("DDV_final_on") + F.col("DDV_final_off"), 3))
         .withColumn("categoria", F.lit(categoria))
+        .withColumn("proporcao_on_real", F.lit(proporcao_on_real))
+        .withColumn("proporcao_off_real", F.lit(proporcao_off_real))
         .select(
             "categoria",
             "grupo_de_necessidade", 
@@ -340,7 +350,9 @@ for categoria, df_resultado in resultados_ddv.items():
             "DDV_futuro_filial_on", 
             "DDV_final_on",
             "DDV_final_off",
-            "DDV_final_total"
+            "DDV_final_total",
+            "proporcao_on_real",
+            "proporcao_off_real"
         )
     )
     
@@ -457,27 +469,28 @@ if 'df_final_consolidado' in locals():
     ddv_negativos = df_final_consolidado.filter(F.col("DDV_final_total") < 0).count()
     print(f"\n📊 Validação 2 - DDV negativos: {ddv_negativos}")
     
-    # Validação 3: Verificar se proporções estão corretas
-    print(f"\n📊 Validação 3 - Verificação de proporções:")
+    # Validação 3: Verificar proporções reais calculadas
+    print(f"\n📊 Validação 3 - Proporções reais calculadas:")
     for categoria in categorias_esperadas:
         if categoria in [row['categoria'] for row in categorias_com_dados]:
-            config = CATEGORIAS_CONFIG[categoria]
             df_cat = df_final_consolidado.filter(F.col("categoria") == categoria)
             
-            # Calcular proporção real
+            # Pegar proporções reais calculadas
+            proporcoes = df_cat.select("proporcao_on_real", "proporcao_off_real").distinct().collect()[0]
+            prop_on_real = proporcoes['proporcao_on_real']
+            prop_off_real = proporcoes['proporcao_off_real']
+            
+            # Calcular totais para validação
             soma_on = df_cat.agg(F.sum("DDV_final_on")).collect()[0][0]
             soma_off = df_cat.agg(F.sum("DDV_final_off")).collect()[0][0]
             soma_total = soma_on + soma_off
             
-            if soma_total > 0:
-                prop_on_real = soma_on / soma_total
-                prop_off_real = soma_off / soma_total
-                
-                print(f"  • {categoria}:")
-                print(f"    - Proporção ON esperada: {config['proporcao_on']:.1%}")
-                print(f"    - Proporção ON real: {prop_on_real:.1%}")
-                print(f"    - Proporção OFF esperada: {config['proporcao_off']:.1%}")
-                print(f"    - Proporção OFF real: {prop_off_real:.1%}")
+            print(f"  • {categoria}:")
+            print(f"    - Proporção ON calculada: {prop_on_real:.1%}")
+            print(f"    - Proporção OFF calculada: {prop_off_real:.1%}")
+            print(f"    - Total ON: R$ {soma_on:,.2f}")
+            print(f"    - Total OFF: R$ {soma_off:,.2f}")
+            print(f"    - Total geral: R$ {soma_total:,.2f}")
     
     print(f"\n✅ Validações concluídas!")
 
