@@ -16,6 +16,14 @@
 
 # COMMAND ----------
 
+# MAGIC %sql SELECT * FROM databox.logistica_comum.gestao_avista
+
+# COMMAND ----------
+
+# MAGIC %sql SELECT * FROM databox.bcg_comum.supply_base_merecimento_diario_v4
+
+# COMMAND ----------
+
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F, Window
 from datetime import datetime, timedelta, date

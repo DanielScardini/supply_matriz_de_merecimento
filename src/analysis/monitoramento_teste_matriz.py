@@ -24,13 +24,30 @@ hoje_str = hoje.strftime("%Y-%m-%d")
 hoje_int = int(hoje.strftime("%Y%m%d"))
 
 GRUPOS_TESTE = [
-    #"Telef pp",
-    "TV 50 ALTO P",
-    "TV 55 ALTO P",
+    "TV 32 ALTO P",
+    "TV 32 MEDIO",
+    "TV 32 PP",
+    "TV 40 MEDIO P",
+    "TV 43 ALTO P",
+    "TV 43 MEDIO",
     "TV 43 PP",
-    "Telef Alto",
-    #"Telef Medio 256GB",
-    #"Telef Medio 128GB"+
+    "TV 50 ALTO P",
+    "TV 50 MEDIO",
+    "TV 50 PP",
+    "TV 55 ALTO P",
+    "TV 55 MEDIO",
+    "TV 58 PP",
+    "TV 60 ALTO P",
+    "TV 65 ALTO P",
+    "TV 65 MEDIO"
+    "1200 a 1600",
+    "1601 a 2000",
+    "2001 a 2500",
+    "2501 a 3000",
+    "3001 a 3500",
+    "<1099",
+    "<799",
+    ">4000"
 ]
 print(GRUPOS_TESTE)
 
@@ -83,22 +100,11 @@ df_merecimento_offline = {}
 df_merecimento_online = {}
 
 
-df_merecimento_offline['TELAS'] = (
-    spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_teste1009')
-    .select('CdFilial', 'grupo_de_necessidade', 'CdSku',
-            F.round(100*F.col('Merecimento_Final_Media90_Qt_venda_sem_ruptura'), 2).alias('merecimento_percentual')
-    ).dropDuplicates(subset=['CdFilial', 'grupo_de_necessidade','CdSku',])
-    .join(spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
-          .select("CdFilial", "NmFilial", "NmRegiaoGeografica", "NmPorteLoja").distinct(),
-          how="left",
-          on="CdFilial")
-    .filter(F.col('grupo_de_necessidade').isin(GRUPOS_TESTE))
-)
 
 df_merecimento_offline['TELAS'] = (
-    spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_teste1009')
+    spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_teste0710')
     .select('CdFilial', 'grupo_de_necessidade', 'CdSku',
-            F.round(100*F.col('Merecimento_Final_Media90_Qt_venda_sem_ruptura'), 2).alias('merecimento_percentual')
+            F.round(100*F.col('Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura'), 2).alias('merecimento_percentual')
     ).dropDuplicates(subset=['CdFilial', 'grupo_de_necessidade','CdSku',])
     .join(spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
           .select("CdFilial", "NmFilial", "NmRegiaoGeografica", "NmPorteLoja").distinct(),
@@ -108,9 +114,9 @@ df_merecimento_offline['TELAS'] = (
 )
 
 df_merecimento_online['TELAS'] = (
-    spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste0809')
+    spark.table('databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste0710')
     .select('CdFilial', 'grupo_de_necessidade', 'CdSku',
-            F.round(100*F.col('Merecimento_Final_Media90_Qt_venda_sem_ruptura'), 2).alias('merecimento_percentual')
+            F.round(100*F.col('Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura'), 2).alias('merecimento_percentual')
     ).dropDuplicates(subset=['CdFilial', 'grupo_de_necessidade', 'CdSku',])
     .join(spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
           .select("CdFilial", "NmFilial", "NmRegiaoGeografica", "NmPorteLoja").distinct(),
@@ -121,9 +127,9 @@ df_merecimento_online['TELAS'] = (
 
 
 df_merecimento_offline['TELEFONIA'] = (
-    spark.table('databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste1009')
+    spark.table('databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste0710')
     .select('CdFilial', 'grupo_de_necessidade', 'CdSku',
-            F.round(100*F.col('Merecimento_Final_Media90_Qt_venda_sem_ruptura'), 2).alias('merecimento_percentual')
+            F.round(100*F.col('Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura'), 2).alias('merecimento_percentual')
     ).dropDuplicates(subset=['CdFilial', 'grupo_de_necessidade', 'CdSku',])
     .join(spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
           .select("CdFilial", "NmFilial", "NmRegiaoGeografica", "NmPorteLoja").distinct(),
@@ -133,9 +139,9 @@ df_merecimento_offline['TELEFONIA'] = (
 )
 
 df_merecimento_online['TELEFONIA'] = (
-    spark.table('databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste0809')
+    spark.table('databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste0710')
     .select('CdFilial', 'grupo_de_necessidade', 'CdSku',
-            F.round(100*F.col('Merecimento_Final_Media90_Qt_venda_sem_ruptura'), 2).alias('merecimento_percentual')
+            F.round(100*F.col('Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura'), 2).alias('merecimento_percentual')
     ).dropDuplicates(subset=['CdFilial', 'grupo_de_necessidade', 'CdSku',])
     .join(spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
           .select("CdFilial", "NmFilial", "NmRegiaoGeografica", "NmPorteLoja").distinct(),
@@ -1520,7 +1526,7 @@ dim_loja = (
 COL_REAL = "Percentual_QtDemanda"
 COL_PESO = "QtDemanda"
 COL_MATRIZ_NOVA = "merecimento_percentual"
-COL_NEOGRID = "PercMatrizNeogrid"
+COL_NEOGRID = "PercMatrizNeogrid_33Median"
 
 # ordem desejada das regiões
 REGIOES_ORD = ["Norte","Nordeste","Centro Oeste","Sudeste","Sul"]

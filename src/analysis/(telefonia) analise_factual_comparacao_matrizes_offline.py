@@ -31,7 +31,15 @@ hoje_str = hoje.strftime("%Y-%m-%d")
 hoje_int = int(hoje.strftime("%Y%m%d"))
 
 
-GRUPOS_TESTE = ['3001 a 3500', '>4000',]
+GRUPOS_TESTE = [
+    "1200 a 1600",
+    "1601 a 2000",
+    "2001 a 2500",
+    "2501 a 3000",
+    "3001 a 3500",
+    "<1099",
+    "<799",
+    ">4000"]
 print(GRUPOS_TESTE)
 
 GRUPOS_REMOVER = ['Chip', 'FORA DE LINHA', 'SEM_GN']
@@ -146,7 +154,7 @@ from pyspark.sql import Window
 
 # === Janela dinâmica: últimos 30 dias até ontem ===
 fim_janela = F.date_sub(F.current_date(), 2)
-inicio_janela = F.date_sub(fim_janela, 92)
+inicio_janela = F.date_sub(fim_janela, 32)
 
 # Log das datas (yyyy-MM-dd)
 _row = (
@@ -489,7 +497,7 @@ def make_scatter(df, y_col, y_label, categoria):
         paper_bgcolor="#f2f2f2",
         plot_bgcolor="#f2f2f2",
         margin=dict(l=40, r=40, t=60, b=40),
-        xaxis=dict(showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)", zeroline=False, range=[0,3]),
+        xaxis=dict(showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)", zeroline=False, range=[0,0.6]),
         yaxis=dict(showgrid=True, gridwidth=0.3, gridcolor="rgba(0,0,0,0.08)", zeroline=False, range=[0,2]),
         legend=dict(title="Região Geográfica", orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5),
         width=1200,

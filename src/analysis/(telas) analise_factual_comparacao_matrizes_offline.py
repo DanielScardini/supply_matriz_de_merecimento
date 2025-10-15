@@ -32,11 +32,22 @@ hoje_int = int(hoje.strftime("%Y%m%d"))
 
 
 GRUPOS_TESTE = [
-    'TV 50 ALTO P', 
-    'TV 55 ALTO P',
-     'TV 43 PP',
-     #'TV 75 PP',
-     #'TV 75 ALTO P'
+    "TV 32 ALTO P",
+    "TV 32 MEDIO",
+    "TV 32 PP",
+    "TV 40 MEDIO P",
+    "TV 43 ALTO P",
+    "TV 43 MEDIO",
+    "TV 43 PP",
+    "TV 50 ALTO P",
+    "TV 50 MEDIO",
+    "TV 50 PP",
+    "TV 55 ALTO P",
+    "TV 55 MEDIO",
+    "TV 58 PP",
+    "TV 60 ALTO P",
+    "TV 65 ALTO P",
+    "TV 65 MEDIO"
      ]
 print(GRUPOS_TESTE)
 
@@ -179,7 +190,7 @@ df_proporcao_factual = (
         how="inner",
         on="CdSku"
     )
-    #.filter(F.col("grupo_de_necessidade").isin(GRUPOS_TESTE))
+    .filter(F.col("grupo_de_necessidade").isin(GRUPOS_TESTE))
     .filter(~F.col("grupo_de_necessidade").isin(GRUPOS_REMOVER))
     .dropna(subset='grupo_de_necessidade')
     .groupBy('CdFilial', 'grupo_de_necessidade')
@@ -272,7 +283,7 @@ def add_smape_components(df, pred_col, real_col=COL_REAL, peso_col=COL_PESO, lab
 
 # === Lista de colunas de predição alvo ===
 pred_cols_base = list(colunas)  # ["Merecimento_Final_Media90_...", ...]
-extras = ["PercMatrizNeogrid"]#, "PercMatrizNeogrid_median"]
+extras = ["PercMatrizNeogrid", "PercMatrizNeogrid_median"]
 # mantém só as extras que existem no DF
 def existing_pred_cols(df, base_cols, maybe_cols):
     present = [c for c in maybe_cols if c in df.columns]
@@ -403,25 +414,25 @@ wmape_all.orderBy("categoria", "grupo", "modelo").display()
 
 # COMMAND ----------
 
-from pyspark.sql import functions as F
+# from pyspark.sql import functions as F
 
-# Lista das TVs que você quer avaliar
-tvs_list = tvs  # assumindo que já foi definida
+# # Lista das TVs que você quer avaliar
+# tvs_list = tvs  # assumindo que já foi definida
 
-# Soma o volume dos grupos filtrados e compara com o total da categoria
-df_vol_check = (
-    wmape_all
-    .filter(F.col("grupo").isin(tvs_list))
-    .groupBy("categoria")
-    .agg(
-        F.sum("Volume").alias("Volume_TVs"),
-        F.first("Volume_total_categoria").alias("Volume_total_categoria")
-    )
-    .withColumn("Pct_Volume_TVs", F.round(F.col("Volume_TVs") / F.col("Volume_total_categoria") * 100, 2))
-    .orderBy("categoria")
-)
+# # Soma o volume dos grupos filtrados e compara com o total da categoria
+# df_vol_check = (
+#     wmape_all
+#     .filter(F.col("grupo").isin(tvs_list))
+#     .groupBy("categoria")
+#     .agg(
+#         F.sum("Volume").alias("Volume_TVs"),
+#         F.first("Volume_total_categoria").alias("Volume_total_categoria")
+#     )
+#     .withColumn("Pct_Volume_TVs", F.round(F.col("Volume_TVs") / F.col("Volume_total_categoria") * 100, 2))
+#     .orderBy("categoria")
+# )
 
-df_vol_check.display()
+# df_vol_check.display()
 
 # COMMAND ----------
 

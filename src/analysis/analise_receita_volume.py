@@ -342,7 +342,7 @@ if categoria_detalhada in resultados:
     print(f"\n🎯 CONCENTRAÇÃO DE RECEITA ({categoria_detalhada}):")
     df_concentracao = (
         df_detalhado
-        .withColumn("PercReceitaCumulativo", F.sum("PercReceita").over(W.orderBy(F.desc("Receita")).rowsBetween(W.unboundedPreceding, 0)))
+        .withColumn("PercReceitaCumulativo", F.sum("PercReceita").over(Window.orderBy(F.desc("Receita")).rowsBetween(Window.unboundedPreceding, 0)))
         .select("grupo_de_necessidade", "PercReceita", "PercReceitaCumulativo")
         .filter(F.col("PercReceitaCumulativo") <= 80)
     )
@@ -387,7 +387,7 @@ print(f"📁 Arquivos salvos em: /tmp/analise_receita_*")
 
 # MAGIC %md
 # MAGIC ## 6. Análise Específica: Participação da Apple na Diretoria Telefonia Celular
-# MAGIC 
+# MAGIC
 # MAGIC Esta análise calcula qual percentual da receita da Diretoria Telefonia Celular é representado pela marca Apple.
 # MAGIC Esta informação é crucial para entender a concentração de receita por marca nesta diretoria.
 
@@ -517,77 +517,8 @@ df_marcas_telefonia = analisar_participacao_apple_telefonia()
 
 # MAGIC %md
 # MAGIC ### Análise Complementar: Evolução Temporal da Apple
-# MAGIC 
+# MAGIC
 # MAGIC Esta análise mostra como a participação da Apple na receita da Diretoria Telefonia Celular evoluiu ao longo do tempo.
-
-# COMMAND ----------
-
-def analisar_evolucao_temporal_apple():
-    """
-    Analisa a evolução temporal da participação da Apple na receita da Diretoria Telefonia Celular.
-    """
-    print("📅 ANÁLISE DE EVOLUÇÃO TEMPORAL DA APPLE")
-    print("=" * 60)
-    
-    # Carregar dados com agregação mensal
-    df_evolucao = (
-        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
-        .filter(F.col("DtAtual") >= dt_inicio)
-        .filter(F.col("DtAtual") < dt_fim)
-        .filter(F.col("NmAgrupamentoDiretoriaSetor") == "DIRETORIA TELEFONIA CELULAR")
-        .withColumn("AnoMes", F.date_format(F.col("DtAtual"), "yyyy-MM"))
-        .groupBy("AnoMes", "NmMarca")
-        .agg(F.sum("Receita").alias("ReceitaMes"))
-    )
-    
-    # Calcular total mensal da diretoria
-    df_total_mensal = (
-        df_evolucao
-        .groupBy("AnoMes")
-        .agg(F.sum("ReceitaMes").alias("ReceitaTotalMes"))
-    )
-    
-    # Join para calcular percentuais
-    df_percentuais_mensais = (
-        df_evolucao
-        .join(df_total_mensal, on="AnoMes", how="left")
-        .withColumn("PercReceitaMes", F.round((F.col("ReceitaMes") / F.col("ReceitaTotalMes")) * 100, 2))
-        .filter(F.col("NmMarca") == "Apple")
-        .orderBy("AnoMes")
-    )
-    
-    print(f"📊 EVOLUÇÃO MENSAL DA PARTICIPAÇÃO DA APPLE:")
-    df_percentuais_mensais.select(
-        "AnoMes",
-        "ReceitaMes", 
-        "ReceitaTotalMes",
-        "PercReceitaMes"
-    ).show(20, truncate=False)
-    
-    # Calcular estatísticas de evolução
-    stats_evolucao = df_percentuais_mensais.agg(
-        F.avg("PercReceitaMes").alias("MediaPercReceita"),
-        F.min("PercReceitaMes").alias("MinPercReceita"),
-        F.max("PercReceitaMes").alias("MaxPercReceita"),
-        F.stddev("PercReceitaMes").alias("DesvioPadraoPercReceita")
-    ).collect()[0]
-    
-    print(f"\n📈 ESTATÍSTICAS DE EVOLUÇÃO:")
-    print(f"  • % Receita médio: {stats_evolucao['MediaPercReceita']:.2f}%")
-    print(f"  • % Receita mínimo: {stats_evolucao['MinPercReceita']:.2f}%")
-    print(f"  • % Receita máximo: {stats_evolucao['MaxPercReceita']:.2f}%")
-    print(f"  • Desvio padrão: {stats_evolucao['DesvioPadraoPercReceita']:.2f}%")
-    
-    # Salvar evolução temporal
-    df_percentuais_mensais.coalesce(1).write.mode("overwrite").option("header", True).csv("/tmp/evolucao_apple_telefonia")
-    print(f"\n💾 Evolução temporal salva em: /tmp/evolucao_apple_telefonia")
-    
-    return df_percentuais_mensais
-
-# COMMAND ----------
-
-# Executar análise de evolução temporal
-df_evolucao_apple = analisar_evolucao_temporal_apple()
 
 # COMMAND ----------
 
