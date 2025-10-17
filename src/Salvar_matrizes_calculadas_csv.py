@@ -48,8 +48,8 @@ dt_fim = "2025-10-01"
 # Calcular top 80% por ESPÉCIE (SKUs) - apenas PORTATEIS
 df_demanda_especie = (
   spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
-  #.filter(F.col("NmSetorGerencial") == "PORTATEIS")
-  .filter(F.col("NmSetorGerencial") == "BELEZA & SAUDE")
+  .filter(F.col("NmSetorGerencial") == "PORTATEIS")
+  #.filter(F.col("NmSetorGerencial") == "BELEZA & SAUDE")
   .filter(F.col("DtAtual") >= dt_inicio)
   .filter(F.col("DtAtual") < dt_fim)
   .groupBy("NmEspecieGerencial")
