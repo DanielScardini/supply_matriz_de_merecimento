@@ -695,9 +695,12 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
             # Somar transferências aos merecimentos existentes do CD14
             print(f"  • Somando transferências aos merecimentos do CD14...")
             
-            # Separar dados do CD14 e outros CDs
+            # Separar dados do CD14 e outros CDs (EXCLUINDO CDs inválidos)
             df_cd14_original = df_com_tipo_filial.filter(F.col("CdFilial") == 14)
-            df_outros_cds = df_com_tipo_filial.filter(F.col("CdFilial") != 14)
+            df_outros_cds = df_com_tipo_filial.filter(
+                (F.col("CdFilial") != 14) & 
+                (F.col("CdFilial").isin(cds_validos_categoria))  # Apenas CDs válidos
+            )
             
             # Fazer join das transferências com CD14 original
             df_cd14_com_transferencias = (
