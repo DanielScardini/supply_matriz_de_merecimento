@@ -616,6 +616,7 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
             spark.table('databox.logistica_comum.roteirizacaocentrodistribuicao')
             .select("CdFilial", "NmTipoFilial")
             .withColumn("tipo_filial", F.col("NmTipoFilial"))
+            .select("CdFilial", "tipo_filial")  # Manter apenas as colunas necessárias
         )
         
         # Lojas ativas
@@ -625,7 +626,7 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
             .withColumn("tipo_filial", F.lit("LOJA"))
         )
         
-        # Unir tabelas de referência
+        # Unir tabelas de referência (agora com mesmo número de colunas)
         df_referencia = df_cds.union(df_lojas)
         
         # Fazer join com dados filtrados para obter tipo_filial
