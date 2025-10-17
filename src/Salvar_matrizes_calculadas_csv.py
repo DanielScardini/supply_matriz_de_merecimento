@@ -1687,13 +1687,146 @@ def exportar_excel_validacao_todas_categorias(data_exportacao: str = None) -> Di
 
 # COMMAND ----------
 
-# Executar exportação para todas as categorias
-resultados = exportar_todas_categorias()
+# Executar exportação para todas as categorias (COMENTADO PARA DEBUG)
+# resultados = exportar_todas_categorias()
 
 # COMMAND ----------
 
-# Exportar Excel de validação para todas as categorias
-resultados_validacao = exportar_excel_validacao_todas_categorias()
+# Exportar Excel de validação para todas as categorias (COMENTADO PARA DEBUG)
+# resultados_validacao = exportar_excel_validacao_todas_categorias()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 9. Debug - Teste da Lógica de Identificação de CDs
+
+# COMMAND ----------
+
+def debug_identificacao_cds(categoria: str):
+    """
+    Função de debug para testar apenas a lógica de identificação de CDs
+    sem processar todos os dados.
+    """
+    print(f"🔍 DEBUG - Testando identificação de CDs para {categoria}")
+    print("=" * 80)
+    
+    # Definir CDs válidos por categoria
+    cds_validos = {
+        "DIRETORIA DE TELAS": [1760, 2241, 2600, 1895],
+        "DIRETORIA TELEFONIA CELULAR": [1760, 2241, 2600]
+    }
+    
+    cds_validos_categoria = cds_validos[categoria]
+    print(f"📋 CDs Válidos para {categoria}: {cds_validos_categoria}")
+    
+    # Carregar apenas uma amostra pequena dos dados online
+    tabela_online = TABELAS_MATRIZ_MERECIMENTO[categoria]["online"]
+    print(f"📊 Carregando amostra da tabela: {tabela_online}")
+    
+    # Carregar apenas alguns registros para teste
+    df_amostra = (
+        spark.table(tabela_online)
+        .select("CdFilial", "CdSku")
+        .distinct()
+        .limit(100)  # Apenas 100 registros para teste rápido
+    )
+    
+    print(f"📊 Amostra carregada: {df_amostra.count()} registros únicos")
+    
+    # Carregar informações de tipo de filial
+    print(f"📋 Carregando informações de tipo de filial...")
+    
+    # CDs ativos
+    df_cds = (
+        spark.table('databox.logistica_comum.roteirizacaocentrodistribuicao')
+        .select("CdFilial", "NmTipoFilial")
+        .withColumn("tipo_filial", F.col("NmTipoFilial"))
+        .select("CdFilial", "tipo_filial")
+    )
+    
+    # Lojas ativas
+    df_lojas = (
+        spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+        .select("CdFilial")
+        .withColumn("tipo_filial", F.lit("LOJA"))
+    )
+    
+    # Unir tabelas de referência
+    df_referencia = df_cds.union(df_lojas)
+    
+    # Fazer join com amostra
+    df_com_tipo_filial = (
+        df_amostra
+        .join(df_referencia, on="CdFilial", how="left")
+        .withColumn(
+            "is_cd",
+            F.when(F.col("CdFilial") == 14, F.lit(True))
+            .when(F.col("tipo_filial").isin(["CD", "Entreposto", "TERMINAL"]), F.lit(True))
+            .otherwise(F.lit(False))
+        )
+    )
+    
+    # Verificar CD 1200 especificamente
+    print(f"\n🔍 VERIFICAÇÃO ESPECÍFICA DO CD 1200:")
+    cd1200_info = (
+        df_com_tipo_filial
+        .filter(F.col("CdFilial") == 1200)
+        .select("CdFilial", "tipo_filial", "is_cd")
+        .distinct()
+        .collect()
+    )
+    
+    if cd1200_info:
+        print(f"✅ CD 1200 encontrado: {cd1200_info}")
+        cd1200_row = cd1200_info[0]
+        print(f"   • Tipo de filial: {cd1200_row['tipo_filial']}")
+        print(f"   • É CD: {cd1200_row['is_cd']}")
+        
+        # Verificar se seria considerado inválido
+        if cd1200_row['is_cd'] and 1200 not in cds_validos_categoria + [14]:
+            print(f"   ✅ CD 1200 seria considerado INVÁLIDO (não está na lista válida)")
+            print(f"   ✅ CD 1200 seria transferido para CD14")
+        else:
+            print(f"   ❌ CD 1200 NÃO seria considerado inválido")
+            if not cd1200_row['is_cd']:
+                print(f"   ❌ Motivo: Não é identificado como CD")
+            elif 1200 in cds_validos_categoria + [14]:
+                print(f"   ❌ Motivo: Está na lista de CDs válidos")
+    else:
+        print(f"❌ CD 1200 não encontrado na amostra")
+    
+    # Mostrar todos os CDs na amostra
+    print(f"\n📋 TODOS OS CDs NA AMOSTRA:")
+    cds_na_amostra = (
+        df_com_tipo_filial
+        .filter(F.col("is_cd") == True)
+        .select("CdFilial", "tipo_filial")
+        .distinct()
+        .orderBy("CdFilial")
+        .collect()
+    )
+    
+    for cd in cds_na_amostra:
+        cd_num = cd['CdFilial']
+        tipo = cd['tipo_filial']
+        if cd_num in cds_validos_categoria + [14]:
+            status = "✅ VÁLIDO"
+        else:
+            status = "❌ INVÁLIDO"
+        print(f"   • CD {cd_num} ({tipo}): {status}")
+    
+    print("=" * 80)
+    print(f"✅ Debug concluído para {categoria}")
+
+# COMMAND ----------
+
+# Executar debug para Telas
+debug_identificacao_cds("DIRETORIA DE TELAS")
+
+# COMMAND ----------
+
+# Executar debug para Telefonia
+debug_identificacao_cds("DIRETORIA TELEFONIA CELULAR")
 
 # COMMAND ----------
 
