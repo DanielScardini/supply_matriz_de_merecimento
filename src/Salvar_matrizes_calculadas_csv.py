@@ -699,12 +699,16 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
                 .drop("is_cd", "tipo_filial")
             )
             
-            # Reunir todos os dados
+            # Reunir todos os dados (garantindo mesmo número de colunas)
+            # Selecionar apenas as colunas necessárias de cada DataFrame
+            df_outros_cds_final = df_outros_cds.select("CdFilial", "CdSku", "grupo_de_necessidade", "Merecimento_raw")
+            df_cd14_final = df_cd14_com_transferencias.select("CdFilial", "CdSku", "grupo_de_necessidade", "Merecimento_raw")
+            df_cds_invalidos_final = df_cds_invalidos_zerados.select("CdFilial", "CdSku", "grupo_de_necessidade", "Merecimento_raw")
+            
             df_filtrado = (
-                df_outros_cds
-                .union(df_cd14_com_transferencias)
-                .union(df_cds_invalidos_zerados)
-                .drop("is_cd", "tipo_filial")
+                df_outros_cds_final
+                .union(df_cd14_final)
+                .union(df_cds_invalidos_final)
             )
             
             print(f"✅ Regra de de-para aplicada:")
@@ -713,7 +717,7 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
             print(f"  • Total de registros após de-para: {df_filtrado.count():,}")
         else:
             print(f"✅ Nenhum CD inválido encontrado - regra não aplicada")
-            df_filtrado = df_com_tipo_filial.drop("is_cd", "tipo_filial")
+            df_filtrado = df_com_tipo_filial.select("CdFilial", "CdSku", "grupo_de_necessidade", "Merecimento_raw")
         
         print("=" * 60)
     
