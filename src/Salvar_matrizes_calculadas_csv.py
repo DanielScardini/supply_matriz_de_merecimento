@@ -650,6 +650,17 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
         cds_invalidos_count = df_cds_invalidos.count()
         print(f"📋 CDs Inválidos identificados: {cds_invalidos_count:,} registros")
         
+        # DEBUG: Verificar se CD 1200 está sendo identificado corretamente
+        cd1200_info = (
+            df_com_tipo_filial
+            .filter(F.col("CdFilial") == 1200)
+            .select("CdFilial", "tipo_filial", "is_cd")
+            .distinct()
+            .collect()
+        )
+        if cd1200_info:
+            print(f"🔍 DEBUG CD 1200: {cd1200_info}")
+        
         if cds_invalidos_count > 0:
             # Mostrar quais CDs inválidos foram encontrados
             cds_invalidos_lista = (
@@ -661,6 +672,12 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
                 .collect()
             )
             print(f"📋 CDs Inválidos encontrados: {cds_invalidos_lista}")
+            
+            # DEBUG: Verificar se CD 1200 está na lista de inválidos
+            if 1200 in cds_invalidos_lista:
+                print(f"✅ CD 1200 está na lista de CDs inválidos - será transferido")
+            else:
+                print(f"❌ CD 1200 NÃO está na lista de CDs inválidos - PROBLEMA!")
             
             # Calcular transferências para CD14 por SKU
             print(f"\n🔄 TRANSFERINDO MERECIMENTOS PARA CD14:")
