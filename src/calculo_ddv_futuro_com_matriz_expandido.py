@@ -416,28 +416,92 @@ if 'df_final_consolidado' in locals():
             df_pandas[col] = df_pandas[col].astype(float)
     
     # Salvar em CSV (mais eficiente para grandes volumes)
-    output_dir = f"src/output/{hoje_str}/ddv_futuro/"
+    output_dir = f"/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/output/{hoje_str}/ddv_futuro/"
     
     # Criar diretório se não existir
     os.makedirs(output_dir, exist_ok=True)
     
-    # Arquivo 1: DDV Final simplificado
+    # Instalar openpyxl se necessário
+    import subprocess
+    try:
+        import openpyxl
+    except ImportError:
+        print("📦 Instalando openpyxl...")
+        subprocess.check_call(["pip", "install", "openpyxl"])
+    
+    # Configuração para divisão em partes
+    MAX_LINHAS_POR_ARQUIVO = 250000
+    
+    # Arquivo 1: DDV Final simplificado (dividido em partes se necessário)
     df_simplificado = df_pandas[['CdSku', 'CdFilial', 'DDV_final_total']].copy()
     df_simplificado['Chave'] = df_simplificado['CdSku'].astype(str) + '-' + df_simplificado['CdFilial'].astype(str)
     df_simplificado = df_simplificado[['CdSku', 'CdFilial', 'Chave', 'DDV_final_total']]
     
-    output_path_simplificado = f"{output_dir}ddv_futuro_final_{VERSAO_MERECIMENTO}_{hoje_str}.csv"
-    df_simplificado.to_csv(output_path_simplificado, index=False, encoding='utf-8')
+    # Formatar DDV_final_total com vírgula como decimal
+    df_simplificado['DDV_final_total'] = df_simplificado['DDV_final_total'].apply(lambda x: f"{x:.3f}".replace('.', ','))
     
-    # Arquivo 2: Memorial completo
-    output_path_completo = f"{output_dir}ddv_futuro_memorial_{VERSAO_MERECIMENTO}_{hoje_str}.csv"
-    df_pandas.to_csv(output_path_completo, index=False, encoding='utf-8')
+    total_linhas_simplificado = len(df_simplificado)
+    num_partes_simplificado = (total_linhas_simplificado + MAX_LINHAS_POR_ARQUIVO - 1) // MAX_LINHAS_POR_ARQUIVO
     
-    print(f"✅ Arquivos salvos em: {output_dir}")
+    print(f"📊 DDV Final simplificado: {total_linhas_simplificado:,} linhas")
+    print(f"📦 Será dividido em {num_partes_simplificado} parte(s)")
+    
+    for i in range(num_partes_simplificado):
+        inicio = i * MAX_LINHAS_POR_ARQUIVO
+        fim = min((i + 1) * MAX_LINHAS_POR_ARQUIVO, total_linhas_simplificado)
+        
+        df_parte = df_simplificado.iloc[inicio:fim]
+        
+        if num_partes_simplificado == 1:
+            nome_arquivo = f"ddv_futuro_final_{VERSAO_MERECIMENTO}_{hoje_str}.xlsx"
+        else:
+            nome_arquivo = f"ddv_futuro_final_{VERSAO_MERECIMENTO}_{hoje_str}_parte_{i+1:02d}.xlsx"
+        
+        output_path = f"{output_dir}{nome_arquivo}"
+        df_parte.to_excel(output_path, index=False, engine='openpyxl')
+        print(f"  ✅ Parte {i+1}: {len(df_parte):,} linhas -> {nome_arquivo}")
+    
+    # Arquivo 2: Memorial completo (dividido em partes se necessário)
+    # Formatar colunas numéricas com vírgula como decimal
+    df_memorial_formatado = df_pandas.copy()
+    colunas_para_formatar = [
+        "demanda_diarizada_off", "demanda_diarizada_on",
+        "DDV_futuro_filial_off", "DDV_futuro_filial_on",
+        "DDV_final_on", "DDV_final_off", "DDV_final_total"
+    ]
+    
+    for col in colunas_para_formatar:
+        if col in df_memorial_formatado.columns:
+            df_memorial_formatado[col] = df_memorial_formatado[col].apply(lambda x: f"{x:.3f}".replace('.', ','))
+    
+    total_linhas_memorial = len(df_memorial_formatado)
+    num_partes_memorial = (total_linhas_memorial + MAX_LINHAS_POR_ARQUIVO - 1) // MAX_LINHAS_POR_ARQUIVO
+    
+    print(f"\n📊 Memorial completo: {total_linhas_memorial:,} linhas")
+    print(f"📦 Será dividido em {num_partes_memorial} parte(s)")
+    
+    for i in range(num_partes_memorial):
+        inicio = i * MAX_LINHAS_POR_ARQUIVO
+        fim = min((i + 1) * MAX_LINHAS_POR_ARQUIVO, total_linhas_memorial)
+        
+        df_parte = df_memorial_formatado.iloc[inicio:fim]
+        
+        if num_partes_memorial == 1:
+            nome_arquivo = f"ddv_futuro_memorial_{VERSAO_MERECIMENTO}_{hoje_str}.xlsx"
+        else:
+            nome_arquivo = f"ddv_futuro_memorial_{VERSAO_MERECIMENTO}_{hoje_str}_parte_{i+1:02d}.xlsx"
+        
+        output_path = f"{output_dir}{nome_arquivo}"
+        df_parte.to_excel(output_path, index=False, engine='openpyxl')
+        print(f"  ✅ Parte {i+1}: {len(df_parte):,} linhas -> {nome_arquivo}")
+    
+    print(f"\n✅ Arquivos salvos em: {output_dir}")
     print(f"📊 Total de registros salvos: {len(df_pandas):,}")
-    print(f"📋 Arquivos gerados:")
-    print(f"  • DDV Final: ddv_futuro_final_{VERSAO_MERECIMENTO}_{hoje_str}.csv")
-    print(f"  • Memorial: ddv_futuro_memorial_{VERSAO_MERECIMENTO}_{hoje_str}.csv")
+    print(f"📋 Resumo:")
+    print(f"  • DDV Final: {num_partes_simplificado} arquivo(s) XLSX")
+    print(f"  • Memorial: {num_partes_memorial} arquivo(s) XLSX")
+    print(f"  • Máximo por arquivo: {MAX_LINHAS_POR_ARQUIVO:,} linhas")
+    print(f"  • Formato: Vírgula como separador decimal")
     
 else:
     print("❌ Nenhum resultado para salvar!")
