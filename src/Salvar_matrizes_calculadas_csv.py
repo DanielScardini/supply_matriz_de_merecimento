@@ -607,19 +607,41 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
         cds_validos_categoria = cds_validos[categoria]
         print(f"📋 CDs Válidos: {cds_validos_categoria}")
         
-        # Identificar CDs usando método existente
-        df_com_tipo = (
+        # Identificar CDs usando método existente (mesma lógica da função adicionar_informacoes_filial)
+        # Primeiro, carregar informações de tipo de filial das tabelas de referência
+        print(f"  📋 Carregando informações de tipo de filial...")
+        
+        # CDs ativos
+        df_cds = (
+            spark.table('databox.logistica_comum.roteirizacaocentrodistribuicao')
+            .select("CdFilial", "NmTipoFilial")
+            .withColumn("tipo_filial", F.col("NmTipoFilial"))
+        )
+        
+        # Lojas ativas
+        df_lojas = (
+            spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
+            .select("CdFilial")
+            .withColumn("tipo_filial", F.lit("LOJA"))
+        )
+        
+        # Unir tabelas de referência
+        df_referencia = df_cds.union(df_lojas)
+        
+        # Fazer join com dados filtrados para obter tipo_filial
+        df_com_tipo_filial = (
             df_filtrado
+            .join(df_referencia, on="CdFilial", how="left")
             .withColumn(
                 "is_cd",
                 F.when(F.col("CdFilial") == 14, F.lit(True))  # CD 14 é CD
-                .when(F.col("CdFilial").isin(cds_validos_categoria), F.lit(True))  # CDs válidos são CDs
+                .when(F.col("tipo_filial").isin(["CD", "Entreposto", "TERMINAL"]), F.lit(True))
                 .otherwise(F.lit(False))
             )
         )
         
         # Separar CDs inválidos (que não estão na lista válida)
-        df_cds_invalidos = df_com_tipo.filter(
+        df_cds_invalidos = df_com_tipo_filial.filter(
             (F.col("is_cd") == True) & 
             (~F.col("CdFilial").isin(cds_validos_categoria + [14]))  # Excluir CDs válidos e CD14
         )
@@ -656,8 +678,8 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
             print(f"  • Somando transferências aos merecimentos do CD14...")
             
             # Separar dados do CD14 e outros CDs
-            df_cd14_original = df_com_tipo.filter(F.col("CdFilial") == 14)
-            df_outros_cds = df_com_tipo.filter(F.col("CdFilial") != 14)
+            df_cd14_original = df_com_tipo_filial.filter(F.col("CdFilial") == 14)
+            df_outros_cds = df_com_tipo_filial.filter(F.col("CdFilial") != 14)
             
             # Fazer join das transferências com CD14 original
             df_cd14_com_transferencias = (
@@ -673,7 +695,7 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
             df_cds_invalidos_zerados = (
                 df_cds_invalidos
                 .withColumn("Merecimento_raw", F.lit(0.0))
-                .drop("is_cd")
+                .drop("is_cd", "tipo_filial")
             )
             
             # Reunir todos os dados
@@ -681,7 +703,7 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
                 df_outros_cds
                 .union(df_cd14_com_transferencias)
                 .union(df_cds_invalidos_zerados)
-                .drop("is_cd")
+                .drop("is_cd", "tipo_filial")
             )
             
             print(f"✅ Regra de de-para aplicada:")
@@ -690,7 +712,7 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
             print(f"  • Total de registros após de-para: {df_filtrado.count():,}")
         else:
             print(f"✅ Nenhum CD inválido encontrado - regra não aplicada")
-            df_filtrado = df_com_tipo.drop("is_cd")
+            df_filtrado = df_com_tipo_filial.drop("is_cd", "tipo_filial")
         
         print("=" * 60)
     
