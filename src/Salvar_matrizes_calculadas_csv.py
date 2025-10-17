@@ -587,11 +587,16 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
         
         # Agregar por CdSku + CdFilial + grupo_de_necessidade para somar merecimentos
         print(f"  • Agregando merecimentos após consolidação...")
+        registros_antes_agg = df_filtrado.count()
         df_filtrado = (
             df_filtrado
             .groupBy("CdSku", "CdFilial", "grupo_de_necessidade")
             .agg(F.sum("Merecimento_raw").alias("Merecimento_raw"))
         )
+        registros_apos_agg = df_filtrado.count()
+        print(f"  • Registros antes da agregação: {registros_antes_agg:,}")
+        print(f"  • Registros após agregação: {registros_apos_agg:,}")
+        print(f"  • Diferença: {registros_apos_agg - registros_antes_agg:+,}")
     
     # NOVA REGRA: De-para de CDs inválidos para CD14 (apenas para TELAS e TELEFONIA online)
     if canal == "online" and categoria in ["DIRETORIA DE TELAS", "DIRETORIA TELEFONIA CELULAR"]:
