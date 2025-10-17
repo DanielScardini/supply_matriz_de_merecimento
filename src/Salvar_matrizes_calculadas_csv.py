@@ -593,6 +593,107 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
             .agg(F.sum("Merecimento_raw").alias("Merecimento_raw"))
         )
     
+    # NOVA REGRA: De-para de CDs inválidos para CD14 (apenas para TELAS e TELEFONIA online)
+    if canal == "online" and categoria in ["DIRETORIA DE TELAS", "DIRETORIA TELEFONIA CELULAR"]:
+        print(f"\n🔄 APLICANDO REGRA DE DE-PARA PARA {categoria}")
+        print("=" * 60)
+        
+        # Definir CDs válidos por categoria (SEM o 1401, que já foi tratado acima)
+        cds_validos = {
+            "DIRETORIA DE TELAS": [1760, 2241, 2600, 1895],
+            "DIRETORIA TELEFONIA CELULAR": [1760, 2241, 2600]
+        }
+        
+        cds_validos_categoria = cds_validos[categoria]
+        print(f"📋 CDs Válidos: {cds_validos_categoria}")
+        
+        # Identificar CDs usando método existente
+        df_com_tipo = (
+            df_filtrado
+            .withColumn(
+                "is_cd",
+                F.when(F.col("CdFilial") == 14, F.lit(True))  # CD 14 é CD
+                .when(F.col("CdFilial").isin(cds_validos_categoria), F.lit(True))  # CDs válidos são CDs
+                .otherwise(F.lit(False))
+            )
+        )
+        
+        # Separar CDs inválidos (que não estão na lista válida)
+        df_cds_invalidos = df_com_tipo.filter(
+            (F.col("is_cd") == True) & 
+            (~F.col("CdFilial").isin(cds_validos_categoria + [14]))  # Excluir CDs válidos e CD14
+        )
+        
+        cds_invalidos_count = df_cds_invalidos.count()
+        print(f"📋 CDs Inválidos identificados: {cds_invalidos_count:,} registros")
+        
+        if cds_invalidos_count > 0:
+            # Mostrar quais CDs inválidos foram encontrados
+            cds_invalidos_lista = (
+                df_cds_invalidos
+                .select("CdFilial")
+                .distinct()
+                .orderBy("CdFilial")
+                .rdd.flatMap(lambda x: x)
+                .collect()
+            )
+            print(f"📋 CDs Inválidos encontrados: {cds_invalidos_lista}")
+            
+            # Calcular transferências para CD14 por SKU
+            print(f"\n🔄 TRANSFERINDO MERECIMENTOS PARA CD14:")
+            transferencias = (
+                df_cds_invalidos
+                .groupBy("CdSku")
+                .agg(F.sum("Merecimento_raw").alias("Merecimento_transferido"))
+                .withColumn("CdFilial", F.lit(14))
+                .select("CdSku", "CdFilial", "Merecimento_transferido")
+            )
+            
+            transferencias_count = transferencias.count()
+            print(f"  • Transferências criadas: {transferencias_count:,} SKUs")
+            
+            # Somar transferências aos merecimentos existentes do CD14
+            print(f"  • Somando transferências aos merecimentos do CD14...")
+            
+            # Separar dados do CD14 e outros CDs
+            df_cd14_original = df_com_tipo.filter(F.col("CdFilial") == 14)
+            df_outros_cds = df_com_tipo.filter(F.col("CdFilial") != 14)
+            
+            # Fazer join das transferências com CD14 original
+            df_cd14_com_transferencias = (
+                df_cd14_original
+                .join(transferencias, on=["CdSku", "CdFilial"], how="outer")
+                .fillna(0.0, subset=["Merecimento_raw", "Merecimento_transferido"])
+                .withColumn("Merecimento_raw", F.col("Merecimento_raw") + F.col("Merecimento_transferido"))
+                .drop("Merecimento_transferido")
+            )
+            
+            # Zerar CDs inválidos (manter todas as linhas, mas com merecimento = 0)
+            print(f"  • Zerando merecimentos dos CDs inválidos...")
+            df_cds_invalidos_zerados = (
+                df_cds_invalidos
+                .withColumn("Merecimento_raw", F.lit(0.0))
+                .drop("is_cd")
+            )
+            
+            # Reunir todos os dados
+            df_filtrado = (
+                df_outros_cds
+                .union(df_cd14_com_transferencias)
+                .union(df_cds_invalidos_zerados)
+                .drop("is_cd")
+            )
+            
+            print(f"✅ Regra de de-para aplicada:")
+            print(f"  • CDs inválidos zerados: {len(cds_invalidos_lista)} CDs")
+            print(f"  • Merecimentos transferidos para CD14: {transferencias_count:,} SKUs")
+            print(f"  • Total de registros após de-para: {df_filtrado.count():,}")
+        else:
+            print(f"✅ Nenhum CD inválido encontrado - regra não aplicada")
+            df_filtrado = df_com_tipo.drop("is_cd")
+        
+        print("=" * 60)
+    
     # Agregar por CdSku + CdFilial (agregação final)
     print(f"\n📊 AGREGAÇÃO FINAL:")
     df_agregado = (
