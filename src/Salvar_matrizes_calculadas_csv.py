@@ -728,7 +728,10 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
             df_cd14_original = df_com_tipo_filial.filter(F.col("CdFilial") == 14)
             df_outros_cds = df_com_tipo_filial.filter(
                 (F.col("CdFilial") != 14) & 
-                (F.col("CdFilial").isin(cds_validos_categoria))  # Apenas CDs válidos
+                (
+                    F.col("CdFilial").isin(cds_validos_categoria) |  # CDs válidos
+                    (F.col("is_cd") == False)  # OU todas as lojas
+                )
             )
             
             # Fazer join das transferências com CD14 original
