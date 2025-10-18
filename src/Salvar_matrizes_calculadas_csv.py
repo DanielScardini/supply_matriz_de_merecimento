@@ -391,9 +391,50 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
     # CHECKPOINT 1: Dados brutos
     skus_inicial = df_base.select("CdSku").distinct().count()
     registros_inicial = df_base.count()
+    filiais_inicial = df_base.select("CdFilial").distinct().count()
+    grupos_inicial = df_base.select("grupo_de_necessidade").distinct().count()
+    
     print(f"📦 DADOS BRUTOS DA TABELA:")
     print(f"  • Registros: {registros_inicial:,}")
     print(f"  • SKUs únicos: {skus_inicial:,}")
+    print(f"  • Filiais únicas: {filiais_inicial:,}")
+    print(f"  • Grupos únicos: {grupos_inicial:,}")
+    
+    # TESTE DE SANIDADE: Verificar se há diferenças muito grandes entre canais
+    if canal == "online":
+        print(f"\n🔍 TESTE DE SANIDADE - COMPARAÇÃO ONLINE vs OFFLINE:")
+        tabela_offline = TABELAS_MATRIZ_MERECIMENTO[categoria]["offline"]
+        
+        df_offline_base = (
+            spark.table(tabela_offline)
+            .select("CdFilial", "CdSku", "grupo_de_necessidade")
+        )
+        
+        registros_offline = df_offline_base.count()
+        skus_offline = df_offline_base.select("CdSku").distinct().count()
+        filiais_offline = df_offline_base.select("CdFilial").distinct().count()
+        grupos_offline = df_offline_base.select("grupo_de_necessidade").distinct().count()
+        
+        print(f"  📊 OFFLINE: {registros_offline:,} registros | {skus_offline} SKUs | {filiais_offline} filiais | {grupos_offline} grupos")
+        print(f"  📊 ONLINE:  {registros_inicial:,} registros | {skus_inicial} SKUs | {filiais_inicial} filiais | {grupos_inicial} grupos")
+        
+        razao_registros = registros_inicial / registros_offline if registros_offline > 0 else 0
+        razao_skus = skus_inicial / skus_offline if skus_offline > 0 else 0
+        razao_filiais = filiais_inicial / filiais_offline if filiais_offline > 0 else 0
+        
+        print(f"  📈 RAZÕES:")
+        print(f"    • Registros: {razao_registros:.2f}x")
+        print(f"    • SKUs: {razao_skus:.2f}x")
+        print(f"    • Filiais: {razao_filiais:.2f}x")
+        
+        if razao_registros > 1.5 or razao_registros < 0.5:
+            print(f"  ⚠️ ATENÇÃO: Diferença muito grande nos registros ({razao_registros:.2f}x)")
+        if razao_skus > 1.2 or razao_skus < 0.8:
+            print(f"  ⚠️ ATENÇÃO: Diferença muito grande nos SKUs ({razao_skus:.2f}x)")
+        if razao_filiais > 1.2 or razao_filiais < 0.8:
+            print(f"  ⚠️ ATENÇÃO: Diferença muito grande nas filiais ({razao_filiais:.2f}x)")
+        
+        print(f"  ✅ Teste de sanidade concluído")
     
     # FILTRO DE PRODUTOS: Configurável por categoria
     filtros_produtos = FILTROS_PRODUTOS.get(categoria, FILTROS_PRODUTOS_GLOBAL)
