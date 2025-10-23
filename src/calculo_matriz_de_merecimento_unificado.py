@@ -231,7 +231,7 @@ DE_PARA_CONSOLIDACAO_CDS = {
 data_m_menos_1 = hoje - timedelta(days=30)
 data_m_menos_1 = data_m_menos_1.strftime("%Y-%m-%d")
 
-DATA_CALCULO = "2025-09-30"
+DATA_CALCULO = "2025-10-15"
 data_calculo_auto = True
 
 if data_calculo_auto:
@@ -1610,9 +1610,9 @@ print("=" * 80)
 # Lista de todas as categorias disponíveis
 categorias = [
     "DIRETORIA DE TELAS",
-    "DIRETORIA TELEFONIA CELULAR", 
+    #"DIRETORIA TELEFONIA CELULAR", 
     #"DIRETORIA DE LINHA BRANCA",
-    "DIRETORIA LINHA LEVE",
+    #"DIRETORIA LINHA LEVE",
     # "DIRETORIA INFO/PERIFERICOS"
 ]
 
