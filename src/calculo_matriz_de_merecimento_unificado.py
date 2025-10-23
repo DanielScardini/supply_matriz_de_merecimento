@@ -29,7 +29,7 @@ from datetime import datetime, timedelta, date
 import pandas as pd
 from typing import List, Optional, Dict, Any
 
-!pip install openpyxl
+# MAGIC %pip install openpyxl
 
 # Inicialização do Spark
 spark = SparkSession.builder.appName("calculo_matriz_merecimento_unificado").getOrCreate()
@@ -314,6 +314,9 @@ JANELA_CD_MERECIMENTO = 90
 # Configuração das médias aparadas (percentual de corte)
 PERCENTUAL_CORTE_MEDIAS_APARADAS = 0.01  # 1% de corte superior e inferior
 
+# Parâmetros de amortização de demanda
+PERCENTUAL_MAX_DEMANDA_SUPRIMIDA = 0.30  # 30% do QtMercadoria
+
 FILIAIS_ATACADO = [
     1671,     # Petrolina - PE
     17,       # Norte Shopping
@@ -350,6 +353,7 @@ print(f"  • Categorias suportadas: {list(REGRAS_AGRUPAMENTO.keys())}")
 print(f"  • Janelas móveis aparadas: {JANELAS_MOVEIS_APARADAS} dias")
 print(f"  • Janela CD merecimento: {JANELA_CD_MERECIMENTO} dias")
 print(f"  • Percentual de corte para médias aparadas: {PERCENTUAL_CORTE_MEDIAS_APARADAS*100}% (total 2%)")
+print(f"  • Percentual máximo demanda suprimida: {PERCENTUAL_MAX_DEMANDA_SUPRIMIDA*100:.0f}%")
 
 
 # COMMAND ----------
@@ -933,28 +937,50 @@ def calcular_medidas_centrais_com_medias_aparadas(df: DataFrame) -> DataFrame:
     """
     print("🔄 Calculando medidas centrais com médias aparadas (protegido)...")
     
-    df_sem_ruptura = (
+    # Aplicar lógica de amortização: deltaRuptura saturado ao máximo de 30% do QtMercadoria
+    df_com_amortizacao = (
         df
+        .withColumn(
+            "demandaSuprimida",  # deltaRuptura saturado ao máximo de 30% do QtMercadoria
+            F.least(
+                F.col("deltaRuptura"),
+                F.col("QtMercadoria") * PERCENTUAL_MAX_DEMANDA_SUPRIMIDA
+            )
+        )
+    )
+    
+    df_sem_ruptura = (
+        df_com_amortizacao
         .withColumn("demanda_robusta",
-                    F.col("QtMercadoria") + F.col("deltaRuptura"))
+                    F.col("QtMercadoria") + F.col("demandaSuprimida"))
         .withColumn("demanda_robusta",
                     F.when(
                         F.col("CdFilial").isin(FILIAIS_OUTLET), F.lit(0)
                         )
                     .otherwise(F.col("demanda_robusta"))
                     )
-        # ✅ HIERARQUIA INTELIGENTE: demanda_robusta → QtMercadoria → deltaRuptura → 0
+        # ✅ HIERARQUIA INTELIGENTE: demanda_robusta → QtMercadoria → demandaSuprimida → 0
         .withColumn("demanda_robusta", 
                     F.coalesce(
                         F.col("demanda_robusta"),  # Primeiro: demanda robusta calculada
                         F.col("QtMercadoria"),     # Segundo: apenas vendas
-                        F.col("deltaRuptura"),     # Terceiro: apenas ruptura
+                        F.col("demandaSuprimida"), # Terceiro: apenas demanda suprimida
                         F.lit(0)                   # Último: zero
                     ))
     )
 
     lista = ", ".join(str(f) for f in FILIAIS_OUTLET)
     print(f"🏬 Zerando a demanda das filiais [{lista}] ⚠️ pois não são abastecidas via CD normalmente.")
+    
+    # Estatísticas da amortização
+    casos_com_ruptura = df_com_amortizacao.filter(F.col("deltaRuptura") > 0).count()
+    casos_amortizados = df_com_amortizacao.filter(F.col("demandaSuprimida") > 0).count()
+    if casos_com_ruptura > 0:
+        demanda_suprimida_total = df_com_amortizacao.agg(F.sum("demandaSuprimida")).collect()[0][0]
+        print(f"🔧 Amortização aplicada: {casos_amortizados:,} casos de {casos_com_ruptura:,} com ruptura")
+        print(f"📉 Demanda total suprimida: {demanda_suprimida_total:,.0f}")
+    else:
+        print(f"✅ Nenhum caso com ruptura encontrado - amortização não necessária")
     
      # Aplicar apenas médias aparadas
     df_com_medias_aparadas = (
