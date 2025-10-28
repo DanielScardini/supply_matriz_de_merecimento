@@ -33,7 +33,7 @@ print(GRUPOS_TESTE)
 data_inicio = "2025-09-15"
 fim_baseline = "2025-09-21"
 
-inicio_teste = "2025-09-22"
+inicio_teste = "2025-10-20"
 
 categorias_teste = ['LEVES']
 
