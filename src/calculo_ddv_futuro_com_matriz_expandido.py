@@ -249,6 +249,30 @@ def calcular_ddv_categoria(categoria: str, tipo_dados: str) -> DataFrame:
     
     print(f"  • DDV calculado: {df_final.count():,} registros")
     
+    # Validação: verificar duplicatas antes de retornar
+    df_dup_check = (
+        df_final
+        .groupBy("grupo_de_necessidade", "CdSku", "CdFilial")
+        .agg(F.count("*").alias("count"))
+        .filter(F.col("count") > 1)
+    )
+    dup_count = df_dup_check.count()
+    
+    if dup_count > 0:
+        print(f"  ⚠️ ATENÇÃO: {dup_count} chave(s) duplicada(s) encontradas no DF final")
+        print(f"  📋 Mostrando amostra de duplicatas:")
+        df_dup_check.show(10, truncate=False)
+        
+        # Mostrar detalhe de uma chave duplicada
+        if dup_count > 0:
+            primeira_chave = df_dup_check.select("grupo_de_necessidade", "CdSku", "CdFilial").limit(1).collect()[0]
+            print(f"  🔍 Detalhamento da chave: grupo={primeira_chave['grupo_de_necessidade']}, SKU={primeira_chave['CdSku']}, Filial={primeira_chave['CdFilial']}")
+            df_final.filter(
+                (F.col("grupo_de_necessidade") == primeira_chave['grupo_de_necessidade']) &
+                (F.col("CdSku") == primeira_chave['CdSku']) &
+                (F.col("CdFilial") == primeira_chave['CdFilial'])
+            ).show(10, truncate=False)
+    
     return df_final
 
 # COMMAND ----------
@@ -603,6 +627,52 @@ if 'df_final_consolidado' in locals():
                 
                 # Mostrar amostra de duplicatas
                 print(f"    📋 Amostra de chaves duplicadas:")
-                df_agrupado.select("grupo_de_necessidade", "CdSku", "CdFilial", "count_chave").show(5, truncate=False)
+                df_agrupado.select("grupo_de_necessidade", "CdSku", "CdFilial", "count_chave").show(10, truncate=False)
+                
+                # Análise detalhada das duplicatas
+                print(f"\n    🔍 ANÁLISE DETALHADA DAS DUPLICAÇÕES:")
+                
+                # Identificar filiais com mais duplicatas
+                df_dup_por_filial = (
+                    df_agrupado
+                    .groupBy("CdFilial")
+                    .agg(
+                        F.count("*").alias("qtd_chaves_duplicadas"),
+                        F.sum("count_chave").alias("total_registros_duplicados")
+                    )
+                    .orderBy(F.desc("qtd_chaves_duplicadas"))
+                )
+                
+                print(f"    📊 Duplicatas por Filial (top 10):")
+                df_dup_por_filial.show(10, truncate=False)
+                
+                # Para cada chave duplicada, mostrar os valores únicos para investigar
+                print(f"    📋 Detalhamento de valores para uma chave duplicada:")
+                # Pegar primeira chave duplicada
+                primeira_dup = df_agrupado.select("grupo_de_necessidade", "CdSku", "CdFilial").limit(1).collect()[0]
+                
+                df_detalhe = df_cat.filter(
+                    (F.col("grupo_de_necessidade") == primeira_dup['grupo_de_necessidade']) &
+                    (F.col("CdSku") == primeira_dup['CdSku']) &
+                    (F.col("CdFilial") == primeira_dup['CdFilial'])
+                )
+                
+                print(f"      Chave: grupo={primeira_dup['grupo_de_necessidade']}, SKU={primeira_dup['CdSku']}, Filial={primeira_dup['CdFilial']}")
+                print(f"      Registros encontrados: {df_detalhe.count()}")
+                
+                # Mostrar todas as colunas para identificar diferenças
+                df_detalhe.select(
+                    "categoria",
+                    "grupo_de_necessidade",
+                    "CdSku", 
+                    "CdFilial",
+                    "demanda_diarizada_off",
+                    "demanda_diarizada_on",
+                    "DDV_futuro_filial_off",
+                    "DDV_futuro_filial_on",
+                    "DDV_final_on",
+                    "DDV_final_off",
+                    "DDV_final_total"
+                ).show(20, truncate=False)
     
     print(f"\n✅ Validações concluídas!")
