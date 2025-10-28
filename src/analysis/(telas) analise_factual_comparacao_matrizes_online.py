@@ -705,7 +705,7 @@ buckets = ["0-15", "15-30", "30-45", "45-60", "60+", "Nulo"]
 
 # Datas de baseline e piloto (ajustar conforme necessidade)
 fim_baseline = "2025-09-05"
-inicio_teste = "2025-09-05"
+inicio_teste = "2025-10-20"
 
 # Carregar dados históricos de estoque para calcular DDE
 def load_estoque_historico_com_DDE(categoria: str, data_inicio: str):
