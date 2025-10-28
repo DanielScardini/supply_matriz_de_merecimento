@@ -351,9 +351,26 @@ dfs_consolidados = []
 for categoria, df_resultado in resultados_ddv.items():
     print(f"\n📊 Processando {categoria}:")
     
+    # IMPORTANTE: Agrupar por chaves únicas e somar DDVs duplicados
+    # Isso garante que se houver duplicatas na tabela de merecimento, elas sejam consolidadas
+    df_resultado_unicos = (
+        df_resultado
+        .groupBy("grupo_de_necessidade", "CdSku", "CdFilial")
+        .agg(
+            F.sum("DDV_futuro_filial_on").alias("DDV_futuro_filial_on"),
+            F.sum("DDV_futuro_filial_off").alias("DDV_futuro_filial_off"),
+            F.sum("demanda_diarizada_on").alias("demanda_diarizada_on"),
+            F.sum("demanda_diarizada_off").alias("demanda_diarizada_off"),
+            F.sum("DDV_futuro_filial_merecimento").alias("DDV_futuro_filial_merecimento")
+        )
+    )
+    
+    print(f"  • Registros antes de consolidar duplicatas: {df_resultado.count():,}")
+    print(f"  • Registros após consolidar duplicatas: {df_resultado_unicos.count():,}")
+    
     # Calcular proporções reais baseadas nos dados das tabelas ON e OFF
-    total_on = df_resultado.agg(F.sum("DDV_futuro_filial_on")).collect()[0][0]
-    total_off = df_resultado.agg(F.sum("DDV_futuro_filial_off")).collect()[0][0]
+    total_on = df_resultado_unicos.agg(F.sum("DDV_futuro_filial_on")).collect()[0][0]
+    total_off = df_resultado_unicos.agg(F.sum("DDV_futuro_filial_off")).collect()[0][0]
     total_geral = total_on + total_off
     
     if total_geral > 0:
@@ -366,9 +383,9 @@ for categoria, df_resultado in resultados_ddv.items():
     print(f"  • Proporção ON real: {proporcao_on_real:.1%}")
     print(f"  • Proporção OFF real: {proporcao_off_real:.1%}")
     
-    # Aplicar proporções reais calculadas
+    # Aplicar proporções reais calculadas usando dados únicos
     df_com_proporcoes = (
-        df_resultado
+        df_resultado_unicos
         .withColumn("DDV_final_on", F.round(F.col("DDV_futuro_filial_on") * proporcao_on_real, 3))
         .withColumn("DDV_final_off", F.round(F.col("DDV_futuro_filial_off") * proporcao_off_real, 3))
         .withColumn("DDV_final_total", F.round(F.col("DDV_final_on") + F.col("DDV_final_off"), 3))
@@ -380,10 +397,10 @@ for categoria, df_resultado in resultados_ddv.items():
             "grupo_de_necessidade", 
             "CdSku", 
             "CdFilial",
-            "demanda_diarizada_off",
-            "demanda_diarizada_on",
-            "DDV_futuro_filial_off",
-            "DDV_futuro_filial_on", 
+            F.col("demanda_diarizada_off").alias("demanda_diarizada_off"),
+            F.col("demanda_diarizada_on").alias("demanda_diarizada_on"),
+            F.col("DDV_futuro_filial_off").alias("DDV_futuro_filial_off"),
+            F.col("DDV_futuro_filial_on").alias("DDV_futuro_filial_on"), 
             "DDV_final_on",
             "DDV_final_off",
             "DDV_final_total",
