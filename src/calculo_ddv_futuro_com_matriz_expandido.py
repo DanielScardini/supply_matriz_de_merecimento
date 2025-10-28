@@ -210,9 +210,10 @@ def calcular_ddv_categoria(categoria: str, tipo_dados: str) -> DataFrame:
     print(f"  • Após join com de-para: {df_com_grupos.count():,} registros")
     
     # Calcular demanda diarizada
+    # IMPORTANTE: Incluir CdFilial na agregação para permitir join correto
     df_demanda = (
         df_com_grupos
-        .groupBy("grupo_de_necessidade", "CdSku")
+        .groupBy("grupo_de_necessidade", "CdSku", "CdFilial")
         .agg(
             F.round(F.sum(F.col('QtMercadoria') + F.col("deltaRuptura")), 3).alias("demanda_total"),
             F.countDistinct("DtAtual").alias("dias"),
