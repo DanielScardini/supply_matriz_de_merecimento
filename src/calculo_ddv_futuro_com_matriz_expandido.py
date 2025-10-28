@@ -415,6 +415,28 @@ if dfs_consolidados:
     for df in dfs_consolidados[1:]:
         df_final_consolidado = df_final_consolidado.union(df)
     
+    # IMPORTANTE: Consolidar duplicatas SOMANDO os valores numéricos
+    registros_antes = df_final_consolidado.count()
+    
+    df_final_consolidado = (
+        df_final_consolidado
+        .groupBy("categoria", "grupo_de_necessidade", "CdSku", "CdFilial", "proporcao_on_real", "proporcao_off_real")
+        .agg(
+            F.sum("demanda_diarizada_off").alias("demanda_diarizada_off"),
+            F.sum("demanda_diarizada_on").alias("demanda_diarizada_on"),
+            F.sum("DDV_futuro_filial_off").alias("DDV_futuro_filial_off"),
+            F.sum("DDV_futuro_filial_on").alias("DDV_futuro_filial_on"),
+            F.sum("DDV_final_on").alias("DDV_final_on"),
+            F.sum("DDV_final_off").alias("DDV_final_off"),
+            F.sum("DDV_final_total").alias("DDV_final_total")
+        )
+    )
+    
+    registros_depois = df_final_consolidado.count()
+    
+    if registros_antes > registros_depois:
+        print(f"  ⚠️ {registros_antes - registros_depois:,} duplicatas consolidadas (valores SOMADOS)!")
+    
     print(f"\n🎯 RESULTADO FINAL CONSOLIDADO:")
     print(f"  • Total de registros: {df_final_consolidado.count():,}")
     print(f"  • Categorias incluídas: {df_final_consolidado.select('categoria').distinct().count()}")
@@ -450,8 +472,26 @@ if 'df_final_consolidado' in locals():
     print("💾 SALVANDO RESULTADOS EM CSV")
     print("=" * 50)
     
+    # Validação final: garantir que não há duplicatas
+    registros_spark = df_final_consolidado.count()
+    chaves_unicas_spark = df_final_consolidado.select("categoria", "grupo_de_necessidade", "CdSku", "CdFilial").distinct().count()
+    
+    if registros_spark != chaves_unicas_spark:
+        print(f"  ⚠️ ATENÇÃO: {registros_spark - chaves_unicas_spark} duplicatas ainda presentes!")
+        print(f"     Registros: {registros_spark}, Chaves únicas: {chaves_unicas_spark}")
+    else:
+        print(f"  ✅ Nenhuma duplicata encontrada!")
+    
     # Converter para Pandas
     df_pandas = df_final_consolidado.toPandas()
+    
+    # Última garantia: remover duplicatas no pandas (caso ainda existam)
+    registros_antes_pandas = len(df_pandas)
+    df_pandas = df_pandas.drop_duplicates(subset=["categoria", "grupo_de_necessidade", "CdSku", "CdFilial"])
+    registros_depois_pandas = len(df_pandas)
+    
+    if registros_antes_pandas > registros_depois_pandas:
+        print(f"  ⚠️ {registros_antes_pandas - registros_depois_pandas:,} duplicatas removidas no pandas!")
     
     # Garantir que colunas numéricas sejam float
     colunas_numericas = [
