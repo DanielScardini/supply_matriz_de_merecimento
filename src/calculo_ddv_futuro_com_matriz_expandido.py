@@ -14,7 +14,7 @@ spark = SparkSession.builder.appName("calculo_ddv_futuro_expandido").getOrCreate
 
 # MAGIC %md
 # MAGIC ## Configuração Global - Cálculo DDV Futuro Expandido
-# MAGIC 
+# MAGIC
 # MAGIC Este notebook calcula DDV futuro para todas as categorias: Telas, Telefonia Celular e Linha Leve.
 # MAGIC Utiliza merecimentos da versão parametrizável e proporções flexíveis on/off.
 
@@ -30,7 +30,11 @@ data_inicio_str = data_inicio.strftime("%Y-%m-%d")
 data_inicio_int = int(data_inicio.strftime("%Y%m%d"))
 
 # Parâmetro da versão do merecimento (flexível)
-VERSAO_MERECIMENTO = "0710"  # Pode ser alterado conforme necessário
+VERSAO_MERECIMENTO = {
+    "TELAS":"0710",  # Pode ser alterado conforme necessário
+    "TELEFONIA": "2410",
+    "LEVES": "0710"
+}
 
 # COMMAND ----------
 
@@ -112,8 +116,8 @@ GRUPOS_TESTE_LINHA_LEVE = [
 CATEGORIAS_CONFIG = {
     "TELAS": {
         "grupos_teste": GRUPOS_TESTE_TELAS,
-        "tabela_merecimento_off": f"databox.bcg_comum.supply_matriz_merecimento_de_telas_teste{VERSAO_MERECIMENTO}",
-        "tabela_merecimento_on": f"databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste{VERSAO_MERECIMENTO}",
+        "tabela_merecimento_off": f"databox.bcg_comum.supply_matriz_merecimento_de_telas_teste{VERSAO_MERECIMENTO['TELAS']}",
+        "tabela_merecimento_on": f"databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste{VERSAO_MERECIMENTO['TELAS']}",
         "de_para": "databox.bcg_comum.supply_de_para_modelos_gemeos_tecnologia",
         "proporcao_on": 0.235,  # 23.5%
         "proporcao_off": 0.765,  # Complementar
@@ -122,8 +126,8 @@ CATEGORIAS_CONFIG = {
     },
     "TELEFONIA": {
         "grupos_teste": GRUPOS_TESTE_TELEFONIA,
-        "tabela_merecimento_off": f"databox.bcg_comum.supply_matriz_merecimento_telefonia_teste{VERSAO_MERECIMENTO}",
-        "tabela_merecimento_on": f"databox.bcg_comum.supply_matriz_merecimento_telefonia_online_teste{VERSAO_MERECIMENTO}",
+        "tabela_merecimento_off": f"databox.bcg_comum.supply_matriz_merecimento_telefonia_teste{VERSAO_MERECIMENTO['TELEFONIA']}",
+        "tabela_merecimento_on": f"databox.bcg_comum.supply_matriz_merecimento_telefonia_online_teste{VERSAO_MERECIMENTO['TELEFONIA']}",
         "de_para": "databox.bcg_comum.supply_de_para_modelos_gemeos_tecnologia",  # Mesmo de telas
         "proporcao_on": 0.235,  # 23.5%
         "proporcao_off": 0.765,  # Complementar
@@ -132,9 +136,9 @@ CATEGORIAS_CONFIG = {
     },
     "LINHA_LEVE": {
         "grupos_teste": GRUPOS_TESTE_LINHA_LEVE,
-        "tabela_merecimento_off": f"databox.bcg_comum.supply_matriz_merecimento_linha_leve_teste{VERSAO_MERECIMENTO}",
-        "tabela_merecimento_on": f"databox.bcg_comum.supply_matriz_merecimento_linha_leve_online_teste{VERSAO_MERECIMENTO}",
-        "de_para": "databox.bcg_comum.supply_grupo_de_necessidade_linha_leve",  # Mesma estrutura de colunas
+        "tabela_merecimento_off": f"databox.bcg_comum.supply_matriz_merecimento_linha_leve_teste{VERSAO_MERECIMENTO['LEVES']}",
+        "tabela_merecimento_on": f"databox.bcg_comum.supply_matriz_merecimento_linha_leve_online_teste{VERSAO_MERECIMENTO['LEVES']}",
+        "de_para": "databox.bcg_comum.supply_grupo_de_necessidade_linha_leve",
         "proporcao_on": 0.235,  # 23.5%
         "proporcao_off": 0.765,  # Complementar
         "tabela_base_off": "databox.bcg_comum.supply_base_merecimento_diario_v4",
@@ -145,7 +149,7 @@ CATEGORIAS_CONFIG = {
 print("🔧 CONFIGURAÇÃO CARREGADA:")
 for categoria, config in CATEGORIAS_CONFIG.items():
     print(f"  • {categoria}: {len(config['grupos_teste'])} grupos teste")
-    print(f"    - Proporções serão calculadas dinamicamente baseadas nos dados reais")
+    print("    - Proporções serão calculadas dinamicamente baseadas nos dados reais")
 
 # COMMAND ----------
 
@@ -557,5 +561,3 @@ if 'df_final_consolidado' in locals():
             print(f"    - Total geral: R$ {soma_total:,.2f}")
     
     print(f"\n✅ Validações concluídas!")
-
-# COMMAND ----------

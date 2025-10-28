@@ -763,7 +763,7 @@ for categoria in categorias_teste:
     # Criar buckets de DDE
     df_buckets = (
         df_estoque
-        .groupBy("CdFilial", "grupo_de_necessidade", "periodo_analise")
+        .groupBy("CdFilial", "periodo_analise")
         .agg(
             F.round(F.mean("DDE_mediano"), 1).alias("DDE_medio"),
             F.round(F.percentile_approx("DDE_mediano", 0.5, 100), 1).alias("DDE_mediano_agregado")
@@ -833,3 +833,38 @@ for categoria in categorias_teste:
     
     print(f"Categoria: {categoria}")
     df_counts_export[categoria].display()
+
+# COMMAND ----------
+
+df_buckets = (
+        df_estoque
+        .groupBy("periodo_analise")
+        .agg(
+            F.round(F.mean("DDE_mediano"), 1).alias("DDE_medio"),
+            F.round(F.percentile_approx("DDE_mediano", 0.5, 100), 1).alias("DDE_mediano_agregado")
+        )
+        # Bucket para média
+        .withColumn(
+            "bucket_DDE_medio",
+            F.when(F.col("DDE_medio").isNull(), "Nulo")
+            .when(F.col("DDE_medio") > 60, "60+")
+            .when(F.col("DDE_medio") >= 45, "45-60")
+            .when(F.col("DDE_medio") >= 30, "30-45")
+            .when(F.col("DDE_medio") >= 15, "15-30")
+            .when(F.col("DDE_medio") >= 0, "0-15")
+            .otherwise("Nulo")
+        )
+        # Bucket para mediana
+        .withColumn(
+            "bucket_DDE_mediano",
+            F.when(F.col("DDE_mediano_agregado").isNull(), "Nulo")
+            .when(F.col("DDE_mediano_agregado") > 60, "60+")
+            .when(F.col("DDE_mediano_agregado") >= 45, "45-60")
+            .when(F.col("DDE_mediano_agregado") >= 30, "30-45")
+            .when(F.col("DDE_mediano_agregado") >= 15, "15-30")
+            .when(F.col("DDE_mediano_agregado") >= 0, "0-15")
+            .otherwise("Nulo")
+        )
+    )
+
+df_buckets.display()

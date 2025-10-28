@@ -754,7 +754,7 @@ for categoria in categorias_teste:
     # Criar buckets de DDE
     df_buckets = (
         df_estoque
-        .groupBy("CdFilial", "grupo_de_necessidade", "periodo_analise")
+        .groupBy("CdFilial", "periodo_analise")
         .agg(
             F.round(F.mean("DDE_mediano"), 1).alias("DDE_medio"),
             F.round(F.percentile_approx("DDE_mediano", 0.5, 100), 1).alias("DDE_mediano_agregado")
