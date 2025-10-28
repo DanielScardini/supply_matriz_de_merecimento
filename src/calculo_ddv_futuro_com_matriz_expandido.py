@@ -223,14 +223,21 @@ def calcular_ddv_categoria(categoria: str, tipo_dados: str) -> DataFrame:
     )
     
     # Join com matriz de merecimento
+    # IMPORTANTE: Incluir grupo_de_necessidade no join para evitar duplicação
     df_merecimento = spark.table(tabela_merecimento).select(
-        "CdSku", "CdFilial",
+        "grupo_de_necessidade",  # <- ADICIONADO para garantir unicidade
+        "CdSku", 
+        "CdFilial",
         F.col("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura").alias("merecimento_final")
     )
     
     df_final = (
         df_demanda
-        .join(df_merecimento, on="CdSku", how="inner")
+        .join(
+            df_merecimento, 
+            on=["grupo_de_necessidade", "CdSku", "CdFilial"],  # <- Join por 3 chaves
+            how="inner"
+        )
         .withColumn("DDV_futuro_filial",
                    F.round(F.col("demanda_diarizada") * F.col("merecimento_final"), 3))
     )
