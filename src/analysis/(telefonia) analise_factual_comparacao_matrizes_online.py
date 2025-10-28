@@ -74,7 +74,7 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     
     for categoria in categorias:
         try:
-            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste0710"
+            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste2410"
             df_matriz = spark.table(nome_tabela)
             
             matrizes[categoria] = df_matriz
@@ -102,7 +102,7 @@ df_merecimento_online['TELEFONIA_CELULAR'].limit(1).display()
 df_matriz_neogrid_online = (
     spark.createDataFrame(
         pd.read_csv(
-            "/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/dados_analise/(DRP)_MATRIZ_20250904123325_online.csv",
+            "/Workspace/Users/daniel.scardini-ext@viavarejo.com.br/supply/supply_matriz_de_merecimento/src/dados_analise/(DRP)_MATRIZ_20250904123325_online.csv",
             delimiter=";",
         )
     )

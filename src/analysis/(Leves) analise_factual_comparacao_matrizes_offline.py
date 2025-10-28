@@ -16,14 +16,6 @@
 
 # COMMAND ----------
 
-# MAGIC %sql SELECT * FROM databox.logistica_comum.gestao_avista
-
-# COMMAND ----------
-
-# MAGIC %sql SELECT * FROM databox.bcg_comum.supply_base_merecimento_diario_v4
-
-# COMMAND ----------
-
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F, Window
 from datetime import datetime, timedelta, date
@@ -53,79 +45,86 @@ categorias_teste = ['LINHA_LEVE']
 
 # COMMAND ----------
 
+from pyspark.sql import functions as F
+from pyspark.sql import Window
+
 dt_inicio = "2025-08-01"
 dt_fim = "2025-10-01"
 
+# Base de demanda agregada por espécie
 df_demanda = (
-  spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
-  .filter(F.col("NmSetorGerencial")
-          .isin("BELEZA & SAUDE", "PORTATEIS"))
-  .filter(F.col("DtAtual") >= dt_inicio)
-  .filter(F.col("DtAtual") < dt_fim)
-  .groupBy("NmEspecieGerencial")
-  .agg(
-    F.sum(F.col("QtMercadoria")).alias("QtDemanda"),
-    F.sum(F.col("Receita")).alias("Receita")
-  )
-
+    spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
+    .filter(F.col("NmSetorGerencial").isin("BELEZA & SAUDE", "PORTATEIS"))
+    .filter(F.col("DtAtual") >= dt_inicio)
+    .filter(F.col("DtAtual") < dt_fim)
+    .groupBy("NmEspecieGerencial")
+    .agg(
+        F.sum(F.col("QtMercadoria")).alias("QtDemanda"),
+        F.sum(F.col("Receita")).alias("Receita")
+    )
 )
 
-# calcular totais com window
+# Windows
 w_total = Window.rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing)
+# Ordenar pelo percentual "não arredondado" para correto cumulativo
+# A janela é aplicada depois que a coluna existir
+w_cum = Window.orderBy(F.col("PercDemanda_raw").desc()) \
+              .rowsBetween(Window.unboundedPreceding, 0)
 
-# window para cumulativo
-w_cum = Window.orderBy(F.col("PercDemanda").desc()).rowsBetween(Window.unboundedPreceding, 0)
-
+# Percentuais e cumulativos (usar raw para evitar distorção por arredondamento)
 df_demanda = (
     df_demanda
     .withColumn("TotalDemanda", F.sum("QtDemanda").over(w_total))
     .withColumn("TotalReceita", F.sum("Receita").over(w_total))
-    .withColumn("PercDemanda", F.round((F.col("QtDemanda") / F.col("TotalDemanda")) * 100, 0))
-    .withColumn("PercReceita", F.round((F.col("Receita") / F.col("TotalReceita")) * 100, 0))
+    .withColumn("PercDemanda_raw", (F.col("QtDemanda") / F.col("TotalDemanda")) * 100.0)
+    .withColumn("PercReceita_raw", (F.col("Receita") / F.col("TotalReceita")) * 100.0)
+    .withColumn("PercDemanda", F.round(F.col("PercDemanda_raw"), 0))
+    .withColumn("PercReceita", F.round(F.col("PercReceita_raw"), 0))
+    .withColumn("PercDemandaCumulativo_raw", F.sum("PercDemanda_raw").over(w_cum))
+    .withColumn("PercReceitaCumulativo_raw", F.sum("PercReceita_raw").over(w_cum))
     .drop("TotalDemanda", "TotalReceita")
-    .withColumn("PercDemandaCumulativo", F.sum("PercDemanda").over(w_cum))
-    .withColumn("PercReceitaCumulativo", F.sum("PercReceita").over(w_cum))
-
 )
 
-especies_top80 = (
+# Top 80% por demanda (sem RDD)
+especies_top80_df = (
     df_demanda
-    .filter(F.col("PercDemandaCumulativo") <= 80)
-    #.filter(F.col("NmEspecieGerencial") != 'SANDUICHEIRAS')
+    .orderBy(F.col("PercDemanda_raw").desc())
+    .filter(F.col("PercDemandaCumulativo_raw") <= 80)
     .select("NmEspecieGerencial")
-    .rdd.flatMap(lambda x: x)
-    .collect()
+    .distinct()
 )
 
-
+# Se você realmente precisa da lista em Python:
+especies_top80 = [r["NmEspecieGerencial"] for r in especies_top80_df.collect()]
 print(especies_top80)
-#print(skus_especies_top80)
 
-
-especies_boas = [
-    "LIQUIDIFICADORES 350 A 1000 W",
-    "FERROS DE PASSAR A SECO",
-    "LIQUIDIFICADORES ACIMA 1001 W.",
-    "PANELAS ELETRICAS DE ARROZ",
-    "FRITADEIRA ELETRICA (CAPSULA)",
-    "FERROS PAS. ROUPA VAPOR/SPRAY",
-    "CAFETEIRA ELETRICA (FILTRO)"
-]
-
-skus_especies_top80 = (
+# Tabela de SKUs. Evite coletar: use join com as espécies top 80
+mercadoria = (
     spark.table('data_engineering_prd.app_venda.mercadoria')
     .select(
         F.col("CdSkuLoja").alias("CdSku"),
         F.col("NmEspecieGerencial")
     )
-    .filter(F.col("NmEspecieGerencial").isin(especies_top80))
     .filter(F.col("CdSku") != -1)
-    .select("CdSku")
-    .rdd.flatMap(lambda x: x)
-    .collect()
 )
 
-df_demanda.filter(F.col("NmEspecieGerencial").isin(especies_top80)).agg(F.sum("PercDemanda")).display()
+skus_especies_top80_df = (
+    mercadoria.join(especies_top80_df, on="NmEspecieGerencial", how="inner")
+    .select("CdSku")
+    .distinct()
+)
+
+# Se precisar da lista em Python:
+skus_especies_top80 = [r["CdSku"] for r in skus_especies_top80_df.collect()]
+print(len(skus_especies_top80))
+
+# Checagem: soma dos percentuais das espécies Top 80 (use raw para precisão)
+df_demanda.join(especies_top80_df, on="NmEspecieGerencial", how="inner") \
+          .agg(
+              F.sum("PercDemanda_raw").alias("SomaPercDemanda_raw"),
+              F.sum("PercDemanda").alias("SomaPercDemanda_arred")
+          ) \
+          .show(truncate=False)
 
 # COMMAND ----------
 
