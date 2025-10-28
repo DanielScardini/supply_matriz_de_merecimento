@@ -31,8 +31,8 @@ hoje_str = hoje.strftime("%Y-%m-%d")
 hoje_int = int(hoje.strftime("%Y%m%d"))
 
 
-GRUPOS_TESTE = ['Telef pp', 'Telef Medio 128GB', 'Telef Medio 256GB', 'Telef Alto', 'LINHA PREMIUM']
-print(GRUPOS_TESTE)
+##GRUPOS_TESTE = ['Telef pp', 'Telef Medio 128GB', 'Telef Medio 256GB', 'Telef Alto', 'LINHA PREMIUM']
+#print(GRUPOS_TESTE)
 
 
 GRUPOS_REMOVER = ['Chip', 'FORA DE LINHA', 'SEM_GN']
@@ -723,7 +723,7 @@ def load_estoque_historico_com_DDE(categoria: str, data_inicio: str):
             how='inner',
             on='CdSku'
         )
-        .filter(F.col("grupo_de_necessidade").isin(GRUPOS_TESTE))
+        #.filter(F.col("grupo_de_necessidade").isin(GRUPOS_TESTE))
         .dropna(subset='grupo_de_necessidade')
         .filter(~F.col("grupo_de_necessidade").isin(GRUPOS_REMOVER))
         .groupBy("CdFilial", "grupo_de_necessidade", "DtAtual")
