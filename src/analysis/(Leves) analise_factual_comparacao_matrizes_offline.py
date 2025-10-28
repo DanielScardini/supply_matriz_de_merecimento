@@ -16,6 +16,14 @@
 
 # COMMAND ----------
 
+# MAGIC %sql SELECT * FROM databox.logistica_comum.gestao_avista
+
+# COMMAND ----------
+
+# MAGIC %sql SELECT * FROM databox.bcg_comum.supply_base_merecimento_diario_v4
+
+# COMMAND ----------
+
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F, Window
 from datetime import datetime, timedelta, date
@@ -45,86 +53,79 @@ categorias_teste = ['LINHA_LEVE']
 
 # COMMAND ----------
 
-from pyspark.sql import functions as F
-from pyspark.sql import Window
-
 dt_inicio = "2025-08-01"
 dt_fim = "2025-10-01"
 
-# Base de demanda agregada por espécie
 df_demanda = (
-    spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
-    .filter(F.col("NmSetorGerencial").isin("BELEZA & SAUDE", "PORTATEIS"))
-    .filter(F.col("DtAtual") >= dt_inicio)
-    .filter(F.col("DtAtual") < dt_fim)
-    .groupBy("NmEspecieGerencial")
-    .agg(
-        F.sum(F.col("QtMercadoria")).alias("QtDemanda"),
-        F.sum(F.col("Receita")).alias("Receita")
-    )
+  spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
+  .filter(F.col("NmSetorGerencial")
+          .isin("BELEZA & SAUDE", "PORTATEIS"))
+  .filter(F.col("DtAtual") >= dt_inicio)
+  .filter(F.col("DtAtual") < dt_fim)
+  .groupBy("NmEspecieGerencial")
+  .agg(
+    F.sum(F.col("QtMercadoria")).alias("QtDemanda"),
+    F.sum(F.col("Receita")).alias("Receita")
+  )
+
 )
 
-# Windows
+# calcular totais com window
 w_total = Window.rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing)
-# Ordenar pelo percentual "não arredondado" para correto cumulativo
-# A janela é aplicada depois que a coluna existir
-w_cum = Window.orderBy(F.col("PercDemanda_raw").desc()) \
-              .rowsBetween(Window.unboundedPreceding, 0)
 
-# Percentuais e cumulativos (usar raw para evitar distorção por arredondamento)
+# window para cumulativo
+w_cum = Window.orderBy(F.col("PercDemanda").desc()).rowsBetween(Window.unboundedPreceding, 0)
+
 df_demanda = (
     df_demanda
     .withColumn("TotalDemanda", F.sum("QtDemanda").over(w_total))
     .withColumn("TotalReceita", F.sum("Receita").over(w_total))
-    .withColumn("PercDemanda_raw", (F.col("QtDemanda") / F.col("TotalDemanda")) * 100.0)
-    .withColumn("PercReceita_raw", (F.col("Receita") / F.col("TotalReceita")) * 100.0)
-    .withColumn("PercDemanda", F.round(F.col("PercDemanda_raw"), 0))
-    .withColumn("PercReceita", F.round(F.col("PercReceita_raw"), 0))
-    .withColumn("PercDemandaCumulativo_raw", F.sum("PercDemanda_raw").over(w_cum))
-    .withColumn("PercReceitaCumulativo_raw", F.sum("PercReceita_raw").over(w_cum))
+    .withColumn("PercDemanda", F.round((F.col("QtDemanda") / F.col("TotalDemanda")) * 100, 0))
+    .withColumn("PercReceita", F.round((F.col("Receita") / F.col("TotalReceita")) * 100, 0))
     .drop("TotalDemanda", "TotalReceita")
+    .withColumn("PercDemandaCumulativo", F.sum("PercDemanda").over(w_cum))
+    .withColumn("PercReceitaCumulativo", F.sum("PercReceita").over(w_cum))
+
 )
 
-# Top 80% por demanda (sem RDD)
-especies_top80_df = (
+especies_top80 = (
     df_demanda
-    .orderBy(F.col("PercDemanda_raw").desc())
-    .filter(F.col("PercDemandaCumulativo_raw") <= 80)
+    .filter(F.col("PercDemandaCumulativo") <= 80)
+    #.filter(F.col("NmEspecieGerencial") != 'SANDUICHEIRAS')
     .select("NmEspecieGerencial")
-    .distinct()
+    .rdd.flatMap(lambda x: x)
+    .collect()
 )
 
-# Se você realmente precisa da lista em Python:
-especies_top80 = [r["NmEspecieGerencial"] for r in especies_top80_df.collect()]
-print(especies_top80)
 
-# Tabela de SKUs. Evite coletar: use join com as espécies top 80
-mercadoria = (
+print(especies_top80)
+#print(skus_especies_top80)
+
+
+especies_boas = [
+    "LIQUIDIFICADORES 350 A 1000 W",
+    "FERROS DE PASSAR A SECO",
+    "LIQUIDIFICADORES ACIMA 1001 W.",
+    "PANELAS ELETRICAS DE ARROZ",
+    "FRITADEIRA ELETRICA (CAPSULA)",
+    "FERROS PAS. ROUPA VAPOR/SPRAY",
+    "CAFETEIRA ELETRICA (FILTRO)"
+]
+
+skus_especies_top80 = (
     spark.table('data_engineering_prd.app_venda.mercadoria')
     .select(
         F.col("CdSkuLoja").alias("CdSku"),
         F.col("NmEspecieGerencial")
     )
+    .filter(F.col("NmEspecieGerencial").isin(especies_top80))
     .filter(F.col("CdSku") != -1)
-)
-
-skus_especies_top80_df = (
-    mercadoria.join(especies_top80_df, on="NmEspecieGerencial", how="inner")
     .select("CdSku")
-    .distinct()
+    .rdd.flatMap(lambda x: x)
+    .collect()
 )
 
-# Se precisar da lista em Python:
-skus_especies_top80 = [r["CdSku"] for r in skus_especies_top80_df.collect()]
-print(len(skus_especies_top80))
-
-# Checagem: soma dos percentuais das espécies Top 80 (use raw para precisão)
-df_demanda.join(especies_top80_df, on="NmEspecieGerencial", how="inner") \
-          .agg(
-              F.sum("PercDemanda_raw").alias("SomaPercDemanda_raw"),
-              F.sum("PercDemanda").alias("SomaPercDemanda_arred")
-          ) \
-          .show(truncate=False)
+df_demanda.filter(F.col("NmEspecieGerencial").isin(especies_top80)).agg(F.sum("PercDemanda")).display()
 
 # COMMAND ----------
 
@@ -208,7 +209,7 @@ df_de_para_SKU_cadastro_mercadoria = (
 df_matriz_neogrid_offline = (
     spark.createDataFrame(
         pd.read_csv(
-            "/Workspace/Users/daniel.scardini-ext@viavarejo.com.br/supply/supply_matriz_de_merecimento/src/dados_analise/(DRP)_MATRIZ_20250902160333.csv",
+            "/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/dados_analise/(DRP)_MATRIZ_20250902160333.csv",
             delimiter=";",
         )
     )
@@ -948,3 +949,134 @@ metrics_cd_all.orderBy("categoria", "modelo").display()
 
 # Se quiser inspecionar o dataframe base já agregado no nível CD×grupo para uma categoria:
 # df_cd_comp.select("cd_vinculo","grupo_de_necessidade", COL_PESO, COL_REAL, *pred_cols).limit(20).display()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Análise de Buckets de DDE
+
+# COMMAND ----------
+
+from pyspark.sql import functions as F
+
+# Definir buckets de DDE (mesma estrutura do monitoramento)
+buckets = ["0-15", "15-30", "30-45", "45-60", "60+", "Nulo"]
+
+# Datas de baseline e piloto (ajustar conforme necessidade)
+fim_baseline = "2025-09-05"
+inicio_teste = "2025-09-05"
+
+# Carregar dados históricos de estoque para calcular DDE
+def load_estoque_historico_com_DDE(categoria: str, data_inicio: str):
+    """
+    Carrega dados históricos de estoque com cálculo de DDE (Dias De Estoque).
+    """
+    return (
+        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
+        .filter(F.col("DtAtual") >= data_inicio)
+        .filter(F.col("NmAgrupamentoDiretoriaSetor") == 'DIRETORIA LINHA LEVE')
+        .join(
+            spark.table('databox.bcg_comum.supply_grupo_de_necessidade_linha_leve'),
+            how='inner',
+            on='CdSku'
+        )
+        .dropna(subset='grupo_de_necessidade')
+        .filter(~F.col("grupo_de_necessidade").isin('SEM_GN', 'FORA DE LINHA'))
+        .groupBy("CdFilial", "grupo_de_necessidade", "DtAtual")
+        .agg(F.round(F.median("DDE"), 1).alias("DDE_mediano"))
+    )
+
+# Calcular buckets de DDE por filial e período
+df_estoque_dde = {}
+df_counts_export = {}
+
+for categoria in categorias_teste:
+    # Carregar dados históricos
+    df_estoque = load_estoque_historico_com_DDE(categoria, data_inicio)
+    
+    # Classificar períodos
+    df_estoque = df_estoque.withColumn(
+        "periodo_analise",
+        F.when(
+            F.col("DtAtual") < fim_baseline, F.lit('baseline')
+        )
+        .when(F.col("DtAtual") >= inicio_teste, F.lit('piloto'))
+        .otherwise(F.lit('ignorar'))
+    )
+    
+    # Filtrar apenas baseline e piloto
+    df_estoque = df_estoque.filter(F.col("periodo_analise").isin('baseline', 'piloto'))
+    
+    # Criar buckets de DDE
+    df_buckets = (
+        df_estoque
+        .groupBy("CdFilial", "grupo_de_necessidade", "periodo_analise")
+        .agg(
+            F.round(F.mean("DDE_mediano"), 1).alias("DDE_medio"),
+            F.round(F.percentile_approx("DDE_mediano", 0.5, 100), 1).alias("DDE_mediano_agregado")
+        )
+        # Bucket para média
+        .withColumn(
+            "bucket_DDE_medio",
+            F.when(F.col("DDE_medio").isNull(), "Nulo")
+            .when(F.col("DDE_medio") > 60, "60+")
+            .when(F.col("DDE_medio") >= 45, "45-60")
+            .when(F.col("DDE_medio") >= 30, "30-45")
+            .when(F.col("DDE_medio") >= 15, "15-30")
+            .when(F.col("DDE_medio") >= 0, "0-15")
+            .otherwise("Nulo")
+        )
+        # Bucket para mediana
+        .withColumn(
+            "bucket_DDE_mediano",
+            F.when(F.col("DDE_mediano_agregado").isNull(), "Nulo")
+            .when(F.col("DDE_mediano_agregado") > 60, "60+")
+            .when(F.col("DDE_mediano_agregado") >= 45, "45-60")
+            .when(F.col("DDE_mediano_agregado") >= 30, "30-45")
+            .when(F.col("DDE_mediano_agregado") >= 15, "15-30")
+            .when(F.col("DDE_mediano_agregado") >= 0, "0-15")
+            .otherwise("Nulo")
+        )
+    )
+    
+    df_estoque_dde[categoria] = df_buckets
+    
+    # Contagens por bucket (média)
+    df_counts_medio = (
+        df_buckets
+        .groupBy("periodo_analise")
+        .pivot("bucket_DDE_medio", buckets)
+        .count()
+        .na.fill(0)
+    )
+    for b in buckets:
+        df_counts_medio = df_counts_medio.withColumn(b, F.col(b).cast("long"))
+    df_counts_medio = (
+        df_counts_medio
+        .select("periodo_analise", *buckets)
+        .withColumn("Metrica", F.lit("DDE_medio"))
+        .withColumn("Categoria", F.lit(categoria))
+    )
+    
+    # Contagens por bucket (mediana)
+    df_counts_mediano = (
+        df_buckets
+        .groupBy("periodo_analise")
+        .pivot("bucket_DDE_mediano", buckets)
+        .count()
+        .na.fill(0)
+    )
+    for b in buckets:
+        df_counts_mediano = df_counts_mediano.withColumn(b, F.col(b).cast("long"))
+    df_counts_mediano = (
+        df_counts_mediano
+        .select("periodo_analise", *buckets)
+        .withColumn("Metrica", F.lit("DDE_mediano"))
+        .withColumn("Categoria", F.lit(categoria))
+    )
+    
+    # Union e exibição
+    df_counts_export[categoria] = df_counts_medio.unionByName(df_counts_mediano)
+    
+    print(f"Categoria: {categoria}")
+    df_counts_export[categoria].display()
