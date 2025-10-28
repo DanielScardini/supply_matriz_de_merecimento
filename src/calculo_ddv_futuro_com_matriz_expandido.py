@@ -563,6 +563,43 @@ if 'df_final_consolidado' in locals():
             print(f"    - Total OFF: R$ {soma_off:,.2f}")
             print(f"    - Total geral: R$ {soma_total:,.2f}")
     
+    # Validação 4: Verificar unicidade de chaves (grupo + SKU + filial)
+    print(f"\n📊 Validação 4 - Unicidade de chaves:")
+    print("  Verificando se não há duplicação de chaves (grupo + SKU + filial)...")
+    
+    for categoria in categorias_esperadas:
+        if categoria in [row['categoria'] for row in categorias_com_dados]:
+            df_cat = df_final_consolidado.filter(F.col("categoria") == categoria)
+            
+            # Contar registros totais
+            total_registros = df_cat.count()
+            
+            # Contar chaves únicas (grupo + SKU + filial)
+            chaves_unicas = df_cat.select("grupo_de_necessidade", "CdSku", "CdFilial").distinct().count()
+            
+            # Verificar duplicatas
+            df_agrupado = (
+                df_cat
+                .groupBy("grupo_de_necessidade", "CdSku", "CdFilial")
+                .agg(F.count("*").alias("count_chave"))
+                .filter(F.col("count_chave") > 1)
+            )
+            duplicatas = df_agrupado.count()
+            
+            print(f"  • {categoria}:")
+            print(f"    - Total de registros: {total_registros:,}")
+            print(f"    - Chaves únicas esperadas: {chaves_unicas:,}")
+            print(f"    - Duplicatas encontradas: {duplicatas:,}")
+            
+            if duplicatas == 0:
+                print(f"    ✅ SEM DUPLICAÇÕES - Chaves únicas garantidas!")
+            else:
+                print(f"    ❌ ATENÇÃO: {duplicatas} chave(s) duplicada(s)")
+                
+                # Mostrar amostra de duplicatas
+                print(f"    📋 Amostra de chaves duplicadas:")
+                df_agrupado.select("grupo_de_necessidade", "CdSku", "CdFilial", "count_chave").show(5, truncate=False)
+    
     print(f"\n✅ Validações concluídas!")
 
 # COMMAND ----------
