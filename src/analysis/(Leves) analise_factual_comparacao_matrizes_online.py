@@ -37,7 +37,7 @@ print(GRUPOS_TESTE)
 data_inicio = "2025-08-29"
 fim_baseline = "2025-09-05"
 
-inicio_teste = "2025-10-20"
+inicio_teste = "2025-09-05"
 
 categorias_teste = ['LINHA_LEVE']
 
@@ -70,7 +70,7 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     
     for categoria in categorias:
         try:
-            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_online_teste0710"
+            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_online_teste0310"
             df_matriz = spark.table(nome_tabela)
             
             matrizes[categoria] = df_matriz
@@ -124,7 +124,7 @@ df_de_para_SKU_cadastro_mercadoria = (
 df_matriz_neogrid_online = (
     spark.createDataFrame(
         pd.read_csv(
-            "/Workspace/Users/daniel.scardini-ext@viavarejo.com.br/supply/supply_matriz_de_merecimento/src/dados_analise/(DRP)_MATRIZ_20250904123325_online.csv",
+            "/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/dados_analise/(DRP)_MATRIZ_20250904123325_online.csv",
             delimiter=";",
         )
     )
@@ -188,7 +188,7 @@ df_proporcao_factual = (
         how="left"
     )
     .dropna(subset='grupo_de_necessidade')
-    .filter(F.col("NmSetorGerencial").isin('BELEZA & SAUDE', 'PORTATEIS'))
+    .filter(F.col("NmSetorGerencial") == 'PORTATEIS')
     #.filter(F.col("grupo_de_necessidade").isin(GRUPOS_TESTE))
     .groupBy('CdFilial', 'grupo_de_necessidade')
     .agg(
@@ -332,6 +332,83 @@ metrics_all.orderBy("categoria", "modelo").display()
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Parâmetros de Exibição - wMAPE
+# MAGIC 
+# MAGIC Configure quais modelos deseja exibir e o filtro de volume mínimo para grupos
+
+# COMMAND ----------
+
+# Modelos a exibir no pivot (fácil de alterar)
+MODELOS_EXIBIR = [
+    "Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura",
+    "PercMatrizNeogrid"
+]
+
+# Filtro de volume mínimo para grupos (em peças)
+VOLUME_MINIMO_GRUPO = 1000
+
+print(f"🔧 Configuração de Exibição:")
+print(f"  • Modelos a exibir: {len(MODELOS_EXIBIR)}")
+for m in MODELOS_EXIBIR:
+    print(f"    - {m}")
+print(f"  • Volume mínimo para grupos: {VOLUME_MINIMO_GRUPO:,} peças")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Tabela Pivotada - Métricas Agregadas por Categoria
+# MAGIC 
+# MAGIC Tabela pivotada com wSMAPE por categoria (agregado geral)
+
+# COMMAND ----------
+
+# Filtrar apenas modelos selecionados e coluna WSMAPE
+metrics_filtrado = (
+    metrics_all
+    .filter(F.col("modelo").isin(MODELOS_EXIBIR))
+    .select("categoria", "modelo", "WSMAPE")
+)
+
+# Obter modelos existentes
+modelos_disponiveis_cat = [row[0] for row in metrics_filtrado.select("modelo").distinct().collect()]
+modelos_existentes_cat = [m for m in MODELOS_EXIBIR if m in modelos_disponiveis_cat]
+
+if modelos_existentes_cat:
+    # Pivot por modelo - categoria como linha
+    df_metrics_pivot = (
+        metrics_filtrado
+        .groupBy("categoria")
+        .pivot("modelo", modelos_existentes_cat)
+        .agg(F.first("WSMAPE"))
+        .na.fill(0.0)
+    )
+    
+    # Renomear colunas
+    for modelo in modelos_existentes_cat:
+        if modelo in df_metrics_pivot.columns:
+            nome_simples = modelo.replace("Merecimento_Final_", "").replace("MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada90")
+            nome_simples = nome_simples.replace("PercMatrizNeogrid", "Neogrid")
+            df_metrics_pivot = df_metrics_pivot.withColumnRenamed(modelo, f"wSMAPE_{nome_simples}")
+    
+    # Select final
+    colunas_fixas_cat = ["categoria"]
+    colunas_wmape_cat = [c for c in df_metrics_pivot.columns if c.startswith("wSMAPE_")]
+    colunas_select_cat = colunas_fixas_cat + sorted(colunas_wmape_cat)
+    
+    df_metrics_pivot_final = df_metrics_pivot.select(*colunas_select_cat)
+    
+    print(f"📊 TABELA PIVOTADA - wSMAPE Agregado por Categoria ({len(modelos_existentes_cat)} modelos)")
+    print("=" * 80)
+    df_metrics_pivot_final.orderBy("categoria").display()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Cálculo de wSMAPE por Grupo
+
+# COMMAND ----------
+
 from pyspark.sql import functions as F, Window as W
 
 # === Constantes ===
@@ -383,6 +460,8 @@ for categoria in categorias_teste:
         df_aug
         .groupBy(GROUP_COL)
         .agg(*aggs, F.max("Volume").alias("Volume"))
+        # Aplicar filtro de volume mínimo para grupos
+        .filter(F.col("Volume") >= VOLUME_MINIMO_GRUPO)
         .select(
             F.col(GROUP_COL).alias("grupo"),
             "Volume",
@@ -413,6 +492,66 @@ for categoria in categorias_teste:
 
 # Apenas grupos existentes, sem linhas de TOTAL
 wmape_all.orderBy("categoria", "grupo", "modelo").display()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Tabela Pivotada - wSMAPE por Modelo
+# MAGIC 
+# MAGIC Tabela pivotada com wSMAPE dos modelos selecionados, agrupada por categoria/grupo
+
+# COMMAND ----------
+
+# Filtrar apenas modelos que devem ser exibidos
+# wmape_all já foi calculado anteriormente na seção de cálculo por grupo
+wmape_filtrado = (
+    wmape_all
+    .filter(F.col("modelo").isin(MODELOS_EXIBIR))
+)
+
+# Criar pivot: linhas = categoria/grupo, colunas = modelos
+# Obter lista de modelos que existem no DataFrame filtrado
+modelos_disponiveis = [row[0] for row in wmape_filtrado.select("modelo").distinct().collect()]
+modelos_existentes = [m for m in MODELOS_EXIBIR if m in modelos_disponiveis]
+
+if modelos_existentes:
+    # Criar coluna "agregacao" que será grupo (ou categoria se grupo for null)
+    wmape_com_agregacao = wmape_filtrado.withColumn(
+        "agregacao",
+        F.coalesce(F.col("grupo"), F.col("categoria"))
+    )
+    
+    # Pivot por modelo (as colunas serão os nomes dos modelos)
+    df_wmape_pivot = (
+        wmape_com_agregacao
+        .groupBy("agregacao", "categoria", "Volume")
+        .pivot("modelo", modelos_existentes)
+        .agg(F.first("WSMAPE"))
+        .na.fill(0.0)  # Preencher nulos com 0
+    )
+    
+    # Renomear colunas para facilitar leitura (remover partes longas do nome)
+    for modelo in modelos_existentes:
+        if modelo in df_wmape_pivot.columns:
+            nome_simples = modelo.replace("Merecimento_Final_", "").replace("MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada90")
+            nome_simples = nome_simples.replace("PercMatrizNeogrid", "Neogrid")
+            df_wmape_pivot = df_wmape_pivot.withColumnRenamed(modelo, f"wSMAPE_{nome_simples}")
+    
+    # Select final: escolher apenas colunas desejadas
+    # Manter agregacao, categoria, Volume e todas as colunas wSMAPE
+    colunas_fixas = ["agregacao", "categoria", "Volume"]
+    colunas_wmape = [c for c in df_wmape_pivot.columns if c.startswith("wSMAPE_")]
+    colunas_select = colunas_fixas + sorted(colunas_wmape)
+    
+    df_wmape_pivot_final = df_wmape_pivot.select(*colunas_select)
+    
+    print(f"📊 TABELA PIVOTADA - wSMAPE por Modelo ({len(modelos_existentes)} modelos)")
+    print("=" * 80)
+    df_wmape_pivot_final.orderBy("categoria", "agregacao").display()
+else:
+    print(f"⚠️ Nenhum dos modelos selecionados foi encontrado!")
+    print(f"   Modelos disponíveis: {modelos_disponiveis}")
+    print(f"   Modelos solicitados: {MODELOS_EXIBIR}")
 
 # COMMAND ----------
 
@@ -806,6 +945,11 @@ for categoria in categorias_teste:
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Análise de Buckets de DDE
+
+# COMMAND ----------
+
 from pyspark.sql import functions as F
 
 # Definir buckets de DDE (mesma estrutura do monitoramento)
@@ -813,7 +957,7 @@ buckets = ["0-15", "15-30", "30-45", "45-60", "60+", "Nulo"]
 
 # Datas de baseline e piloto (ajustar conforme necessidade)
 fim_baseline = "2025-09-05"
-inicio_teste = "2025-10-20"
+inicio_teste = "2025-09-05"
 
 # Carregar dados históricos de estoque para calcular DDE
 def load_estoque_historico_com_DDE(categoria: str, data_inicio: str):
@@ -821,18 +965,16 @@ def load_estoque_historico_com_DDE(categoria: str, data_inicio: str):
     Carrega dados históricos de estoque com cálculo de DDE (Dias De Estoque).
     """
     return (
-        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
+        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4_online')
         .filter(F.col("DtAtual") >= data_inicio)
         .filter(F.col("NmAgrupamentoDiretoriaSetor") == 'DIRETORIA LINHA LEVE')
-        .filter(F.col("NmSetorGerencial").isin('BELEZA & SAUDE', 'PORTATEIS'))
         .join(
             spark.table('databox.bcg_comum.supply_grupo_de_necessidade_linha_leve'),
             how='inner',
             on='CdSku'
         )
-        #.filter(F.col("grupo_de_necessidade").isin(GRUPOS_TESTE))
         .dropna(subset='grupo_de_necessidade')
-        #.filter(~F.col("grupo_de_necessidade").isin(GRUPOS_REMOVER))
+        .filter(~F.col("grupo_de_necessidade").isin('SEM_GN', 'FORA DE LINHA'))
         .groupBy("CdFilial", "grupo_de_necessidade", "DtAtual")
         .agg(F.round(F.median("DDE"), 1).alias("DDE_mediano"))
     )
@@ -841,7 +983,7 @@ def load_estoque_historico_com_DDE(categoria: str, data_inicio: str):
 df_estoque_dde = {}
 df_counts_export = {}
 
-for categoria in ['DIRETORIA LINHA LEVE']:
+for categoria in categorias_teste:
     # Carregar dados históricos
     df_estoque = load_estoque_historico_com_DDE(categoria, data_inicio)
     
@@ -861,7 +1003,7 @@ for categoria in ['DIRETORIA LINHA LEVE']:
     # Criar buckets de DDE
     df_buckets = (
         df_estoque
-        .groupBy("CdFilial",  "periodo_analise")
+        .groupBy("CdFilial", "grupo_de_necessidade", "periodo_analise")
         .agg(
             F.round(F.mean("DDE_mediano"), 1).alias("DDE_medio"),
             F.round(F.percentile_approx("DDE_mediano", 0.5, 100), 1).alias("DDE_mediano_agregado")
@@ -931,38 +1073,3 @@ for categoria in ['DIRETORIA LINHA LEVE']:
     
     print(f"Categoria: {categoria}")
     df_counts_export[categoria].display()
-
-# COMMAND ----------
-
-df_buckets = (
-        df_estoque
-        .groupBy("periodo_analise")
-        .agg(
-            F.round(F.mean("DDE_mediano"), 1).alias("DDE_medio"),
-            F.round(F.percentile_approx("DDE_mediano", 0.5, 100), 1).alias("DDE_mediano_agregado")
-        )
-        # Bucket para média
-        .withColumn(
-            "bucket_DDE_medio",
-            F.when(F.col("DDE_medio").isNull(), "Nulo")
-            .when(F.col("DDE_medio") > 60, "60+")
-            .when(F.col("DDE_medio") >= 45, "45-60")
-            .when(F.col("DDE_medio") >= 30, "30-45")
-            .when(F.col("DDE_medio") >= 15, "15-30")
-            .when(F.col("DDE_medio") >= 0, "0-15")
-            .otherwise("Nulo")
-        )
-        # Bucket para mediana
-        .withColumn(
-            "bucket_DDE_mediano",
-            F.when(F.col("DDE_mediano_agregado").isNull(), "Nulo")
-            .when(F.col("DDE_mediano_agregado") > 60, "60+")
-            .when(F.col("DDE_mediano_agregado") >= 45, "45-60")
-            .when(F.col("DDE_mediano_agregado") >= 30, "30-45")
-            .when(F.col("DDE_mediano_agregado") >= 15, "15-30")
-            .when(F.col("DDE_mediano_agregado") >= 0, "0-15")
-            .otherwise("Nulo")
-        )
-    )
-
-df_buckets.display()
