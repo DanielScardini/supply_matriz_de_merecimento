@@ -126,8 +126,8 @@ CATEGORIAS_CONFIG = {
     },
     "TELEFONIA": {
         "grupos_teste": GRUPOS_TESTE_TELEFONIA,
-        "tabela_merecimento_off": f"databox.bcg_comum.supply_matriz_merecimento_telefonia_teste{VERSAO_MERECIMENTO['TELEFONIA']}",
-        "tabela_merecimento_on": f"databox.bcg_comum.supply_matriz_merecimento_telefonia_online_teste{VERSAO_MERECIMENTO['TELEFONIA']}",
+        "tabela_merecimento_off": f"databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste{VERSAO_MERECIMENTO['TELEFONIA']}",
+        "tabela_merecimento_on": f"databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste{VERSAO_MERECIMENTO['TELEFONIA']}",
         "de_para": "databox.bcg_comum.supply_de_para_modelos_gemeos_tecnologia",  # Mesmo de telas
         "proporcao_on": 0.235,  # 23.5%
         "proporcao_off": 0.765,  # Complementar
@@ -222,7 +222,7 @@ def calcular_ddv_categoria(categoria: str, tipo_dados: str) -> DataFrame:
     print(f"  📊 Calculando demanda TOTAL a nível CIA por grupo+SKU...")
     df_demanda = (
         df_com_grupos
-        .groupBy("grupo_de_necessidade", "CdSku")
+        .groupBy("grupo_de_necessidade", "CdSku")  # SEM CdFilial - demanda TOTAL a nível CIA
         .agg(
             F.round(F.sum(F.col('QtMercadoria') + F.col("deltaRuptura")), 3).alias("demanda_total"),
             F.countDistinct("DtAtual").alias("dias"),
@@ -241,7 +241,7 @@ def calcular_ddv_categoria(categoria: str, tipo_dados: str) -> DataFrame:
     # IMPORTANTE: merecimento é por filial+grupo+SKU e representa a proporção/distribuição
     print(f"  📊 Carregando matriz de merecimento...")
     df_merecimento = spark.table(tabela_merecimento).select(
-        "grupo_de_necessidade",
+        "grupo_de_necessidade",  # <- ADICIONADO para garantir unicidade
         "CdSku", 
         "CdFilial",
         F.col("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura").alias("merecimento_final")
@@ -306,30 +306,6 @@ def calcular_ddv_categoria(categoria: str, tipo_dados: str) -> DataFrame:
     df_final = df_final.drop("demanda_total", "dias", "n_domingos")
     
     print(f"  • DDV calculado: {df_final.count():,} registros")
-    
-    # Validação: verificar duplicatas antes de retornar
-    df_dup_check = (
-        df_final
-        .groupBy("grupo_de_necessidade", "CdSku", "CdFilial")
-        .agg(F.count("*").alias("count"))
-        .filter(F.col("count") > 1)
-    )
-    dup_count = df_dup_check.count()
-    
-    if dup_count > 0:
-        print(f"  ⚠️ ATENÇÃO: {dup_count} chave(s) duplicada(s) encontradas no DF final")
-        print(f"  📋 Mostrando amostra de duplicatas:")
-        df_dup_check.show(10, truncate=False)
-        
-        # Mostrar detalhe de uma chave duplicada
-        if dup_count > 0:
-            primeira_chave = df_dup_check.select("grupo_de_necessidade", "CdSku", "CdFilial").limit(1).collect()[0]
-            print(f"  🔍 Detalhamento da chave: grupo={primeira_chave['grupo_de_necessidade']}, SKU={primeira_chave['CdSku']}, Filial={primeira_chave['CdFilial']}")
-            df_final.filter(
-                (F.col("grupo_de_necessidade") == primeira_chave['grupo_de_necessidade']) &
-                (F.col("CdSku") == primeira_chave['CdSku']) &
-                (F.col("CdFilial") == primeira_chave['CdFilial'])
-            ).show(10, truncate=False)
     
     return df_final
 
@@ -409,27 +385,9 @@ dfs_consolidados = []
 for categoria, df_resultado in resultados_ddv.items():
     print(f"\n📊 Processando {categoria}:")
     
-    # IMPORTANTE: Agrupar por chaves únicas
-    # Se houver duplicatas: somar DDVs (podem vir de múltiplas linhas na tabela merecimento)
-    # Mas demandas devem ser únicas (não somar, usar first/max)
-    df_resultado_unicos = (
-        df_resultado
-        .groupBy("grupo_de_necessidade", "CdSku", "CdFilial")
-        .agg(
-            F.sum("DDV_futuro_filial_on").alias("DDV_futuro_filial_on"),
-            F.sum("DDV_futuro_filial_off").alias("DDV_futuro_filial_off"),
-            F.max("demanda_diarizada_on").alias("demanda_diarizada_on"),  # Não somar, pegar max
-            F.max("demanda_diarizada_off").alias("demanda_diarizada_off"),  # Não somar, pegar max
-            F.sum("DDV_futuro_filial_merecimento").alias("DDV_futuro_filial_merecimento")
-        )
-    )
-    
-    print(f"  • Registros antes de consolidar duplicatas: {df_resultado.count():,}")
-    print(f"  • Registros após consolidar duplicatas: {df_resultado_unicos.count():,}")
-    
     # Calcular proporções reais baseadas nos dados das tabelas ON e OFF
-    total_on = df_resultado_unicos.agg(F.sum("DDV_futuro_filial_on")).collect()[0][0]
-    total_off = df_resultado_unicos.agg(F.sum("DDV_futuro_filial_off")).collect()[0][0]
+    total_on = df_resultado.agg(F.sum("DDV_futuro_filial_on")).collect()[0][0]
+    total_off = df_resultado.agg(F.sum("DDV_futuro_filial_off")).collect()[0][0]
     total_geral = total_on + total_off
     
     if total_geral > 0:
@@ -442,9 +400,9 @@ for categoria, df_resultado in resultados_ddv.items():
     print(f"  • Proporção ON real: {proporcao_on_real:.1%}")
     print(f"  • Proporção OFF real: {proporcao_off_real:.1%}")
     
-    # Aplicar proporções reais calculadas usando dados únicos
+    # Aplicar proporções reais calculadas
     df_com_proporcoes = (
-        df_resultado_unicos
+        df_resultado
         .withColumn("DDV_final_on", F.round(F.col("DDV_futuro_filial_on") * proporcao_on_real, 3))
         .withColumn("DDV_final_off", F.round(F.col("DDV_futuro_filial_off") * proporcao_off_real, 3))
         .withColumn("DDV_final_total", F.round(F.col("DDV_final_on") + F.col("DDV_final_off"), 3))
@@ -456,10 +414,10 @@ for categoria, df_resultado in resultados_ddv.items():
             "grupo_de_necessidade", 
             "CdSku", 
             "CdFilial",
-            F.col("demanda_diarizada_off").alias("demanda_diarizada_off"),
-            F.col("demanda_diarizada_on").alias("demanda_diarizada_on"),
-            F.col("DDV_futuro_filial_off").alias("DDV_futuro_filial_off"),
-            F.col("DDV_futuro_filial_on").alias("DDV_futuro_filial_on"), 
+            "demanda_diarizada_off",
+            "demanda_diarizada_on",
+            "DDV_futuro_filial_off",
+            "DDV_futuro_filial_on", 
             "DDV_final_on",
             "DDV_final_off",
             "DDV_final_total",
@@ -478,22 +436,20 @@ if dfs_consolidados:
     for df in dfs_consolidados[1:]:
         df_final_consolidado = df_final_consolidado.union(df)
     
-    # IMPORTANTE: Consolidar duplicatas
-    # Demandas devem ser únicas (max) - não somar
-    # DDVs podem ser somados se vieram de múltiplas linhas na tabela merecimento
+    # IMPORTANTE: Consolidar duplicatas SOMANDO os valores numéricos
     registros_antes = df_final_consolidado.count()
     
     df_final_consolidado = (
         df_final_consolidado
         .groupBy("categoria", "grupo_de_necessidade", "CdSku", "CdFilial", "proporcao_on_real", "proporcao_off_real")
         .agg(
-            F.max("demanda_diarizada_off").alias("demanda_diarizada_off"),  # Única, não somar
-            F.max("demanda_diarizada_on").alias("demanda_diarizada_on"),  # Única, não somar
-            F.sum("DDV_futuro_filial_off").alias("DDV_futuro_filial_off"),  # Pode somar se duplicado
-            F.sum("DDV_futuro_filial_on").alias("DDV_futuro_filial_on"),  # Pode somar se duplicado
-            F.sum("DDV_final_on").alias("DDV_final_on"),  # Pode somar se duplicado
-            F.sum("DDV_final_off").alias("DDV_final_off"),  # Pode somar se duplicado
-            F.sum("DDV_final_total").alias("DDV_final_total")  # Pode somar se duplicado
+            F.sum("demanda_diarizada_off").alias("demanda_diarizada_off"),
+            F.sum("demanda_diarizada_on").alias("demanda_diarizada_on"),
+            F.sum("DDV_futuro_filial_off").alias("DDV_futuro_filial_off"),
+            F.sum("DDV_futuro_filial_on").alias("DDV_futuro_filial_on"),
+            F.sum("DDV_final_on").alias("DDV_final_on"),
+            F.sum("DDV_final_off").alias("DDV_final_off"),
+            F.sum("DDV_final_total").alias("DDV_final_total")
         )
     )
     
@@ -570,7 +526,7 @@ if 'df_final_consolidado' in locals():
             df_pandas[col] = df_pandas[col].astype(float)
     
     # Salvar em CSV (mais eficiente para grandes volumes)
-    output_dir = f"/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/output/{hoje_str}/ddv_futuro/"
+    output_dir = f"/Workspace/Users/daniel.scardini-ext@viavarejo.com.br/supply/supply_matriz_de_merecimento/src/output/{hoje_str}/ddv_futuro/"
     
     # Criar diretório se não existir
     os.makedirs(output_dir, exist_ok=True)
@@ -745,52 +701,6 @@ if 'df_final_consolidado' in locals():
                 
                 # Mostrar amostra de duplicatas
                 print(f"    📋 Amostra de chaves duplicadas:")
-                df_agrupado.select("grupo_de_necessidade", "CdSku", "CdFilial", "count_chave").show(10, truncate=False)
-                
-                # Análise detalhada das duplicatas
-                print(f"\n    🔍 ANÁLISE DETALHADA DAS DUPLICAÇÕES:")
-                
-                # Identificar filiais com mais duplicatas
-                df_dup_por_filial = (
-                    df_agrupado
-                    .groupBy("CdFilial")
-                    .agg(
-                        F.count("*").alias("qtd_chaves_duplicadas"),
-                        F.sum("count_chave").alias("total_registros_duplicados")
-                    )
-                    .orderBy(F.desc("qtd_chaves_duplicadas"))
-                )
-                
-                print(f"    📊 Duplicatas por Filial (top 10):")
-                df_dup_por_filial.show(10, truncate=False)
-                
-                # Para cada chave duplicada, mostrar os valores únicos para investigar
-                print(f"    📋 Detalhamento de valores para uma chave duplicada:")
-                # Pegar primeira chave duplicada
-                primeira_dup = df_agrupado.select("grupo_de_necessidade", "CdSku", "CdFilial").limit(1).collect()[0]
-                
-                df_detalhe = df_cat.filter(
-                    (F.col("grupo_de_necessidade") == primeira_dup['grupo_de_necessidade']) &
-                    (F.col("CdSku") == primeira_dup['CdSku']) &
-                    (F.col("CdFilial") == primeira_dup['CdFilial'])
-                )
-                
-                print(f"      Chave: grupo={primeira_dup['grupo_de_necessidade']}, SKU={primeira_dup['CdSku']}, Filial={primeira_dup['CdFilial']}")
-                print(f"      Registros encontrados: {df_detalhe.count()}")
-                
-                # Mostrar todas as colunas para identificar diferenças
-                df_detalhe.select(
-                    "categoria",
-                    "grupo_de_necessidade",
-                    "CdSku", 
-                    "CdFilial",
-                    "demanda_diarizada_off",
-                    "demanda_diarizada_on",
-                    "DDV_futuro_filial_off",
-                    "DDV_futuro_filial_on",
-                    "DDV_final_on",
-                    "DDV_final_off",
-                    "DDV_final_total"
-                ).show(20, truncate=False)
+                df_agrupado.select("grupo_de_necessidade", "CdSku", "CdFilial", "count_chave").display()
     
     print(f"\n✅ Validações concluídas!")
