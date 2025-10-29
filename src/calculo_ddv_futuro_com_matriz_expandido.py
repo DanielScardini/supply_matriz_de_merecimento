@@ -213,8 +213,13 @@ def calcular_ddv_categoria(categoria: str, tipo_dados: str) -> DataFrame:
     
     print(f"  • Após join com de-para: {df_com_grupos.count():,} registros")
     
-    # Calcular demanda diarizada TOTAL (sem filial) por grupo+SKU
-    # Depois distribuiremos por filial via merecimento
+    # LÓGICA CORRETA:
+    # 1. Somar demanda TOTAL por SKU a nível CIA (todas as filiais juntas) nos últimos N dias
+    # 2. Diarizar essa demanda total (dividindo por dias úteis, excluindo domingos)
+    # 3. Multiplicar demanda diarizada TOTAL pelo merecimento de cada filial por grupo
+    #    para obter demanda diarizada POR FILIAL
+    
+    print(f"  📊 Calculando demanda TOTAL a nível CIA por grupo+SKU...")
     df_demanda = (
         df_com_grupos
         .groupBy("grupo_de_necessidade", "CdSku")
@@ -227,8 +232,14 @@ def calcular_ddv_categoria(categoria: str, tipo_dados: str) -> DataFrame:
         .orderBy(F.desc("demanda_diarizada"))
     )
     
-    # Join com matriz de merecimento
-    # IMPORTANTE: Join por grupo+SKU (sem filial) para distribuir demanda TOTAL por filial
+    # Validação: mostrar amostra da demanda calculada
+    print(f"  • Demanda calculada: {df_demanda.count():,} registros (grupo+SKU)")
+    print(f"  📋 Amostra de demanda diarizada TOTAL (top 5):")
+    df_demanda.select("grupo_de_necessidade", "CdSku", "demanda_total", "dias", "demanda_diarizada").show(5, truncate=False)
+    
+    # Carregar matriz de merecimento
+    # IMPORTANTE: merecimento é por filial+grupo+SKU e representa a proporção/distribuição
+    print(f"  📊 Carregando matriz de merecimento...")
     df_merecimento = spark.table(tabela_merecimento).select(
         "grupo_de_necessidade",
         "CdSku", 
@@ -236,16 +247,63 @@ def calcular_ddv_categoria(categoria: str, tipo_dados: str) -> DataFrame:
         F.col("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura").alias("merecimento_final")
     )
     
+    # Validar formato do merecimento (verificar se é percentual 0-100 ou decimal 0-1)
+    print(f"  • Merecimentos carregados: {df_merecimento.count():,} registros")
+    print(f"  📋 Amostra de merecimentos (top 5):")
+    df_merecimento.select("grupo_de_necessidade", "CdSku", "CdFilial", "merecimento_final").show(5, truncate=False)
+    
+    # Verificar estatísticas do merecimento para entender se é percentual ou decimal
+    stats_merecimento = df_merecimento.agg(
+        F.min("merecimento_final").alias("min_merecimento"),
+        F.max("merecimento_final").alias("max_merecimento"),
+        F.avg("merecimento_final").alias("avg_merecimento")
+    ).collect()[0]
+    
+    print(f"  📊 Estatísticas do merecimento:")
+    print(f"     - Mínimo: {stats_merecimento['min_merecimento']}")
+    print(f"     - Máximo: {stats_merecimento['max_merecimento']}")
+    print(f"     - Média: {stats_merecimento['avg_merecimento']}")
+    
+    # Se o máximo for > 1, provavelmente é percentual (0-100), senão é decimal (0-1)
+    # NORMALIZAR: se for percentual, dividir por 100 para converter em decimal (0-1)
+    if stats_merecimento['max_merecimento'] > 1.0:
+        print(f"  ⚠️ Merecimento parece estar em formato PERCENTUAL (0-100). Convertendo para decimal (0-1)...")
+        df_merecimento = df_merecimento.withColumn(
+            "merecimento_final", 
+            F.round(F.col("merecimento_final") / 100.0, 6)
+        )
+        print(f"  ✅ Merecimento normalizado para decimal (0-1)")
+    else:
+        print(f"  ✅ Merecimento já está em formato decimal (0-1)")
+    
+    # Join: distribuir demanda diarizada TOTAL por filial via merecimento
+    print(f"  📊 Distribuindo demanda diarizada TOTAL por filial via merecimento...")
     df_final = (
         df_demanda
         .join(
             df_merecimento, 
-            on=["grupo_de_necessidade", "CdSku"],  # Join por 2 chaves - distribui demanda total por filial
+            on=["grupo_de_necessidade", "CdSku"],  # Join por grupo+SKU - distribui demanda total por filial
             how="inner"
         )
         .withColumn("DDV_futuro_filial",
                    F.round(F.col("demanda_diarizada") * F.col("merecimento_final"), 3))
     )
+    
+    # Validação: verificar se a soma dos DDVs por grupo+SKU é próxima da demanda diarizada original
+    print(f"  ✅ Validando cálculo DDV...")
+    df_validacao = (
+        df_final
+        .groupBy("grupo_de_necessidade", "CdSku", "demanda_diarizada")
+        .agg(F.sum("DDV_futuro_filial").alias("soma_ddv_por_filial"))
+        .withColumn("diferenca_pct", 
+                   F.round(((F.col("soma_ddv_por_filial") - F.col("demanda_diarizada")) / F.col("demanda_diarizada")) * 100, 2))
+    )
+    
+    print(f"  📋 Validação: Comparando demanda_diarizada TOTAL vs soma de DDV por filial (top 10):")
+    df_validacao.select("grupo_de_necessidade", "CdSku", "demanda_diarizada", "soma_ddv_por_filial", "diferenca_pct").show(10, truncate=False)
+    
+    # Remover colunas temporárias de validação
+    df_final = df_final.drop("demanda_total", "dias", "n_domingos")
     
     print(f"  • DDV calculado: {df_final.count():,} registros")
     
