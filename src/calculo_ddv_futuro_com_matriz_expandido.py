@@ -566,8 +566,9 @@ if 'df_final_consolidado' in locals():
     print("=" * 50)
     
     # Validação final: garantir que não há duplicatas
+    # Após o groupBy, temos apenas: Chave, CdSku, CdFilial, DDV_final_total
     registros_spark = df_final_consolidado.count()
-    chaves_unicas_spark = df_final_consolidado.select("categoria", "grupo_de_necessidade", "CdSku", "CdFilial").distinct().count()
+    chaves_unicas_spark = df_final_consolidado.select("Chave", "CdSku", "CdFilial").distinct().count()
     
     if registros_spark != chaves_unicas_spark:
         print(f"  ⚠️ ATENÇÃO: {registros_spark - chaves_unicas_spark} duplicatas ainda presentes!")
@@ -580,18 +581,14 @@ if 'df_final_consolidado' in locals():
     
     # Última garantia: remover duplicatas no pandas (caso ainda existam)
     registros_antes_pandas = len(df_pandas)
-    df_pandas = df_pandas.drop_duplicates(subset=["categoria", "grupo_de_necessidade", "CdSku", "CdFilial"])
+    df_pandas = df_pandas.drop_duplicates(subset=["Chave", "CdSku", "CdFilial"])
     registros_depois_pandas = len(df_pandas)
     
     if registros_antes_pandas > registros_depois_pandas:
         print(f"  ⚠️ {registros_antes_pandas - registros_depois_pandas:,} duplicatas removidas no pandas!")
     
     # Garantir que colunas numéricas sejam float
-    colunas_numericas = [
-        "demanda_diarizada_off", "demanda_diarizada_on",
-        "DDV_futuro_filial_off", "DDV_futuro_filial_on",
-        "DDV_final_on", "DDV_final_off", "DDV_final_total"
-    ]
+    colunas_numericas = ["DDV_final_total"]
     
     for col in colunas_numericas:
         if col in df_pandas.columns:
@@ -643,13 +640,9 @@ if 'df_final_consolidado' in locals():
         print(f"  ✅ Parte {i+1}: {len(df_parte):,} linhas -> {nome_arquivo}")
     
     # Arquivo 2: Memorial completo (dividido em partes se necessário)
-    # Formatar colunas numéricas com vírgula como decimal
+    # Após o groupBy final, temos apenas: Chave, CdSku, CdFilial, DDV_final_total
     df_memorial_formatado = df_pandas.copy()
-    colunas_para_formatar = [
-        "demanda_diarizada_off", "demanda_diarizada_on",
-        "DDV_futuro_filial_off", "DDV_futuro_filial_on",
-        "DDV_final_on", "DDV_final_off", "DDV_final_total"
-    ]
+    colunas_para_formatar = ["DDV_final_total"]
     
     for col in colunas_para_formatar:
         if col in df_memorial_formatado.columns:
@@ -698,80 +691,57 @@ if 'df_final_consolidado' in locals():
     print("🔍 VALIDAÇÕES FINAIS")
     print("=" * 50)
     
-    # Validação 1: Verificar se todas as categorias têm dados
-    categorias_com_dados = df_final_consolidado.select("categoria").distinct().collect()
-    categorias_esperadas = list(CATEGORIAS_CONFIG.keys())
-    
-    print(f"📊 Validação 1 - Categorias com dados:")
-    for row in categorias_com_dados:
-        print(f"  ✅ {row['categoria']}")
-    
-    categorias_faltando = set(categorias_esperadas) - {row['categoria'] for row in categorias_com_dados}
-    if categorias_faltando:
-        print(f"  ❌ Categorias faltando: {categorias_faltando}")
-    
-    # Validação 2: Verificar se DDV final é positivo
+    # Após o groupBy final, temos apenas: Chave, CdSku, CdFilial, DDV_final_total
+    # Validação 1: Verificar se DDV final é positivo
     ddv_negativos = df_final_consolidado.filter(F.col("DDV_final_total") < 0).count()
-    print(f"\n📊 Validação 2 - DDV negativos: {ddv_negativos}")
+    print(f"📊 Validação 1 - DDV negativos: {ddv_negativos}")
     
-    # Validação 3: Verificar proporções reais calculadas
-    print(f"\n📊 Validação 3 - Proporções reais calculadas:")
-    for categoria in categorias_esperadas:
-        if categoria in [row['categoria'] for row in categorias_com_dados]:
-            df_cat = df_final_consolidado.filter(F.col("categoria") == categoria)
-            
-            # Pegar proporções reais calculadas
-            proporcoes = df_cat.select("proporcao_on_real", "proporcao_off_real").distinct().collect()[0]
-            prop_on_real = proporcoes['proporcao_on_real']
-            prop_off_real = proporcoes['proporcao_off_real']
-            
-            # Calcular totais para validação
-            soma_on = df_cat.agg(F.sum("DDV_final_on")).collect()[0][0]
-            soma_off = df_cat.agg(F.sum("DDV_final_off")).collect()[0][0]
-            soma_total = soma_on + soma_off
-            
-            print(f"  • {categoria}:")
-            print(f"    - Proporção ON calculada: {prop_on_real:.1%}")
-            print(f"    - Proporção OFF calculada: {prop_off_real:.1%}")
-            print(f"    - Total ON: R$ {soma_on:,.2f}")
-            print(f"    - Total OFF: R$ {soma_off:,.2f}")
-            print(f"    - Total geral: R$ {soma_total:,.2f}")
+    # Validação 2: Verificar unicidade de chaves (Chave, CdSku, CdFilial)
+    print(f"\n📊 Validação 2 - Unicidade de chaves:")
+    print("  Verificando se não há duplicação de chaves (Chave, CdSku, CdFilial)...")
     
-    # Validação 4: Verificar unicidade de chaves (grupo + SKU + filial)
-    print(f"\n📊 Validação 4 - Unicidade de chaves:")
-    print("  Verificando se não há duplicação de chaves (grupo + SKU + filial)...")
+    # Contar registros totais
+    total_registros = df_final_consolidado.count()
     
-    for categoria in categorias_esperadas:
-        if categoria in [row['categoria'] for row in categorias_com_dados]:
-            df_cat = df_final_consolidado.filter(F.col("categoria") == categoria)
-            
-            # Contar registros totais
-            total_registros = df_cat.count()
-            
-            # Contar chaves únicas (grupo + SKU + filial)
-            chaves_unicas = df_cat.select("grupo_de_necessidade", "CdSku", "CdFilial").distinct().count()
-            
-            # Verificar duplicatas
-            df_agrupado = (
-                df_cat
-                .groupBy("grupo_de_necessidade", "CdSku", "CdFilial")
-                .agg(F.count("*").alias("count_chave"))
-                .filter(F.col("count_chave") > 1)
-            )
-            duplicatas = df_agrupado.count()
-            
-            print(f"  • {categoria}:")
-            print(f"    - Total de registros: {total_registros:,}")
-            print(f"    - Chaves únicas esperadas: {chaves_unicas:,}")
-            print(f"    - Duplicatas encontradas: {duplicatas:,}")
-            
-            if duplicatas == 0:
-                print(f"    ✅ SEM DUPLICAÇÕES - Chaves únicas garantidas!")
-            else:
-                print(f"    ❌ ATENÇÃO: {duplicatas} chave(s) duplicada(s)")
-                
-                # Mostrar amostra de duplicatas
-                print(f"    📋 Amostra de chaves duplicadas:")
-                df_agrupado.select("grupo_de_necessidade", "CdSku", "CdFilial", "count_chave").display()
+    # Contar chaves únicas
+    chaves_unicas = df_final_consolidado.select("Chave", "CdSku", "CdFilial").distinct().count()
+    
+    # Verificar duplicatas
+    df_agrupado = (
+        df_final_consolidado
+        .groupBy("Chave", "CdSku", "CdFilial")
+        .agg(F.count("*").alias("count_chave"))
+        .filter(F.col("count_chave") > 1)
+    )
+    duplicatas = df_agrupado.count()
+    
+    print(f"  • Total de registros: {total_registros:,}")
+    print(f"  • Chaves únicas esperadas: {chaves_unicas:,}")
+    print(f"  • Duplicatas encontradas: {duplicatas:,}")
+    
+    if duplicatas == 0:
+        print(f"  ✅ SEM DUPLICAÇÕES - Chaves únicas garantidas!")
+    else:
+        print(f"  ❌ ATENÇÃO: {duplicatas} chave(s) duplicada(s)")
+        print(f"  📋 Amostra de chaves duplicadas:")
+        df_agrupado.select("Chave", "CdSku", "CdFilial", "count_chave").show(10, truncate=False)
+    
+    # Validação 3: Estatísticas gerais
+    print(f"\n📊 Validação 3 - Estatísticas gerais:")
+    stats = df_final_consolidado.agg(
+        F.sum("DDV_final_total").alias("total_ddv"),
+        F.avg("DDV_final_total").alias("media_ddv"),
+        F.min("DDV_final_total").alias("min_ddv"),
+        F.max("DDV_final_total").alias("max_ddv"),
+        F.countDistinct("CdSku").alias("skus_unicos"),
+        F.countDistinct("CdFilial").alias("filiais_unicas")
+    ).collect()[0]
+    
+    print(f"  • Total DDV: {stats['total_ddv']:,.2f}")
+    print(f"  • Média DDV por chave: {stats['media_ddv']:,.2f}")
+    print(f"  • Mínimo DDV: {stats['min_ddv']:,.2f}")
+    print(f"  • Máximo DDV: {stats['max_ddv']:,.2f}")
+    print(f"  • SKUs únicos: {stats['skus_unicos']:,}")
+    print(f"  • Filiais únicas: {stats['filiais_unicas']:,}")
     
     print(f"\n✅ Validações concluídas!")
