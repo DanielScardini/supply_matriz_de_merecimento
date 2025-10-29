@@ -513,6 +513,50 @@ else:
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## Agregação Final por Chave (CdSku + CdFilial)
+
+# COMMAND ----------
+
+if 'df_final_consolidado' in locals():
+    print("🔄 APLICANDO GROUPBY FINAL: SOMANDO DDV_final_total POR Chave, CdSku, CdFilial")
+    print("=" * 80)
+    
+    # Criar coluna Chave (CdSku-CdFilial)
+    df_final_consolidado = (
+        df_final_consolidado
+        .withColumn("Chave", 
+                   F.concat(
+                       F.col("CdSku").cast("string"),
+                       F.lit("-"),
+                       F.col("CdFilial").cast("string")
+                   ))
+    )
+    
+    # GroupBy por Chave, CdSku, CdFilial somando DDV_final_total
+    registros_antes_agreg = df_final_consolidado.count()
+    
+    df_final_consolidado = (
+        df_final_consolidado
+        .groupBy("Chave", "CdSku", "CdFilial")
+        .agg(
+            F.sum("DDV_final_total").alias("DDV_final_total")
+        )
+    )
+    
+    registros_depois_agreg = df_final_consolidado.count()
+    
+    print(f"  • Registros antes da agregação: {registros_antes_agreg:,}")
+    print(f"  • Registros depois da agregação: {registros_depois_agreg:,}")
+    
+    if registros_antes_agreg > registros_depois_agreg:
+        print(f"  ✅ {registros_antes_agreg - registros_depois_agreg:,} registros consolidados (DDVs somados)")
+    
+    print(f"\n📊 AMOSTRA DO RESULTADO FINAL (top 10):")
+    df_final_consolidado.orderBy(F.desc("DDV_final_total")).show(10, truncate=False)
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## Salvar Resultados em CSV
 
 # COMMAND ----------
@@ -571,9 +615,8 @@ if 'df_final_consolidado' in locals():
     MAX_LINHAS_POR_ARQUIVO = 250000
     
     # Arquivo 1: DDV Final simplificado (dividido em partes se necessário)
-    df_simplificado = df_pandas[['CdSku', 'CdFilial', 'DDV_final_total']].copy()
-    df_simplificado['Chave'] = df_simplificado['CdSku'].astype(str) + '-' + df_simplificado['CdFilial'].astype(str)
-    df_simplificado = df_simplificado[['CdSku', 'CdFilial', 'Chave', 'DDV_final_total']]
+    # A coluna Chave já foi criada no Spark antes da agregação
+    df_simplificado = df_pandas[['Chave', 'CdSku', 'CdFilial', 'DDV_final_total']].copy()
     
     # Formatar DDV_final_total com vírgula como decimal
     df_simplificado['DDV_final_total'] = df_simplificado['DDV_final_total'].apply(lambda x: f"{x:.3f}".replace('.', ','))
