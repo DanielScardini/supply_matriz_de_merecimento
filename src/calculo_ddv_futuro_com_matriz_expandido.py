@@ -421,11 +421,13 @@ for categoria, df_resultado in resultados_ddv.items():
     print(f"  • Proporção ON real: {proporcao_on_real:.1%}")
     print(f"  • Proporção OFF real: {proporcao_off_real:.1%}")
     
-    # Aplicar proporções reais calculadas
+    # CORREÇÃO: Não multiplicar DDVs pelas proporções - isso reduz os valores incorretamente
+    # Os DDVs já estão calculados corretamente (demanda_diarizada * merecimento)
+    # As proporções são apenas informativas para análise
     df_com_proporcoes = (
         df_resultado
-        .withColumn("DDV_final_on", F.round(F.col("DDV_futuro_filial_on") * proporcao_on_real, 3))
-        .withColumn("DDV_final_off", F.round(F.col("DDV_futuro_filial_off") * proporcao_off_real, 3))
+        .withColumn("DDV_final_on", F.round(F.col("DDV_futuro_filial_on"), 3))
+        .withColumn("DDV_final_off", F.round(F.col("DDV_futuro_filial_off"), 3))
         .withColumn("DDV_final_total", F.round(F.col("DDV_final_on") + F.col("DDV_final_off"), 3))
         .withColumn("categoria", F.lit(categoria))
         .withColumn("proporcao_on_real", F.lit(proporcao_on_real))
