@@ -347,16 +347,17 @@ dfs_consolidados = []
 for categoria, df_resultado in resultados_ddv.items():
     print(f"\n📊 Processando {categoria}:")
     
-    # IMPORTANTE: Agrupar por chaves únicas e somar DDVs duplicados
-    # Isso garante que se houver duplicatas na tabela de merecimento, elas sejam consolidadas
+    # IMPORTANTE: Agrupar por chaves únicas
+    # Se houver duplicatas: somar DDVs (podem vir de múltiplas linhas na tabela merecimento)
+    # Mas demandas devem ser únicas (não somar, usar first/max)
     df_resultado_unicos = (
         df_resultado
         .groupBy("grupo_de_necessidade", "CdSku", "CdFilial")
         .agg(
             F.sum("DDV_futuro_filial_on").alias("DDV_futuro_filial_on"),
             F.sum("DDV_futuro_filial_off").alias("DDV_futuro_filial_off"),
-            F.sum("demanda_diarizada_on").alias("demanda_diarizada_on"),
-            F.sum("demanda_diarizada_off").alias("demanda_diarizada_off"),
+            F.max("demanda_diarizada_on").alias("demanda_diarizada_on"),  # Não somar, pegar max
+            F.max("demanda_diarizada_off").alias("demanda_diarizada_off"),  # Não somar, pegar max
             F.sum("DDV_futuro_filial_merecimento").alias("DDV_futuro_filial_merecimento")
         )
     )
@@ -415,20 +416,22 @@ if dfs_consolidados:
     for df in dfs_consolidados[1:]:
         df_final_consolidado = df_final_consolidado.union(df)
     
-    # IMPORTANTE: Consolidar duplicatas SOMANDO os valores numéricos
+    # IMPORTANTE: Consolidar duplicatas
+    # Demandas devem ser únicas (max) - não somar
+    # DDVs podem ser somados se vieram de múltiplas linhas na tabela merecimento
     registros_antes = df_final_consolidado.count()
     
     df_final_consolidado = (
         df_final_consolidado
         .groupBy("categoria", "grupo_de_necessidade", "CdSku", "CdFilial", "proporcao_on_real", "proporcao_off_real")
         .agg(
-            F.sum("demanda_diarizada_off").alias("demanda_diarizada_off"),
-            F.sum("demanda_diarizada_on").alias("demanda_diarizada_on"),
-            F.sum("DDV_futuro_filial_off").alias("DDV_futuro_filial_off"),
-            F.sum("DDV_futuro_filial_on").alias("DDV_futuro_filial_on"),
-            F.sum("DDV_final_on").alias("DDV_final_on"),
-            F.sum("DDV_final_off").alias("DDV_final_off"),
-            F.sum("DDV_final_total").alias("DDV_final_total")
+            F.max("demanda_diarizada_off").alias("demanda_diarizada_off"),  # Única, não somar
+            F.max("demanda_diarizada_on").alias("demanda_diarizada_on"),  # Única, não somar
+            F.sum("DDV_futuro_filial_off").alias("DDV_futuro_filial_off"),  # Pode somar se duplicado
+            F.sum("DDV_futuro_filial_on").alias("DDV_futuro_filial_on"),  # Pode somar se duplicado
+            F.sum("DDV_final_on").alias("DDV_final_on"),  # Pode somar se duplicado
+            F.sum("DDV_final_off").alias("DDV_final_off"),  # Pode somar se duplicado
+            F.sum("DDV_final_total").alias("DDV_final_total")  # Pode somar se duplicado
         )
     )
     
