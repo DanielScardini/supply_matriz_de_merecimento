@@ -311,6 +311,78 @@ metrics_all.orderBy("categoria", "modelo").display()
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Parâmetros de Exibição - wMAPE
+# MAGIC 
+# MAGIC Configure quais modelos deseja exibir e o filtro de volume mínimo para grupos
+
+# COMMAND ----------
+
+# Modelos a exibir no pivot (fácil de alterar)
+MODELOS_EXIBIR = [
+    "Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura",
+    "PercMatrizNeogrid"
+]
+
+# Filtro de volume mínimo para grupos (em peças)
+VOLUME_MINIMO_GRUPO = 1000
+
+print(f"🔧 Configuração de Exibição:")
+print(f"  • Modelos a exibir: {len(MODELOS_EXIBIR)}")
+for m in MODELOS_EXIBIR:
+    print(f"    - {m}")
+print(f"  • Volume mínimo para grupos: {VOLUME_MINIMO_GRUPO:,} peças")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Tabela Pivotada - Métricas Agregadas por Categoria
+# MAGIC 
+# MAGIC Tabela pivotada com wMAPE por categoria (agregado geral)
+
+# COMMAND ----------
+
+# Filtrar apenas modelos selecionados e coluna WMAPE
+metrics_filtrado = (
+    metrics_all
+    .filter(F.col("modelo").isin(MODELOS_EXIBIR))
+    .select("categoria", "modelo", "WMAPE")
+)
+
+# Obter modelos existentes
+modelos_disponiveis_cat = [row[0] for row in metrics_filtrado.select("modelo").distinct().collect()]
+modelos_existentes_cat = [m for m in MODELOS_EXIBIR if m in modelos_disponiveis_cat]
+
+if modelos_existentes_cat:
+    # Pivot por modelo - categoria como linha
+    df_metrics_pivot = (
+        metrics_filtrado
+        .groupBy("categoria")
+        .pivot("modelo", modelos_existentes_cat)
+        .agg(F.first("WMAPE"))
+        .na.fill(0.0)
+    )
+    
+    # Renomear colunas
+    for modelo in modelos_existentes_cat:
+        if modelo in df_metrics_pivot.columns:
+            nome_simples = modelo.replace("Merecimento_Final_", "").replace("MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada90")
+            nome_simples = nome_simples.replace("PercMatrizNeogrid", "Neogrid")
+            df_metrics_pivot = df_metrics_pivot.withColumnRenamed(modelo, f"wMAPE_{nome_simples}")
+    
+    # Select final
+    colunas_fixas_cat = ["categoria"]
+    colunas_wmape_cat = [c for c in df_metrics_pivot.columns if c.startswith("wMAPE_")]
+    colunas_select_cat = colunas_fixas_cat + sorted(colunas_wmape_cat)
+    
+    df_metrics_pivot_final = df_metrics_pivot.select(*colunas_select_cat)
+    
+    print(f"📊 TABELA PIVOTADA - wMAPE Agregado por Categoria ({len(modelos_existentes_cat)} modelos)")
+    print("=" * 80)
+    df_metrics_pivot_final.orderBy("categoria").display()
+
+# COMMAND ----------
+
 from pyspark.sql import functions as F, Window as W
 
 # === Constantes ===
@@ -362,6 +434,8 @@ for categoria in categorias_teste:
         df_aug
         .groupBy(GROUP_COL)
         .agg(*aggs, F.max("Volume").alias("Volume"))
+        # Aplicar filtro de volume mínimo para grupos
+        .filter(F.col("Volume") >= VOLUME_MINIMO_GRUPO)
         .select(
             F.col(GROUP_COL).alias("grupo"),
             "Volume",
@@ -392,6 +466,65 @@ for categoria in categorias_teste:
 
 # Apenas grupos existentes, sem linhas de TOTAL
 wmape_all.orderBy("categoria", "grupo", "modelo").display()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Tabela Pivotada - wMAPE por Modelo
+# MAGIC 
+# MAGIC Tabela pivotada com wMAPE dos modelos selecionados, agrupada por categoria/grupo
+
+# COMMAND ----------
+
+# Filtrar apenas modelos que devem ser exibidos
+wmape_filtrado = (
+    wmape_all
+    .filter(F.col("modelo").isin(MODELOS_EXIBIR))
+)
+
+# Criar pivot: linhas = categoria/grupo, colunas = modelos
+# Obter lista de modelos que existem no DataFrame filtrado
+modelos_disponiveis = [row[0] for row in wmape_filtrado.select("modelo").distinct().collect()]
+modelos_existentes = [m for m in MODELOS_EXIBIR if m in modelos_disponiveis]
+
+if modelos_existentes:
+    # Criar coluna "agregacao" que será grupo (ou categoria se grupo for null)
+    wmape_com_agregacao = wmape_filtrado.withColumn(
+        "agregacao",
+        F.coalesce(F.col("grupo"), F.col("categoria"))
+    )
+    
+    # Pivot por modelo (as colunas serão os nomes dos modelos)
+    df_wmape_pivot = (
+        wmape_com_agregacao
+        .groupBy("agregacao", "categoria", "Volume")
+        .pivot("modelo", modelos_existentes)
+        .agg(F.first("WMAPE"))
+        .na.fill(0.0)  # Preencher nulos com 0
+    )
+    
+    # Renomear colunas para facilitar leitura (remover partes longas do nome)
+    for modelo in modelos_existentes:
+        if modelo in df_wmape_pivot.columns:
+            nome_simples = modelo.replace("Merecimento_Final_", "").replace("MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada90")
+            nome_simples = nome_simples.replace("PercMatrizNeogrid", "Neogrid")
+            df_wmape_pivot = df_wmape_pivot.withColumnRenamed(modelo, f"wMAPE_{nome_simples}")
+    
+    # Select final: escolher apenas colunas desejadas
+    # Manter agregacao, categoria, Volume e todas as colunas wMAPE
+    colunas_fixas = ["agregacao", "categoria", "Volume"]
+    colunas_wmape = [c for c in df_wmape_pivot.columns if c.startswith("wMAPE_")]
+    colunas_select = colunas_fixas + sorted(colunas_wmape)
+    
+    df_wmape_pivot_final = df_wmape_pivot.select(*colunas_select)
+    
+    print(f"📊 TABELA PIVOTADA - wMAPE por Modelo ({len(modelos_existentes)} modelos)")
+    print("=" * 80)
+    df_wmape_pivot_final.orderBy("categoria", "agregacao").display()
+else:
+    print(f"⚠️ Nenhum dos modelos selecionados foi encontrado!")
+    print(f"   Modelos disponíveis: {modelos_disponiveis}")
+    print(f"   Modelos solicitados: {MODELOS_EXIBIR}")
 
 # COMMAND ----------
 
