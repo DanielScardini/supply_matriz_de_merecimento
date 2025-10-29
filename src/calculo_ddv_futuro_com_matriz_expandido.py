@@ -431,52 +431,69 @@ dfs_consolidados = []
 for categoria, df_resultado in resultados_ddv.items():
     print(f"\n📊 Processando {categoria}:")
     
-    # Calcular proporções reais baseadas nos dados das tabelas ON e OFF
-    total_on = df_resultado.agg(F.sum("DDV_futuro_filial_on")).collect()[0][0]
-    total_off = df_resultado.agg(F.sum("DDV_futuro_filial_off")).collect()[0][0]
-    total_geral = total_on + total_off
-    
-    if total_geral > 0:
-        proporcao_on_real = total_on / total_geral
-        proporcao_off_real = total_off / total_geral
-    else:
-        proporcao_on_real = 0.0
-        proporcao_off_real = 0.0
-    
-    print(f"  • Proporção ON real: {proporcao_on_real:.1%}")
-    print(f"  • Proporção OFF real: {proporcao_off_real:.1%}")
-    
-    # CORREÇÃO: Não multiplicar DDVs pelas proporções - isso reduz os valores incorretamente
-    # Os DDVs já estão calculados corretamente (demanda_diarizada * merecimento)
-    # As proporções são apenas informativas para análise
-    df_com_proporcoes = (
-        df_resultado
-        .withColumn("DDV_final_on", F.round(F.col("DDV_futuro_filial_on"), 3))
-        .withColumn("DDV_final_off", F.round(F.col("DDV_futuro_filial_off"), 3))
-        .withColumn("DDV_final_total", F.round(F.col("DDV_final_on") + F.col("DDV_final_off"), 3))
-        .withColumn("categoria", F.lit(categoria))
-        .withColumn("proporcao_on_real", F.lit(proporcao_on_real))
-        .withColumn("proporcao_off_real", F.lit(proporcao_off_real))
-        .select(
-            "categoria",
-            "grupo_de_necessidade", 
-            "CdSku", 
-            "CdFilial",
-            "demanda_diarizada_off",
-            "demanda_diarizada_on",
-            "DDV_futuro_filial_off",
-            "DDV_futuro_filial_on", 
-            "DDV_final_on",
-            "DDV_final_off",
-            "DDV_final_total",
-            "proporcao_on_real",
-            "proporcao_off_real"
+    try:
+        # Verificar se as colunas existem
+        colunas_disponiveis = df_resultado.columns
+        print(f"  • Colunas disponíveis: {', '.join(colunas_disponiveis[:10])}...")
+        
+        if "DDV_futuro_filial_on" not in colunas_disponiveis or "DDV_futuro_filial_off" not in colunas_disponiveis:
+            print(f"  ⚠️ Colunas DDV_futuro_filial_on ou DDV_futuro_filial_off não encontradas!")
+            print(f"     Colunas encontradas: {colunas_disponiveis}")
+            continue
+        
+        # Calcular proporções reais baseadas nos dados das tabelas ON e OFF
+        total_on = df_resultado.agg(F.sum("DDV_futuro_filial_on")).collect()[0][0] or 0.0
+        total_off = df_resultado.agg(F.sum("DDV_futuro_filial_off")).collect()[0][0] or 0.0
+        total_geral = total_on + total_off
+        
+        if total_geral > 0:
+            proporcao_on_real = total_on / total_geral
+            proporcao_off_real = total_off / total_geral
+        else:
+            proporcao_on_real = 0.0
+            proporcao_off_real = 0.0
+        
+        print(f"  • Proporção ON real: {proporcao_on_real:.1%}")
+        print(f"  • Proporção OFF real: {proporcao_off_real:.1%}")
+        
+        # CORREÇÃO: Não multiplicar DDVs pelas proporções - isso reduz os valores incorretamente
+        # Os DDVs já estão calculados corretamente (demanda_diarizada * merecimento)
+        # As proporções são apenas informativas para análise
+        df_com_proporcoes = (
+            df_resultado
+            .withColumn("DDV_final_on", F.round(F.col("DDV_futuro_filial_on"), 3))
+            .withColumn("DDV_final_off", F.round(F.col("DDV_futuro_filial_off"), 3))
+            .withColumn("DDV_final_total", F.round(F.col("DDV_final_on") + F.col("DDV_final_off"), 3))
+            .withColumn("categoria", F.lit(categoria))
+            .withColumn("proporcao_on_real", F.lit(proporcao_on_real))
+            .withColumn("proporcao_off_real", F.lit(proporcao_off_real))
+            .select(
+                "categoria",
+                "grupo_de_necessidade", 
+                "CdSku", 
+                "CdFilial",
+                "demanda_diarizada_off",
+                "demanda_diarizada_on",
+                "DDV_futuro_filial_off",
+                "DDV_futuro_filial_on", 
+                "DDV_final_on",
+                "DDV_final_off",
+                "DDV_final_total",
+                "proporcao_on_real",
+                "proporcao_off_real"
+            )
         )
-    )
-    
-    dfs_consolidados.append(df_com_proporcoes)
-    
-    print(f"  • Registros com proporções: {df_com_proporcoes.count():,}")
+        
+        dfs_consolidados.append(df_com_proporcoes)
+        
+        print(f"  • Registros com proporções: {df_com_proporcoes.count():,}")
+    except Exception as e:
+        print(f"  ❌ Erro ao processar {categoria} na consolidação: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        continue
+
+print(f"\n📊 Total de categorias consolidadas: {len(dfs_consolidados)}")
 
 # Unir todos os DataFrames
 if dfs_consolidados:
