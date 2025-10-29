@@ -213,11 +213,11 @@ def calcular_ddv_categoria(categoria: str, tipo_dados: str) -> DataFrame:
     
     print(f"  • Após join com de-para: {df_com_grupos.count():,} registros")
     
-    # Calcular demanda diarizada
-    # IMPORTANTE: Incluir CdFilial na agregação para permitir join correto
+    # Calcular demanda diarizada TOTAL (sem filial) por grupo+SKU
+    # Depois distribuiremos por filial via merecimento
     df_demanda = (
         df_com_grupos
-        .groupBy("grupo_de_necessidade", "CdSku", "CdFilial")
+        .groupBy("grupo_de_necessidade", "CdSku")
         .agg(
             F.round(F.sum(F.col('QtMercadoria') + F.col("deltaRuptura")), 3).alias("demanda_total"),
             F.countDistinct("DtAtual").alias("dias"),
@@ -228,9 +228,9 @@ def calcular_ddv_categoria(categoria: str, tipo_dados: str) -> DataFrame:
     )
     
     # Join com matriz de merecimento
-    # IMPORTANTE: Incluir grupo_de_necessidade no join para evitar duplicação
+    # IMPORTANTE: Join por grupo+SKU (sem filial) para distribuir demanda TOTAL por filial
     df_merecimento = spark.table(tabela_merecimento).select(
-        "grupo_de_necessidade",  # <- ADICIONADO para garantir unicidade
+        "grupo_de_necessidade",
         "CdSku", 
         "CdFilial",
         F.col("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura").alias("merecimento_final")
@@ -240,7 +240,7 @@ def calcular_ddv_categoria(categoria: str, tipo_dados: str) -> DataFrame:
         df_demanda
         .join(
             df_merecimento, 
-            on=["grupo_de_necessidade", "CdSku", "CdFilial"],  # <- Join por 3 chaves
+            on=["grupo_de_necessidade", "CdSku"],  # Join por 2 chaves - distribui demanda total por filial
             how="inner"
         )
         .withColumn("DDV_futuro_filial",
