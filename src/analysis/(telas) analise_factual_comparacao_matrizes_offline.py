@@ -56,7 +56,7 @@ GRUPOS_REMOVER = ['Chip', 'FORA DE LINHA', 'SEM_GN']
 data_inicio = "2025-08-29"
 fim_baseline = "2025-09-05"
 
-inicio_teste = "2025-09-05"
+inicio_teste = "2025-10-20"
 
 categorias_teste = ['DE_TELAS']
 
@@ -332,7 +332,7 @@ metrics_all.orderBy("categoria", "modelo").display()
 
 # MAGIC %md
 # MAGIC ## Parâmetros de Exibição - wSMAPE
-# MAGIC 
+# MAGIC
 # MAGIC Configure quais modelos deseja exibir e o filtro de volume mínimo para grupos
 
 # COMMAND ----------
@@ -356,7 +356,7 @@ print(f"  • Volume mínimo para grupos: {VOLUME_MINIMO_GRUPO:,} peças")
 
 # MAGIC %md
 # MAGIC ## Tabela Pivotada - Métricas Agregadas por Categoria
-# MAGIC 
+# MAGIC
 # MAGIC Tabela pivotada com wSMAPE por categoria (agregado geral)
 
 # COMMAND ----------
@@ -490,7 +490,7 @@ wmape_all.orderBy("categoria", "grupo", "modelo").display()
 
 # MAGIC %md
 # MAGIC ## Tabela Pivotada - wSMAPE por Modelo
-# MAGIC 
+# MAGIC
 # MAGIC Tabela pivotada com wSMAPE dos modelos selecionados, agrupada por categoria/grupo
 
 # COMMAND ----------
