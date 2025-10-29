@@ -216,7 +216,7 @@ def calcular_ddv_categoria(categoria: str, tipo_dados: str) -> DataFrame:
     # FILTRO: Apenas lojas (não CDs)
     # Carregar tabela de lojas ativas para filtrar apenas lojas
     print(f"  📊 Carregando tabela de lojas ativas para filtrar apenas lojas (não CDs)...")
-    df_lojas_ativas = spark.table("data_engineering_prd.app_operacoes_loja.roteirizacaolojaativa").select("CdFilial").distinct()
+    df_lojas_ativas = spark.table("data_engineering_prd.app_operacoesloja.roteirizacaolojaativa").select("CdFilial").distinct()
     total_lojas = df_lojas_ativas.count()
     print(f"  • Lojas ativas encontradas: {total_lojas:,}")
     
