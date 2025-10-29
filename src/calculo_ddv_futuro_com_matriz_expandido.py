@@ -331,6 +331,9 @@ for categoria in CATEGORIAS_CONFIG.keys():
         # Calcular DDV online  
         df_on = calcular_ddv_categoria(categoria, 'on')
         
+        print(f"  • Registros offline: {df_off.count():,}")
+        print(f"  • Registros online: {df_on.count():,}")
+        
         # Adicionar sufixos para distinguir offline/online
         chaves = ["grupo_de_necessidade", "CdSku", "CdFilial"]
         
@@ -342,12 +345,30 @@ for categoria in CATEGORIAS_CONFIG.keys():
             *[c if c in chaves else f"{c}_on" for c in df_on.columns]
         )
         
-        # Join offline + online
+        # Join offline + online usando full_outer para manter todos os registros
+        # Se offline não tiver dados, manter apenas online (e vice-versa)
         df_consolidado = (
             df_off_sufixo
-            .join(df_on_sufixo, on=["grupo_de_necessidade", "CdSku", "CdFilial"], how="inner")
-            .withColumn("DDV_futuro_filial_merecimento",
-                       F.round(F.col("DDV_futuro_filial_off") + F.col("DDV_futuro_filial_on"), 3))
+            .join(df_on_sufixo, on=["grupo_de_necessidade", "CdSku", "CdFilial"], how="full_outer")
+        )
+        
+        # Identificar colunas numéricas para preencher nulos com 0
+        colunas_off = [c for c in df_off_sufixo.columns if c not in chaves]
+        colunas_on = [c for c in df_on_sufixo.columns if c not in chaves]
+        colunas_para_preencher = colunas_off + colunas_on
+        
+        # Preencher valores nulos (quando um lado não tem dados) com 0
+        if colunas_para_preencher:
+            df_consolidado = df_consolidado.fillna(0.0, subset=colunas_para_preencher)
+        
+        # Calcular DDV total (off + on)
+        df_consolidado = df_consolidado.withColumn(
+            "DDV_futuro_filial_merecimento",
+            F.round(
+                F.coalesce(F.col("DDV_futuro_filial_off"), F.lit(0.0)) + 
+                F.coalesce(F.col("DDV_futuro_filial_on"), F.lit(0.0)), 
+                3
+            )
         )
         
         resultados_ddv[categoria] = df_consolidado
