@@ -323,7 +323,7 @@ metrics_all.orderBy("categoria", "modelo").display()
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Parâmetros de Exibição - wMAPE
+# MAGIC ## Parâmetros de Exibição - wSMAPE
 # MAGIC 
 # MAGIC Configure quais modelos deseja exibir e o filtro de volume mínimo para grupos
 
@@ -349,15 +349,15 @@ print(f"  • Volume mínimo para grupos: {VOLUME_MINIMO_GRUPO:,} peças")
 # MAGIC %md
 # MAGIC ## Tabela Pivotada - Métricas Agregadas por Categoria
 # MAGIC 
-# MAGIC Tabela pivotada com wMAPE por categoria (agregado geral)
+# MAGIC Tabela pivotada com wSMAPE por categoria (agregado geral)
 
 # COMMAND ----------
 
-# Filtrar apenas modelos selecionados e coluna WMAPE
+# Filtrar apenas modelos selecionados e coluna WSMAPE
 metrics_filtrado = (
     metrics_all
     .filter(F.col("modelo").isin(MODELOS_EXIBIR))
-    .select("categoria", "modelo", "WMAPE")
+    .select("categoria", "modelo", "WSMAPE")
 )
 
 # Obter modelos existentes
@@ -370,7 +370,7 @@ if modelos_existentes_cat:
         metrics_filtrado
         .groupBy("categoria")
         .pivot("modelo", modelos_existentes_cat)
-        .agg(F.first("WMAPE"))
+        .agg(F.first("WSMAPE"))
         .na.fill(0.0)
     )
     
@@ -379,16 +379,16 @@ if modelos_existentes_cat:
         if modelo in df_metrics_pivot.columns:
             nome_simples = modelo.replace("Merecimento_Final_", "").replace("MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada90")
             nome_simples = nome_simples.replace("PercMatrizNeogrid", "Neogrid")
-            df_metrics_pivot = df_metrics_pivot.withColumnRenamed(modelo, f"wMAPE_{nome_simples}")
+            df_metrics_pivot = df_metrics_pivot.withColumnRenamed(modelo, f"wSMAPE_{nome_simples}")
     
     # Select final
     colunas_fixas_cat = ["categoria"]
-    colunas_wmape_cat = [c for c in df_metrics_pivot.columns if c.startswith("wMAPE_")]
+    colunas_wmape_cat = [c for c in df_metrics_pivot.columns if c.startswith("wSMAPE_")]
     colunas_select_cat = colunas_fixas_cat + sorted(colunas_wmape_cat)
     
     df_metrics_pivot_final = df_metrics_pivot.select(*colunas_select_cat)
     
-    print(f"📊 TABELA PIVOTADA - wMAPE Agregado por Categoria ({len(modelos_existentes_cat)} modelos)")
+    print(f"📊 TABELA PIVOTADA - wSMAPE Agregado por Categoria ({len(modelos_existentes_cat)} modelos)")
     print("=" * 80)
     df_metrics_pivot_final.orderBy("categoria").display()
 
@@ -437,7 +437,7 @@ for categoria in categorias_teste:
                 F.lit(categoria).alias("categoria"),
                 F.col(GROUP_COL).alias("grupo"),
                 F.lit(c).alias("modelo"),
-                F.round(wmape_expr(c), 4).alias("WMAPE")
+                F.round(wmape_expr(c), 4).alias("WSMAPE")
             ).alias(name)
         )
 
@@ -457,7 +457,7 @@ for categoria in categorias_teste:
             F.lit(categoria).alias("categoria"),
             "grupo",
             F.col("m.modelo").alias("modelo"),
-            F.col("m.WMAPE").alias("WMAPE"),
+            F.col("m.WSMAPE").alias("WSMAPE"),
             "Volume"
         )
     )
@@ -481,9 +481,9 @@ wmape_all.orderBy("categoria", "grupo", "modelo").display()
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Tabela Pivotada - wMAPE por Modelo
+# MAGIC ## Tabela Pivotada - wSMAPE por Modelo
 # MAGIC 
-# MAGIC Tabela pivotada com wMAPE dos modelos selecionados, agrupada por categoria/grupo
+# MAGIC Tabela pivotada com wSMAPE dos modelos selecionados, agrupada por categoria/grupo
 
 # COMMAND ----------
 
@@ -510,7 +510,7 @@ if modelos_existentes:
         wmape_com_agregacao
         .groupBy("agregacao", "categoria", "Volume")
         .pivot("modelo", modelos_existentes)
-        .agg(F.first("WMAPE"))
+        .agg(F.first("WSMAPE"))
         .na.fill(0.0)  # Preencher nulos com 0
     )
     
@@ -519,17 +519,17 @@ if modelos_existentes:
         if modelo in df_wmape_pivot.columns:
             nome_simples = modelo.replace("Merecimento_Final_", "").replace("MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada90")
             nome_simples = nome_simples.replace("PercMatrizNeogrid", "Neogrid")
-            df_wmape_pivot = df_wmape_pivot.withColumnRenamed(modelo, f"wMAPE_{nome_simples}")
+            df_wmape_pivot = df_wmape_pivot.withColumnRenamed(modelo, f"wSMAPE_{nome_simples}")
     
     # Select final: escolher apenas colunas desejadas
-    # Manter agregacao, categoria, Volume e todas as colunas wMAPE
+    # Manter agregacao, categoria, Volume e todas as colunas wSMAPE
     colunas_fixas = ["agregacao", "categoria", "Volume"]
-    colunas_wmape = [c for c in df_wmape_pivot.columns if c.startswith("wMAPE_")]
+    colunas_wmape = [c for c in df_wmape_pivot.columns if c.startswith("wSMAPE_")]
     colunas_select = colunas_fixas + sorted(colunas_wmape)
     
     df_wmape_pivot_final = df_wmape_pivot.select(*colunas_select)
     
-    print(f"📊 TABELA PIVOTADA - wMAPE por Modelo ({len(modelos_existentes)} modelos)")
+    print(f"📊 TABELA PIVOTADA - wSMAPE por Modelo ({len(modelos_existentes)} modelos)")
     print("=" * 80)
     df_wmape_pivot_final.orderBy("categoria", "agregacao").display()
 else:

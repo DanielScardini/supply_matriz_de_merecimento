@@ -408,7 +408,7 @@ for categoria in categorias_teste:
                         100.0 * F.sum(F.abs(F.col(c) - F.col(COL_REAL))) / F.sum(F.abs(F.col(COL_REAL)))
                     ),
                     4
-                ).alias("WMAPE")
+                ).alias("WSMAPE")
             ).alias(c)  # nome temporário
         )
 
@@ -472,7 +472,7 @@ for categoria in categorias_teste:
                 F.lit(categoria).alias("categoria"),
                 F.col(GROUP_COL).alias("grupo"),
                 F.lit(c).alias("modelo"),
-                F.round(wmape_expr(c), 4).alias("WMAPE")
+                F.round(wmape_expr(c), 4).alias("WSMAPE")
             ).alias(name)
         )
 
@@ -490,7 +490,7 @@ for categoria in categorias_teste:
             F.lit(categoria).alias("categoria"),
             "grupo",
             F.col("m.modelo").alias("modelo"),
-            F.col("m.WMAPE").alias("WMAPE"),
+            F.col("m.WSMAPE").alias("WSMAPE"),
             "Volume"
         )
     )
