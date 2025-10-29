@@ -88,14 +88,17 @@ df_demanda = (
 
 )
 
-especies_top80 = (
-    df_demanda
-    .filter(F.col("PercDemandaCumulativo") <= 80)
-    #.filter(F.col("NmEspecieGerencial") != 'SANDUICHEIRAS')
-    .select("NmEspecieGerencial")
-    .rdd.flatMap(lambda x: x)
-    .collect()
-)
+especies_top80 = [
+    row["NmEspecieGerencial"] 
+    for row in (
+        df_demanda
+        .filter(F.col("PercDemandaCumulativo") <= 80)
+        #.filter(F.col("NmEspecieGerencial") != 'SANDUICHEIRAS')
+        .select("NmEspecieGerencial")
+        .distinct()
+        .collect()
+    )
+]
 
 
 print(especies_top80)
@@ -112,18 +115,21 @@ especies_boas = [
     "CAFETEIRA ELETRICA (FILTRO)"
 ]
 
-skus_especies_top80 = (
-    spark.table('data_engineering_prd.app_venda.mercadoria')
-    .select(
-        F.col("CdSkuLoja").alias("CdSku"),
-        F.col("NmEspecieGerencial")
+skus_especies_top80 = [
+    row["CdSku"] 
+    for row in (
+        spark.table('data_engineering_prd.app_venda.mercadoria')
+        .select(
+            F.col("CdSkuLoja").alias("CdSku"),
+            F.col("NmEspecieGerencial")
+        )
+        .filter(F.col("NmEspecieGerencial").isin(especies_top80))
+        .filter(F.col("CdSku") != -1)
+        .select("CdSku")
+        .distinct()
+        .collect()
     )
-    .filter(F.col("NmEspecieGerencial").isin(especies_top80))
-    .filter(F.col("CdSku") != -1)
-    .select("CdSku")
-    .rdd.flatMap(lambda x: x)
-    .collect()
-)
+]
 
 df_demanda.filter(F.col("NmEspecieGerencial").isin(especies_top80)).agg(F.sum("PercDemanda")).display()
 
