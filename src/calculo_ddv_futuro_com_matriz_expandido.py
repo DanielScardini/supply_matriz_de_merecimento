@@ -213,13 +213,29 @@ def calcular_ddv_categoria(categoria: str, tipo_dados: str) -> DataFrame:
     
     print(f"  • Após join com de-para: {df_com_grupos.count():,} registros")
     
+    # FILTRO: Apenas lojas (não CDs)
+    # Carregar tabela de lojas ativas para filtrar apenas lojas
+    print(f"  📊 Carregando tabela de lojas ativas para filtrar apenas lojas (não CDs)...")
+    df_lojas_ativas = spark.table("data_engineering_prd.app_operacoes_loja.roteirizacaolojaativa").select("CdFilial").distinct()
+    total_lojas = df_lojas_ativas.count()
+    print(f"  • Lojas ativas encontradas: {total_lojas:,}")
+    
+    # Filtrar df_com_grupos para incluir apenas lojas
+    df_com_grupos = df_com_grupos.join(
+        df_lojas_ativas,
+        on="CdFilial",
+        how="inner"
+    )
+    
+    print(f"  • Após filtro de lojas: {df_com_grupos.count():,} registros (apenas lojas, sem CDs)")
+    
     # LÓGICA CORRETA:
-    # 1. Somar demanda TOTAL por SKU a nível CIA (todas as filiais juntas) nos últimos N dias
+    # 1. Somar demanda TOTAL por SKU a nível CIA (apenas lojas, sem CDs) nos últimos N dias
     # 2. Diarizar essa demanda total (dividindo por dias úteis, excluindo domingos)
     # 3. Multiplicar demanda diarizada TOTAL pelo merecimento de cada filial por grupo
-    #    para obter demanda diarizada POR FILIAL
+    #    para obter demanda diarizada POR FILIAL (apenas lojas)
     
-    print(f"  📊 Calculando demanda TOTAL a nível CIA por grupo+SKU...")
+    print(f"  📊 Calculando demanda TOTAL a nível CIA por grupo+SKU (apenas lojas)...")
     df_demanda = (
         df_com_grupos
         .groupBy("grupo_de_necessidade", "CdSku")  # SEM CdFilial - demanda TOTAL a nível CIA
@@ -239,12 +255,21 @@ def calcular_ddv_categoria(categoria: str, tipo_dados: str) -> DataFrame:
     
     # Carregar matriz de merecimento
     # IMPORTANTE: merecimento é por filial+grupo+SKU e representa a proporção/distribuição
-    print(f"  📊 Carregando matriz de merecimento...")
-    df_merecimento = spark.table(tabela_merecimento).select(
-        "grupo_de_necessidade",  # <- ADICIONADO para garantir unicidade
-        "CdSku", 
-        "CdFilial",
-        F.col("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura").alias("merecimento_final")
+    # FILTRO: Apenas lojas (não CDs) no merecimento também
+    print(f"  📊 Carregando matriz de merecimento (apenas lojas)...")
+    df_merecimento = (
+        spark.table(tabela_merecimento)
+        .select(
+            "grupo_de_necessidade",  # <- ADICIONADO para garantir unicidade
+            "CdSku", 
+            "CdFilial",
+            F.col("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura").alias("merecimento_final")
+        )
+        .join(
+            df_lojas_ativas,
+            on="CdFilial",
+            how="inner"
+        )
     )
     
     # Validar formato do merecimento (verificar se é percentual 0-100 ou decimal 0-1)
