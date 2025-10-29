@@ -457,15 +457,20 @@ if dfs_consolidados:
     for df in dfs_consolidados[1:]:
         df_final_consolidado = df_final_consolidado.union(df)
     
-    # IMPORTANTE: Consolidar duplicatas SOMANDO os valores numéricos
+    # IMPORTANTE: Consolidar duplicatas
+    # demanda_diarizada é única por grupo+SKU (usa MAX)
+    # DDVs podem ser somados se houver duplicatas
     registros_antes = df_final_consolidado.count()
     
     df_final_consolidado = (
         df_final_consolidado
         .groupBy("categoria", "grupo_de_necessidade", "CdSku", "CdFilial", "proporcao_on_real", "proporcao_off_real")
         .agg(
-            F.sum("demanda_diarizada_off").alias("demanda_diarizada_off"),
-            F.sum("demanda_diarizada_on").alias("demanda_diarizada_on"),
+            # CORREÇÃO: demanda_diarizada é única por grupo+SKU, NÃO deve ser somada
+            # Se houver duplicatas, usar MAX (ou FIRST) para pegar o valor único
+            F.max("demanda_diarizada_off").alias("demanda_diarizada_off"),
+            F.max("demanda_diarizada_on").alias("demanda_diarizada_on"),
+            # DDVs devem ser SOMADOS se houver duplicatas
             F.sum("DDV_futuro_filial_off").alias("DDV_futuro_filial_off"),
             F.sum("DDV_futuro_filial_on").alias("DDV_futuro_filial_on"),
             F.sum("DDV_final_on").alias("DDV_final_on"),
@@ -477,7 +482,7 @@ if dfs_consolidados:
     registros_depois = df_final_consolidado.count()
     
     if registros_antes > registros_depois:
-        print(f"  ⚠️ {registros_antes - registros_depois:,} duplicatas consolidadas (valores SOMADOS)!")
+        print(f"  ⚠️ {registros_antes - registros_depois:,} duplicatas consolidadas (demanda_diarizada: MAX, DDVs: SUM)!")
     
     print(f"\n🎯 RESULTADO FINAL CONSOLIDADO:")
     print(f"  • Total de registros: {df_final_consolidado.count():,}")
