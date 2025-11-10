@@ -16,14 +16,6 @@
 
 # COMMAND ----------
 
-# MAGIC %sql SELECT * FROM databox.logistica_comum.gestao_avista
-
-# COMMAND ----------
-
-# MAGIC %sql SELECT * FROM databox.bcg_comum.supply_base_merecimento_diario_v4
-
-# COMMAND ----------
-
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F, Window
 from datetime import datetime, timedelta, date
@@ -46,7 +38,7 @@ print(GRUPOS_TESTE)
 data_inicio = "2025-08-29"
 fim_baseline = "2025-09-05"
 
-inicio_teste = "2025-09-05"
+inicio_teste = "2025-10-20"
 
 categorias_teste = ['LINHA_LEVE']
 
@@ -215,7 +207,7 @@ df_de_para_SKU_cadastro_mercadoria = (
 df_matriz_neogrid_offline = (
     spark.createDataFrame(
         pd.read_csv(
-            "/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/dados_analise/(DRP)_MATRIZ_20250902160333.csv",
+            "/Workspace/Users/daniel.scardini-ext@viavarejo.com.br/supply/supply_matriz_de_merecimento/src/dados_analise/(DRP)_MATRIZ_20250902160333.csv",
             delimiter=";",
         )
     )
@@ -280,7 +272,8 @@ df_proporcao_factual = (
         how="left"
     )
     .dropna(subset='grupo_de_necessidade')
-    .filter(F.col("NmSetorGerencial") == 'BELEZA & SAUDE')
+    .filter(F.col("NmSetorGerencial")
+          .isin("BELEZA & SAUDE", "PORTATEIS"))
     .filter(~F.col("grupo_de_necessidade").isin('SEM_GN', 'FORA DE LINHA'))
     .filter(F.col("CdSku").isin(skus_especies_top80))
     .groupBy('CdFilial', 'grupo_de_necessidade')
@@ -433,7 +426,7 @@ metrics_all.orderBy("categoria", "modelo").display()
 
 # MAGIC %md
 # MAGIC ## Parâmetros de Exibição - wSMAPE
-# MAGIC 
+# MAGIC
 # MAGIC Configure quais modelos deseja exibir e o filtro de volume mínimo para grupos
 
 # COMMAND ----------
@@ -457,7 +450,7 @@ print(f"  • Volume mínimo para grupos: {VOLUME_MINIMO_GRUPO:,} peças")
 
 # MAGIC %md
 # MAGIC ## Tabela Pivotada - Métricas Agregadas por Categoria
-# MAGIC 
+# MAGIC
 # MAGIC Tabela pivotada com wSMAPE por categoria (agregado geral)
 
 # COMMAND ----------
@@ -596,7 +589,7 @@ wmape_all.orderBy("categoria", "grupo", "modelo").display()
 
 # MAGIC %md
 # MAGIC ## Tabela Pivotada - wSMAPE por Modelo
-# MAGIC 
+# MAGIC
 # MAGIC Tabela pivotada com wSMAPE dos modelos selecionados, agrupada por categoria/grupo
 
 # COMMAND ----------
@@ -1103,7 +1096,7 @@ buckets = ["0-15", "15-30", "30-45", "45-60", "60+", "Nulo"]
 
 # Datas de baseline e piloto (ajustar conforme necessidade)
 fim_baseline = "2025-09-05"
-inicio_teste = "2025-09-05"
+inicio_teste = "2025-10-20"
 
 # Carregar dados históricos de estoque para calcular DDE
 def load_estoque_historico_com_DDE(categoria: str, data_inicio: str):
@@ -1149,7 +1142,7 @@ for categoria in categorias_teste:
     # Criar buckets de DDE
     df_buckets = (
         df_estoque
-        .groupBy("CdFilial", "grupo_de_necessidade", "periodo_analise")
+        .groupBy("CdFilial", "periodo_analise")
         .agg(
             F.round(F.mean("DDE_mediano"), 1).alias("DDE_medio"),
             F.round(F.percentile_approx("DDE_mediano", 0.5, 100), 1).alias("DDE_mediano_agregado")
@@ -1219,3 +1212,28 @@ for categoria in categorias_teste:
     
     print(f"Categoria: {categoria}")
     df_counts_export[categoria].display()
+
+# COMMAND ----------
+
+(
+    df_estoque
+    .groupBy("periodo_analise")
+    .agg(
+        F.median("DDE_mediano").alias("DDE_mediano_geral"),
+        F.stddev("DDE_mediano").alias("DDE_mediano_stddev"),
+    )
+).display()
+
+# COMMAND ----------
+
+(
+    df_estoque
+    .groupBy("periodo_analise","CdFilial")
+    .agg(
+        F.median("DDE_mediano").alias("DDE_mediano_geral"),
+    )
+    .groupBy("periodo_analise")
+    .agg(
+        F.round(F.stddev("DDE_mediano_geral").alias("DDE_mediano_stddev"),1),
+    )
+).display()

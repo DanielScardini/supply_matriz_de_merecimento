@@ -37,7 +37,7 @@ print(GRUPOS_TESTE)
 data_inicio = "2025-08-29"
 fim_baseline = "2025-09-05"
 
-inicio_teste = "2025-09-05"
+inicio_teste = "2025-10-20"
 
 categorias_teste = ['LINHA_LEVE']
 
@@ -124,7 +124,7 @@ df_de_para_SKU_cadastro_mercadoria = (
 df_matriz_neogrid_online = (
     spark.createDataFrame(
         pd.read_csv(
-            "/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/dados_analise/(DRP)_MATRIZ_20250904123325_online.csv",
+            "/Workspace/Users/daniel.scardini-ext@viavarejo.com.br/supply/supply_matriz_de_merecimento/src/dados_analise/(DRP)_MATRIZ_20250904123325_online.csv",
             delimiter=";",
         )
     )
@@ -334,7 +334,7 @@ metrics_all.orderBy("categoria", "modelo").display()
 
 # MAGIC %md
 # MAGIC ## Parâmetros de Exibição - wMAPE
-# MAGIC 
+# MAGIC
 # MAGIC Configure quais modelos deseja exibir e o filtro de volume mínimo para grupos
 
 # COMMAND ----------
@@ -358,7 +358,7 @@ print(f"  • Volume mínimo para grupos: {VOLUME_MINIMO_GRUPO:,} peças")
 
 # MAGIC %md
 # MAGIC ## Tabela Pivotada - Métricas Agregadas por Categoria
-# MAGIC 
+# MAGIC
 # MAGIC Tabela pivotada com wSMAPE por categoria (agregado geral)
 
 # COMMAND ----------
@@ -497,7 +497,7 @@ wmape_all.orderBy("categoria", "grupo", "modelo").display()
 
 # MAGIC %md
 # MAGIC ## Tabela Pivotada - wSMAPE por Modelo
-# MAGIC 
+# MAGIC
 # MAGIC Tabela pivotada com wSMAPE dos modelos selecionados, agrupada por categoria/grupo
 
 # COMMAND ----------
@@ -957,7 +957,7 @@ buckets = ["0-15", "15-30", "30-45", "45-60", "60+", "Nulo"]
 
 # Datas de baseline e piloto (ajustar conforme necessidade)
 fim_baseline = "2025-09-05"
-inicio_teste = "2025-09-05"
+inicio_teste = "2025-10-20"
 
 # Carregar dados históricos de estoque para calcular DDE
 def load_estoque_historico_com_DDE(categoria: str, data_inicio: str):

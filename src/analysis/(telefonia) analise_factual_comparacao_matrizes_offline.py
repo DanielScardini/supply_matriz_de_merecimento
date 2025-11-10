@@ -1001,3 +1001,17 @@ df_buckets = (
     )
 
 df_buckets.display()
+
+# COMMAND ----------
+
+(
+    df_estoque
+    .groupBy("periodo_analise","CdFilial")
+    .agg(
+        F.median("DDE_mediano").alias("DDE_mediano_geral"),
+    )
+    .groupBy("periodo_analise")
+    .agg(
+        F.stddev("DDE_mediano_geral").alias("DDE_mediano_stddev"),
+    )
+).display()
