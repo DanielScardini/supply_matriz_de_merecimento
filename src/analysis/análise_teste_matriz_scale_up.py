@@ -173,7 +173,8 @@ df_proporcao_factual = (
     .fillna("SEM_GN", subset=["grupo_de_necessidade"])
     .dropna(subset='grupo_de_necessidade')
     .withColumn('grupo_de_necessidade', F.col("gemeos"))
-    .groupBy('grupo_de_necessidade', "NmAgrupamentoDiretoriaSetor")
+    .filter(F.col("grupo_de_necessidade") != 'Chip')
+    .groupBy('NmAgrupamentoDiretoriaSetor', 'grupo_de_necessidade')
     .agg(
         F.round(F.sum('QtDemanda'), 0).alias('QtDemanda'),
         F.round(F.sum('Receita'), 0).alias('Receita')
@@ -192,6 +193,7 @@ df_proporcao_factual = (
     .withColumn("Percentual_QtDemanda", F.round(F.col("Proporcao_Interna_QtDemanda") * 100.0, 2))
     .withColumn("Percentual_Receita", F.round(F.col("Proporcao_Interna_Receita") * 100.0, 2))
 
-    .select('grupo_de_necessidade', 'Percentual_QtDemanda', 'Percentual_Receita')
+    .select('NmAgrupamentoDiretoriaSetor', 'grupo_de_necessidade', 'Percentual_QtDemanda', 'Percentual_Receita')
+    .orderBy(F.desc("NmAgrupamentoDiretoriaSetor"), F.desc("Percentual_QtDemanda"))
     #.filter(F.col("grupo_de_necessidade").isin(GRUPOS_TESTE))
 ).display()

@@ -29,6 +29,8 @@ from datetime import datetime, timedelta, date
 import pandas as pd
 from typing import List, Optional, Dict, Any
 
+# MAGIC %pip install openpyxl
+
 # Inicialização do Spark
 spark = SparkSession.builder.appName("calculo_matriz_merecimento_unificado").getOrCreate()
 
@@ -38,6 +40,203 @@ hoje_int = int(hoje.strftime("%Y%m%d"))
 
 FILIAIS_OUTLET = [2528, 3604]
 
+# Flag para escolher fonte do de-para
+USAR_DE_PARA_EXCEL = True  # True = Excel, False = CSV antigo
+
+def criar_tabela_de_para_grupo_necessidade_direto(hoje: datetime, usar_excel: bool = True) -> int:
+    """
+    Lê diretamente do arquivo de de-para, trata os dados e salva na tabela.
+    
+    Args:
+        hoje: Data/hora atual para timestamp
+        usar_excel: True para Excel, False para CSV antigo
+        
+    Returns:
+        int: Número de registros salvos
+    """
+    
+    try:
+        if usar_excel:
+            # Carregar do Excel
+            print("📁 Carregando de-para do Excel (de_para_gemeos_tecnologia.xlsx)...")
+            de_para_df = pd.read_excel(
+                "/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/dados_analise/de_para_gemeos_tecnologia.xlsx",
+                sheet_name="de_para"
+            )
+        else:
+            # Carregar do CSV antigo
+            print("📁 Carregando de-para do CSV antigo (ITENS_GEMEOS 2.csv)...")
+            de_para_df = pd.read_csv(
+                "/dbfs/mnt/datalake/bcg_comum/ITENS_GEMEOS 2.csv",
+                sep=";",
+                encoding="utf-8"
+            )
+        
+        print(f"  ✅ Arquivo carregado: {len(de_para_df)} registros")
+        
+        # Padronizar nomes das colunas
+        de_para_df.columns = (
+            de_para_df.columns
+            .str.lower()
+            .str.replace(r"[^\w]+", "_", regex=True)
+            .str.strip("_")
+        )
+        
+        # Mapear colunas para o formato esperado
+        if 'sku' in de_para_df.columns and 'gemeos' in de_para_df.columns:
+            de_para_df = de_para_df.rename(columns={'sku': 'CdSku', 'gemeos': 'grupo_de_necessidade'})
+        elif 'cdsku' in de_para_df.columns and 'gemeos' in de_para_df.columns:
+            de_para_df = de_para_df.rename(columns={'cdsku': 'CdSku', 'gemeos': 'grupo_de_necessidade'})
+        elif 'sku' in de_para_df.columns and 'gemeos' in de_para_df.columns:
+            de_para_df = de_para_df.rename(columns={'sku': 'CdSku', 'gemeos': 'grupo_de_necessidade'})
+        else:
+            raise ValueError(f"Colunas não encontradas. Disponíveis: {list(de_para_df.columns)}")
+        
+        # Garantir que CdSku seja string
+        de_para_df['CdSku'] = de_para_df['CdSku'].astype(str)
+        
+        # Remover duplicatas e valores nulos
+        de_para_df = de_para_df.dropna(subset=['CdSku', 'grupo_de_necessidade'])
+        de_para_df = de_para_df.drop_duplicates(subset=['CdSku'])
+        
+        # Adicionar timestamp
+        de_para_df['DtAtualizacao'] = hoje
+        
+        # Converter para Spark DataFrame
+        df_spark = spark.createDataFrame(de_para_df)
+        
+        # Salvar tabela em modo overwrite
+        df_spark.write \
+            .mode("overwrite") \
+            .option("overwriteSchema", "true") \
+            .saveAsTable("databox.bcg_comum.supply_de_para_modelos_gemeos_tecnologia")
+        
+        count_registros = len(de_para_df)
+        print(f"✅ Tabela supply_de_para_modelos_gemeos_tecnologia atualizada com {count_registros} registros")
+        
+        return count_registros
+        
+    except Exception as e:
+        print(f"❌ Erro ao criar tabela de de-para: {str(e)}")
+        raise
+
+# COMMAND ----------
+
+def carregar_de_para_gemeos_tecnologia(flag_excel=True) -> pd.DataFrame:
+    """
+    Carrega o de-para de gêmeos tecnologia baseado no flag USAR_DE_PARA_EXCEL.
+    
+    Returns:
+        DataFrame com colunas: CdSku, gemeos
+    """
+    if flag_excel:
+        print("📋 Carregando de-para do Excel (de_para_gemeos_tecnologia.xlsx)...")
+        try:
+            de_para_df = pd.read_excel(
+                'dados_analise/de_para_gemeos_tecnologia.xlsx',
+                sheet_name='de_para'
+            )
+            
+            # Padronizar nomes das colunas
+            de_para_df.columns = (
+                de_para_df.columns
+                .str.strip()
+                .str.lower()
+                .str.replace(r"[^\w]+", "_", regex=True)
+                .str.strip("_")
+            )
+            
+            # Mapear colunas para o formato esperado
+            if 'sku' in de_para_df.columns and 'gemeos' in de_para_df.columns:
+                de_para_df = de_para_df.rename(columns={'sku': 'CdSku'})
+            elif 'cdsku' in de_para_df.columns and 'gemeos' in de_para_df.columns:
+                de_para_df = de_para_df.rename(columns={'cdsku': 'CdSku'})
+            elif 'SKU' in de_para_df.columns and 'gemeos' in de_para_df.columns:
+                de_para_df = de_para_df.rename(columns={'SKU': 'CdSku'})
+            else:
+                raise ValueError(f"Colunas não encontradas. Disponíveis: {list(de_para_df.columns)}")
+            
+            # Garantir que CdSku seja string
+            de_para_df['CdSku'] = de_para_df['CdSku'].astype(str)
+            
+            # Remover duplicatas
+            de_para_df = de_para_df.drop_duplicates()
+            
+            print(f"  ✅ Excel carregado: {len(de_para_df):,} registros")
+            print(f"  📊 Colunas: {list(de_para_df.columns)}")
+            
+            return de_para_df
+            
+        except Exception as e:
+            print(f"  ❌ Erro ao carregar Excel: {e}")
+            print("  🔄 Tentando CSV como fallback...")
+            USAR_DE_PARA_EXCEL = False
+    
+    if not USAR_DE_PARA_EXCEL:
+        print("📋 Carregando de-para do CSV (ITENS_GEMEOS 2.csv)...")
+        try:
+            de_para_df = pd.read_csv(
+                'dados_analise/ITENS_GEMEOS 2.csv',
+                delimiter=";",
+                encoding='iso-8859-1'
+            )
+            
+            # Padronizar nomes das colunas
+            de_para_df.columns = (
+                de_para_df.columns
+                .str.strip()
+                .str.lower()
+                .str.replace(r"[^\w]+", "_", regex=True)
+                .str.strip("_")
+            )
+            
+            # Remover duplicatas
+            de_para_df = de_para_df.drop_duplicates()
+            
+            print(f"  ✅ CSV carregado: {len(de_para_df):,} registros")
+            print(f"  📊 Colunas: {list(de_para_df.columns)}")
+            
+            return de_para_df
+            
+        except Exception as e:
+            print(f"  ❌ Erro ao carregar CSV: {e}")
+            raise ValueError("Não foi possível carregar o de-para de nenhuma fonte")
+
+# ✅ DE-PARA CONSOLIDAÇÃO DE CDs - MESMO DO ONLINE
+DE_PARA_CONSOLIDACAO_CDS = {
+  "14"  : "1401",
+  "1635": "1200",
+  "1500": "1200",
+  "1640": "1401",
+  "1088": "1200",
+  "4760": "1760",
+  "4400": "1400",
+  "4887": "1887",
+  "4475": "1475",
+  "4445": "1445",
+  "2200": "1200",
+  "1736": "1887",
+  "1792": "1887",
+  "1875": "1887",
+  "1999": "1887",
+  "1887": "1887",
+  "1200": "1200",
+  "1400": "1400",
+  "1401": "1401",
+  "1445": "1445",
+  "1475": "1475",
+  "1760": "1760"
+}
+
+data_m_menos_1 = hoje - timedelta(days=30)
+data_m_menos_1 = data_m_menos_1.strftime("%Y-%m-%d")
+
+DATA_CALCULO = "2025-10-15"
+data_calculo_auto = True
+
+if data_calculo_auto:
+    DATA_CALCULO = hoje - timedelta(days=1)
+    DATA_CALCULO = DATA_CALCULO.strftime("%Y-%m-%d")
 
 # COMMAND ----------
 
@@ -115,6 +314,9 @@ JANELA_CD_MERECIMENTO = 90
 # Configuração das médias aparadas (percentual de corte)
 PERCENTUAL_CORTE_MEDIAS_APARADAS = 0.01  # 1% de corte superior e inferior
 
+# Parâmetros de amortização de demanda
+PERCENTUAL_MAX_DEMANDA_SUPRIMIDA = 0.30  # 30% do QtMercadoria
+
 FILIAIS_ATACADO = [
     1671,     # Petrolina - PE
     17,       # Norte Shopping
@@ -151,6 +353,7 @@ print(f"  • Categorias suportadas: {list(REGRAS_AGRUPAMENTO.keys())}")
 print(f"  • Janelas móveis aparadas: {JANELAS_MOVEIS_APARADAS} dias")
 print(f"  • Janela CD merecimento: {JANELA_CD_MERECIMENTO} dias")
 print(f"  • Percentual de corte para médias aparadas: {PERCENTUAL_CORTE_MEDIAS_APARADAS*100}% (total 2%)")
+print(f"  • Percentual máximo demanda suprimida: {PERCENTUAL_MAX_DEMANDA_SUPRIMIDA*100:.0f}%")
 
 
 # COMMAND ----------
@@ -200,6 +403,11 @@ def determinar_grupo_necessidade(categoria: str, df: DataFrame) -> DataFrame:
         print(f"  • Coluna origem: {coluna_origem} + DsVoltagem")
         print(f"  • Valores copiados: {df_com_grupo.select('grupo_de_necessidade').distinct().count()} grupos únicos")
         
+        # Mostrar amostra dos grupos de necessidade
+        grupos_amostra = df_com_grupo.select("grupo_de_necessidade").distinct().limit(10).collect()
+        grupos_lista = [row.grupo_de_necessidade for row in grupos_amostra]
+        print(f"  • Amostra dos grupos: {grupos_lista}")
+        
     else:
         # Para outras categorias, mantém o comportamento original
         df_com_grupo = df.withColumn(
@@ -213,6 +421,11 @@ def determinar_grupo_necessidade(categoria: str, df: DataFrame) -> DataFrame:
         print(f"✅ Grupo de necessidade definido para '{categoria}':")
         print(f"  • Coluna origem: {coluna_origem}")
         print(f"  • Valores copiados: {df_com_grupo.select('grupo_de_necessidade').distinct().count()} grupos únicos")
+        
+        # Mostrar amostra dos grupos de necessidade
+        grupos_amostra = df_com_grupo.select("grupo_de_necessidade").distinct().limit(10).collect()
+        grupos_lista = [row.grupo_de_necessidade for row in grupos_amostra]
+        print(f"  • Amostra dos grupos: {grupos_lista}")
     
     return df_com_grupo
 
@@ -227,7 +440,7 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-07-01") -> Data
     df_base = (
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
         .filter(F.col("NmAgrupamentoDiretoriaSetor") == categoria)
-        .filter(F.col("NmEspecieGerencial").isin('LIQUIDIFICADORES ACIMA 1001 W.'))
+        #.filter(F.col("NmSetorGerencial") == 'PORTATEIS')
         .filter(F.col("DtAtual") >= data_inicio)
         .withColumn(
             "year_month",
@@ -240,6 +453,132 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-07-01") -> Data
     print(f"  • Total de registros: {df_base.count():,}")
     
     return df_base
+
+# COMMAND ----------
+
+def carregar_de_para_espelhamento() -> DataFrame:
+    """
+    Carrega o de-para de espelhamento de filiais do arquivo Excel.
+    
+    Returns:
+        DataFrame com colunas: CdFilial_referencia, CdFilial_espelhada
+    """
+    print("🔄 Carregando de-para de espelhamento de filiais...")
+
+    # pip install openpyxl
+    
+    try:
+        # Carrega o arquivo Excel usando pandas
+        df_pandas = pd.read_excel(
+            "/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/planilha_governanca/governanca_supply_inputs_matriz_merecimento.xlsx",
+            sheet_name="espelhamento_lojas"
+        )
+        
+        # Verifica se o DataFrame não está vazio
+        if df_pandas.empty:
+            print("ℹ️ Aba 'espelhamento_lojas' está vazia")
+            return spark.createDataFrame([], "CdFilial_referencia INT, CdFilial_espelhada INT")
+        
+        # Renomeia as colunas para padronizar
+        df_pandas = df_pandas.rename(columns={
+            "CdFilial_referência": "CdFilial_referencia",
+            "CdFilial_espelhada": "CdFilial_espelhada"
+        })
+        
+        # Remove linhas com valores nulos
+        df_pandas = df_pandas.dropna(subset=["CdFilial_referencia", "CdFilial_espelhada"])
+        
+        # Converte para DataFrame do Spark
+        df_espelhamento = spark.createDataFrame(df_pandas)
+        
+        print(f"✅ De-para de espelhamento carregado:")
+        print(f"  • Total de mapeamentos: {df_espelhamento.count():,}")
+        
+        if df_espelhamento.count() > 0:
+            print("  • Exemplos de espelhamento:")
+            df_espelhamento.show(5, truncate=False)
+        
+        return df_espelhamento
+        
+    except FileNotFoundError:
+        print("⚠️ Arquivo 'governanca_supply_inputs_matriz_merecimento.xlsx' não encontrado")
+        print("  • Continuando sem espelhamento...")
+        return spark.createDataFrame([], "CdFilial_referencia INT, CdFilial_espelhada INT")
+        
+    except Exception as e:
+        print(f"⚠️ Erro ao carregar de-para de espelhamento: {str(e)}")
+        print("  • Continuando sem espelhamento...")
+        return spark.createDataFrame([], "CdFilial_referencia INT, CdFilial_espelhada INT")
+
+# COMMAND ----------
+
+def aplicar_espelhamento_filiais(df_base: DataFrame, df_espelhamento: DataFrame) -> DataFrame:
+    """
+    Aplica o espelhamento de filiais nos dados base.
+    
+    Para cada filial espelhada, remove os dados existentes e substitui pelos dados 
+    da filial de referência.
+    
+    Args:
+        df_base: DataFrame com dados base
+        df_espelhamento: DataFrame com de-para de espelhamento
+        
+    Returns:
+        DataFrame com dados espelhados aplicados
+    """
+    if df_espelhamento.count() == 0:
+        print("ℹ️ Nenhum espelhamento para aplicar")
+        return df_base
+    
+    print("🔄 Aplicando espelhamento de filiais...")
+    
+    # Contar registros antes do espelhamento
+    registros_antes = df_base.count()
+    
+    # Obter lista de filiais que serão espelhadas
+    filiais_espelhadas = [row.CdFilial_espelhada for row in df_espelhamento.select("CdFilial_espelhada").distinct().collect()]
+    
+    print(f"  • Filiais que serão espelhadas: {filiais_espelhadas}")
+    
+    # Remover dados existentes das filiais que serão espelhadas
+    df_sem_espelhadas = df_base.filter(~F.col("CdFilial").isin(filiais_espelhadas))
+    
+    registros_removidos = registros_antes - df_sem_espelhadas.count()
+    print(f"  • Registros removidos das filiais espelhadas: {registros_removidos:,}")
+    
+    # Criar dados espelhados (copiando da filial de referência)
+    df_espelhados = (
+        df_base
+        .join(
+            df_espelhamento,
+            df_base.CdFilial == df_espelhamento.CdFilial_referencia,
+            "inner"
+        )
+        .select(
+            df_espelhamento.CdFilial_espelhada.alias("CdFilial"),
+            *[col for col in df_base.columns if col != "CdFilial"]
+        )
+    )
+    
+    # Unir dados sem as filiais espelhadas com os novos dados espelhados
+    df_com_espelhamento = df_sem_espelhadas.union(df_espelhados)
+    
+    # Contar registros após espelhamento
+    registros_depois = df_com_espelhamento.count()
+    registros_espelhados = df_espelhados.count()
+    
+    print(f"✅ Espelhamento aplicado:")
+    print(f"  • Registros antes: {registros_antes:,}")
+    print(f"  • Registros removidos: {registros_removidos:,}")
+    print(f"  • Registros espelhados adicionados: {registros_espelhados:,}")
+    print(f"  • Registros após: {registros_depois:,}")
+    
+    # Mostrar exemplos de filiais espelhadas
+    if registros_espelhados > 0:
+        print("  • Exemplos de filiais espelhadas:")
+        df_espelhados.select("CdFilial").distinct().show(5, truncate=False)
+    
+    return df_com_espelhamento
 
 # COMMAND ----------
 
@@ -264,20 +603,8 @@ def carregar_mapeamentos_produtos(categoria: str) -> tuple:
     )
     
     try:
-        de_para_gemeos_tecnologia = (
-            pd.read_csv('dados_analise/ITENS_GEMEOS 2.csv',
-                        delimiter=";",
-                        encoding='iso-8859-1')
-            .drop_duplicates()
-        )
-        
-        de_para_gemeos_tecnologia.columns = (
-            de_para_gemeos_tecnologia.columns
-            .str.strip()
-            .str.lower()
-            .str.replace(r"[^\w]+", "_", regex=True)
-            .str.strip("_")
-        )
+        # Usar a nova função para carregar de-para
+        de_para_gemeos_tecnologia = carregar_de_para_gemeos_tecnologia()
         
         print("✅ Mapeamento de gêmeos carregado")
     except FileNotFoundError:
@@ -286,7 +613,7 @@ def carregar_mapeamentos_produtos(categoria: str) -> tuple:
     
     return (
         de_para_modelos_tecnologia.rename(columns={"codigo_item": "CdSku"})[['CdSku', 'modelos']], 
-        de_para_gemeos_tecnologia.rename(columns={"sku_loja": "CdSku"})[['CdSku', 'gemeos']] if de_para_gemeos_tecnologia is not None else None
+        de_para_gemeos_tecnologia[['CdSku', 'gemeos']] if de_para_gemeos_tecnologia is not None else None
     )
 
 # COMMAND ----------
@@ -417,7 +744,7 @@ def remover_outliers_series_historicas(df: DataFrame,
                 F.col(coluna_valor) < F.col("threshold_inferior"),
                 F.col("threshold_inferior")
             )
-            .otherwise(F.col(coluna_valor))
+            .otherwise(F.col(f"{coluna_valor}_original"))
         )
         .withColumn(
             "flag_outlier_removido",
@@ -505,15 +832,31 @@ def detectar_outliers_meses_atipicos(df: DataFrame, categoria: str) -> tuple:
 
 # COMMAND ----------
 
-def filtrar_meses_atipicos(df: DataFrame, df_meses_atipicos: DataFrame) -> DataFrame:
+def filtrar_meses_atipicos(df: DataFrame, df_meses_atipicos: DataFrame, data_calculo: str = None) -> DataFrame:
     """
     Filtra os meses atípicos do DataFrame principal.
+    PROTEGE a data_calculo de ser removida.
     """
     print("🔄 Aplicando filtro de meses atípicos...")
     
+    # Se data_calculo foi fornecida, remover ela da lista de meses atípicos
+    if data_calculo:
+        year_month_calculo = int(data_calculo.replace("-", "")[:6])  # "2025-09-25" -> 202509
+        print(f"🛡️ Protegendo year_month {year_month_calculo} da remoção (DATA_CALCULO)")
+        
+        df_meses_atipicos_filtrado = df_meses_atipicos.filter(
+            F.col("year_month") != year_month_calculo
+        )
+        
+        meses_antes = df_meses_atipicos.count()
+        meses_depois = df_meses_atipicos_filtrado.count()
+        print(f"  • Meses atípicos: {meses_antes} → {meses_depois} (removido {meses_antes - meses_depois} mês protegido)")
+    else:
+        df_meses_atipicos_filtrado = df_meses_atipicos
+    
     df_filtrado = (
         df.join(
-            df_meses_atipicos.withColumn("flag_remover", F.lit(1)),
+            df_meses_atipicos_filtrado.withColumn("flag_remover", F.lit(1)),
             on=["grupo_de_necessidade", "year_month"],
             how="left"
         )
@@ -533,19 +876,25 @@ def filtrar_meses_atipicos(df: DataFrame, df_meses_atipicos: DataFrame) -> DataF
 def add_media_aparada_rolling(df, janelas, col_val="demanda_robusta", col_ord="DtAtual", 
                               grupos=("CdSku","CdFilial"), alpha=0.10, min_obs=10):
     """
-    Adiciona médias aparadas rolling para diferentes janelas.
+    Adiciona médias aparadas rolling com proteção completa contra NULLs.
     """
     out = df
+    
+    # ✅ JANELA DE BACKUP 360d para casos extremos
+    window_360_backup = Window.partitionBy(*grupos).orderBy(F.col(col_ord)).rowsBetween(-360, 0)
+    backup_360_mean = F.avg(F.when(F.col(col_val).isNotNull(), F.col(col_val))).over(window_360_backup)
+    
     for dias in janelas:
         w = Window.partitionBy(*grupos).orderBy(F.col(col_ord)).rowsBetween(-dias, 0)
 
+        # Percentis com proteção contra janelas vazias
         ql = F.percentile_approx(F.col(col_val), F.lit(alpha)).over(w)
         qh = F.percentile_approx(F.col(col_val), F.lit(1 - alpha)).over(w)
 
         out = (
             out
-            .withColumn(f"_ql_{dias}", ql)
-            .withColumn(f"_qh_{dias}", qh)
+            .withColumn(f"_ql_{dias}", F.coalesce(ql, F.lit(0)))  # ✅ Proteção percentis
+            .withColumn(f"_qh_{dias}", F.coalesce(qh, F.lit(float('inf'))))  # ✅ Proteção percentis
         )
 
         cnt = F.count(F.col(col_val)).over(w)
@@ -553,12 +902,29 @@ def add_media_aparada_rolling(df, janelas, col_val="demanda_robusta", col_ord="D
         sum_trim = F.sum(F.when(cond, F.col(col_val)).otherwise(F.lit(0))).over(w)
         cnt_trim = F.sum(F.when(cond, F.lit(1)).otherwise(F.lit(0))).over(w)
 
-        mean_simple = F.avg(F.col(col_val)).over(w)
-        mean_trim = sum_trim / F.when(cnt_trim > 0, cnt_trim).otherwise(F.lit(None))
+        # ✅ PROTEÇÃO: Média simples com fallback
+        mean_simple = F.coalesce(
+            F.avg(F.col(col_val)).over(w),  # Média da janela
+            backup_360_mean,  # Backup 360d
+            F.lit(0)  # Último recurso
+        )
+        
+        # ✅ PROTEÇÃO: Média aparada com fallback para média simples
+        mean_trim = F.when(
+            cnt_trim > 0, 
+            sum_trim / cnt_trim
+        ).otherwise(mean_simple)  # Fallback para média simples protegida
 
+        # ✅ PROTEÇÃO: Lógica final com múltiplos fallbacks
         out = out.withColumn(
             f"MediaAparada{dias}_Qt_venda_sem_ruptura",
-            F.when(cnt >= F.lit(min_obs), mean_trim).otherwise(mean_simple)
+            F.when(
+                cnt >= F.lit(min_obs), 
+                F.coalesce(mean_trim, mean_simple, backup_360_mean, F.lit(0))
+            )
+            .otherwise(
+                F.coalesce(mean_simple, backup_360_mean, F.lit(0))
+            )
         ).drop(f"_ql_{dias}", f"_qh_{dias}")
 
     return out
@@ -567,24 +933,54 @@ def add_media_aparada_rolling(df, janelas, col_val="demanda_robusta", col_ord="D
 
 def calcular_medidas_centrais_com_medias_aparadas(df: DataFrame) -> DataFrame:
     """
-    Calcula apenas médias aparadas (removidas médias móveis simples).
+    Calcula medidas centrais com médias aparadas e proteção completa contra NULLs.
     """
-    print("🔄 Calculando medidas centrais com médias aparadas...")
+    print("🔄 Calculando medidas centrais com médias aparadas (protegido)...")
+    
+    # Aplicar lógica de amortização: deltaRuptura saturado ao máximo de 30% do QtMercadoria
+    df_com_amortizacao = (
+        df
+        .withColumn(
+            "demandaSuprimida",  # deltaRuptura saturado ao máximo de 30% do QtMercadoria
+            F.least(
+                F.col("deltaRuptura"),
+                F.col("QtMercadoria") * PERCENTUAL_MAX_DEMANDA_SUPRIMIDA
+            )
+        )
+    )
     
     df_sem_ruptura = (
-        df
+        df_com_amortizacao
         .withColumn("demanda_robusta",
-                    F.col("QtMercadoria") + F.col("deltaRuptura"))
+                    F.col("QtMercadoria") + F.col("demandaSuprimida"))
         .withColumn("demanda_robusta",
                     F.when(
                         F.col("CdFilial").isin(FILIAIS_OUTLET), F.lit(0)
                         )
                     .otherwise(F.col("demanda_robusta"))
                     )
+        # ✅ HIERARQUIA INTELIGENTE: demanda_robusta → QtMercadoria → demandaSuprimida → 0
+        .withColumn("demanda_robusta", 
+                    F.coalesce(
+                        F.col("demanda_robusta"),  # Primeiro: demanda robusta calculada
+                        F.col("QtMercadoria"),     # Segundo: apenas vendas
+                        F.col("demandaSuprimida"), # Terceiro: apenas demanda suprimida
+                        F.lit(0)                   # Último: zero
+                    ))
     )
 
     lista = ", ".join(str(f) for f in FILIAIS_OUTLET)
     print(f"🏬 Zerando a demanda das filiais [{lista}] ⚠️ pois não são abastecidas via CD normalmente.")
+    
+    # Estatísticas da amortização
+    casos_com_ruptura = df_com_amortizacao.filter(F.col("deltaRuptura") > 0).count()
+    casos_amortizados = df_com_amortizacao.filter(F.col("demandaSuprimida") > 0).count()
+    if casos_com_ruptura > 0:
+        demanda_suprimida_total = df_com_amortizacao.agg(F.sum("demandaSuprimida")).collect()[0][0]
+        print(f"🔧 Amortização aplicada: {casos_amortizados:,} casos de {casos_com_ruptura:,} com ruptura")
+        print(f"📉 Demanda total suprimida: {demanda_suprimida_total:,.0f}")
+    else:
+        print(f"✅ Nenhum caso com ruptura encontrado - amortização não necessária")
     
      # Aplicar apenas médias aparadas
     df_com_medias_aparadas = (
@@ -593,7 +989,7 @@ def calcular_medidas_centrais_com_medias_aparadas(df: DataFrame) -> DataFrame:
             janelas=JANELAS_MOVEIS_APARADAS,
             col_val="demanda_robusta",
             col_ord="DtAtual",
-            grupos=("CdSku","CdFilial"),
+            grupos=("grupo_de_necessidade","CdFilial"),
             alpha=PERCENTUAL_CORTE_MEDIAS_APARADAS,
             min_obs=10
         )
@@ -614,8 +1010,8 @@ def consolidar_medidas(df: DataFrame) -> DataFrame:
     
     df_consolidado = (
         df.select(
-            "DtAtual", "CdSku", "CdFilial", "grupo_de_necessidade", "year_month",
-            "QtMercadoria", "Receita", "FlagRuptura", "deltaRuptura", "tipo_agrupamento",
+            "DtAtual", "CdFilial", "grupo_de_necessidade", "year_month",
+            "QtMercadoria",  "deltaRuptura", "tipo_agrupamento",
             *colunas_medias_aparadas
         )
         .fillna(0, subset=colunas_medias_aparadas)
@@ -628,27 +1024,79 @@ def consolidar_medidas(df: DataFrame) -> DataFrame:
 
 def criar_de_para_filial_cd() -> DataFrame:
     """
-    Cria o mapeamento filial → CD usando dados da tabela base.
+    Cria o mapeamento filial → CD usando dados da tabela base com consolidação.
+    Aplica a mesma lógica do online para evitar distorções.
+    Usa a data mais recente disponível (max DtAtual) em vez de data exata.
     """
-    print("🔄 Criando de-para filial → CD...")
+    print("🔄 Criando de-para filial → CD com consolidação...")
+    
+    # ✅ Buscar a data mais recente disponível
+    max_dt_atual = (
+        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
+        .select(F.max("DtAtual").alias("max_dt"))
+        .collect()[0]["max_dt"]
+    )
+    
+    print(f"✅ Data mais recente na base: {max_dt_atual}")
     
     df_base = (
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
-        .filter(F.col("DtAtual") == "2025-08-01")
+        .filter(F.col("DtAtual") == max_dt_atual)
         .filter(F.col("CdSku").isNotNull())
     )
-    
+
+    print(f"✅ De-para filial usando registros de {max_dt_atual}")
+
+    # ✅ NORMALIZAÇÃO: None → 0 para depois filtrar
+    dict_norm = {int(k): (int(v) if v is not None else 0) for k, v in DE_PARA_CONSOLIDACAO_CDS.items()}
+
+    # ✅ CONSTRÓI EXPRESSÃO DE MAPEAMENTO
+    mapping_expr = F.create_map([F.lit(x) for kv in dict_norm.items() for x in kv])
+
     de_para_filial_cd = (
         df_base
-        .select("cdfilial", "cd_secundario")
+        .select(
+            F.col("cdfilial").alias("CdFilial"),  # ✅ Renomear para CamelCase
+            "cd_secundario"
+        )
         .distinct()
-        .filter(F.col("cdfilial").isNotNull())
+        .filter(F.col("CdFilial").isNotNull())
         .withColumn(
             "cd_vinculo",
             F.coalesce(F.col("cd_secundario"), F.lit("SEM_CD"))
         )
         .drop("cd_secundario")
+        # ✅ APLICA SUBSTITUIÇÃO DE CONSOLIDAÇÃO
+        .withColumn(
+            "cd_vinculo",
+            F.coalesce(mapping_expr.getItem(F.col("cd_vinculo").cast("int")), F.col("cd_vinculo"))
+        )
+        # ✅ FILTRA CDs ZERADOS (None no dict)
+        .filter(F.col("cd_vinculo") != F.lit(0))
+        .fillna("SEM_CD", subset="cd_vinculo")
     )
+    
+    # ✅ DIAGNÓSTICO: Verificar distribuição de CDs
+    print("🔍 Diagnóstico do mapeamento CD:")
+    
+    # Contar filiais por CD
+    distribuicao_cd = (
+        de_para_filial_cd
+        .groupBy("cd_vinculo")
+        .agg(F.count("*").alias("qtd_filiais"))
+        .orderBy(F.desc("qtd_filiais"))
+    )
+    
+    print("  📊 Distribuição de filiais por CD:")
+    for row in distribuicao_cd.collect():
+        print(f"    CD {row['cd_vinculo']}: {row['qtd_filiais']} filiais")
+    
+    # Verificar filiais sem CD
+    filiais_sem_cd = de_para_filial_cd.filter(F.col("cd_vinculo") == "SEM_CD").count()
+    if filiais_sem_cd > 0:
+        print(f"  ⚠️ ATENÇÃO: {filiais_sem_cd} filiais sem CD mapeado!")
+    else:
+        print("  ✅ Todas as filiais têm CD mapeado")
     
     print(f"✅ De-para filial → CD criado: {de_para_filial_cd.count():,} filiais")
     return de_para_filial_cd
@@ -666,21 +1114,25 @@ def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) ->
 
     df_data_calculo = (
         df_data_calculo
-        .orderBy('CdSku', 'CdFilial')
-        .dropDuplicates(subset=['CdSku', 'CdFilial'])
+        .orderBy('CdFilial', 'grupo_de_necessidade')
+        .dropDuplicates(subset=['CdFilial', 'grupo_de_necessidade'])  # ✅ Manter granularidade por grupo
     )
     
     # Usar apenas média aparada 90 dias para merecimento CD
     medida_cd = f"MediaAparada{JANELA_CD_MERECIMENTO}_Qt_venda_sem_ruptura"
     
     de_para_filial_cd = criar_de_para_filial_cd()
-    df_com_cd = df_data_calculo.join(de_para_filial_cd, on="cdfilial", how="left")
+    df_com_cd = df_data_calculo.join(de_para_filial_cd, on="CdFilial", how="left")  # ✅ CamelCase
     
-    # Agregar apenas a medida específica do CD
+    # ✅ AGREGAÇÃO COM PROTEÇÃO DUPLA:
     df_merecimento_cd = (
         df_com_cd
         .groupBy("cd_vinculo", "grupo_de_necessidade")
-        .agg(F.sum(F.col(medida_cd)).alias(f"Total_{medida_cd}"))
+        .agg(
+            # F.sum() já ignora NULLs, mas garantimos com coalesce
+            F.sum(F.coalesce(F.col(medida_cd), F.lit(0))).alias(f"Total_{medida_cd}"),
+            F.count("*").alias("qtd_filiais_cd")  # ✅ Contar registros (filial + grupo)
+        )
     )
     
     # Calcular percentual do CD dentro da Cia
@@ -703,6 +1155,39 @@ def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) ->
         .orderBy('cd_vinculo', 'grupo_de_necessidade')
         .dropDuplicates(subset=['cd_vinculo', 'grupo_de_necessidade'])
     )
+    
+    # ✅ DIAGNÓSTICO FINAL: Verificar distribuição de merecimento
+    print("🔍 Diagnóstico do merecimento por CD:")
+    
+    # Somar merecimento por CD (todos os grupos)
+    merecimento_por_cd = (
+        df_merecimento_cd
+        .groupBy("cd_vinculo")
+        .agg(
+            F.sum(f"Merecimento_CD_{medida_cd}").alias("merecimento_total_cd"),
+            F.count("*").alias("qtd_grupos")
+        )
+        .orderBy(F.desc("merecimento_total_cd"))
+    )
+    
+    print("  📊 Merecimento total por CD:")
+    for row in merecimento_por_cd.collect():
+        print(f"    CD {row['cd_vinculo']}: {row['merecimento_total_cd']:.3f} ({row['qtd_grupos']} grupos)")
+    
+    # Verificar se soma fecha 100% por grupo
+    soma_por_grupo = (
+        df_merecimento_cd
+        .groupBy("grupo_de_necessidade")
+        .agg(F.sum(f"Merecimento_CD_{medida_cd}").alias("soma_grupo"))
+        .filter(F.abs(F.col("soma_grupo") - 1.0) > 0.01)  # Tolerância de 1%
+    )
+    
+    grupos_problema = soma_por_grupo.count()
+    if grupos_problema > 0:
+        print(f"  ⚠️ ATENÇÃO: {grupos_problema} grupos não somam 100%")
+    else:
+        print("  ✅ Todos os grupos somam 100% (tolerância 1%)")
+    
     print(f"✅ Merecimento CD calculado: {df_merecimento_cd.count():,} registros (média aparada 90 dias)")
     return df_merecimento_cd
 
@@ -728,7 +1213,7 @@ def calcular_merecimento_interno_cd(df: DataFrame, data_calculo: str, categoria:
     
     # Join com de-para filial-CD
     de_para_filial_cd = criar_de_para_filial_cd()
-    df_com_cd = df_data_calculo.join(de_para_filial_cd, on="cdfilial", how="left")
+    df_com_cd = df_data_calculo.join(de_para_filial_cd, on="CdFilial", how="left")  # ✅ CamelCase
     
     # Agregar no nível filial × grupo_de_necessidade (somando os SKUs)
     aggs = [F.sum(F.coalesce(F.col(m), F.lit(0))).alias(m) for m in medidas]
@@ -876,15 +1361,38 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
     df_gdn = df_com_grupo.select("CdSku", "grupo_de_necessidade").distinct()
     
     # 2. Carregar todos os SKUs que existem na data especificada
-    print(f"📊 Passo 2: Carregando SKUs existentes em {data_calculo}...")
+    # ✅ Buscar a data mais recente disponível na tabela
+    max_dt_estoque = (
+        spark.table('dev_logistica_ds.estoquegerencial')
+        .select(F.max("dtatual").alias("max_dt"))
+        .collect()[0]["max_dt"]
+    )
+    
+    print(f"📊 Passo 2: Carregando SKUs existentes...")
+    print(f"  • Data solicitada: {data_calculo}")
+    print(f"  • Data mais recente na tabela: {max_dt_estoque}")
+    print(f"  • Usando data: {max_dt_estoque}")
+    
     df_skus_data = (
-        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
-        .filter(F.col("DtAtual") == data_calculo)
+        spark.table('dev_logistica_ds.estoquegerencial')
+        .select(
+            F.col("cdfilial").cast("int").alias("CdFilial"),
+            F.col("CdSku").cast("string").alias("CdSku"),
+            F.col("dtatual").cast("date").alias("DtAtual"),
+            F.col("DsObrigatorio").alias("DsObrigatorio"),
+            F.col("Cluster_Sugestao").alias('Cluster_Sugestao')
+        )
+        .filter(F.col("DtAtual") == max_dt_estoque)  # ✅ Usar data mais recente
+        .filter(F.col("CdSku").isNotNull())
+        .filter(
+            (F.col("DsObrigatorio") == 'S') | 
+            (F.col("Cluster_Sugestao") == 1)
+        )
         .select("CdSku")
         .distinct()
         .join(df_gdn, on="CdSku", how="inner")
-        .filter(F.col("CdSku").isNotNull())
         .filter(F.col("grupo_de_necessidade").isNotNull())
+
     )
     
     skus_count = df_skus_data.count()
@@ -916,6 +1424,63 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
 
 # COMMAND ----------
 
+def garantir_integridade_dados_pre_merecimento(df: DataFrame) -> DataFrame:
+    """
+    Garante integridade dos dados ANTES de qualquer cálculo de merecimento.
+    Preenche NULLs com média 360d da própria combinação grupo+filial.
+    """
+    print("🛡️ Garantindo integridade dos dados pré-merecimento...")
+    
+    # Identificar colunas de médias aparadas
+    colunas_medias_aparadas = [col for col in df.columns 
+                              if col.startswith("MediaAparada") and col.endswith("_Qt_venda_sem_ruptura")]
+    
+    if not colunas_medias_aparadas:
+        print("  ⚠️ Nenhuma coluna de média aparada encontrada")
+        return df
+    
+    print(f"  📊 Tratando: {colunas_medias_aparadas}")
+    
+    # Janela de 360 dias para backup
+    window_360 = Window.partitionBy("grupo_de_necessidade", "CdFilial").orderBy("DtAtual").rowsBetween(-360, 0)
+    
+    df_tratado = df
+    
+    for coluna in colunas_medias_aparadas:
+        backup_col = f"{coluna}_backup360"
+        
+        # Contar NULLs antes
+        nulls_antes = df_tratado.filter(F.col(coluna).isNull()).count()
+        
+        df_tratado = (
+            df_tratado
+            # Calcular média 360d apenas de valores não-nulos da própria combinação
+            .withColumn(
+                backup_col,
+                F.avg(F.when(F.col(coluna).isNotNull(), F.col(coluna))).over(window_360)
+            )
+            # Preencher NULL APENAS se há histórico válido da própria combinação
+            .withColumn(
+                coluna,
+                F.when(
+                    F.col(coluna).isNull() & F.col(backup_col).isNotNull(), 
+                    F.col(backup_col)
+                )
+                .otherwise(F.col(coluna))  # Mantém NULL se não há histórico próprio
+            )
+            .drop(backup_col)
+        )
+        
+        # Contar NULLs depois
+        nulls_depois = df_tratado.filter(F.col(coluna).isNull()).count()
+        nulls_preenchidos = nulls_antes - nulls_depois
+        
+        print(f"    ✅ {coluna}: {nulls_preenchidos:,} NULLs preenchidos | {nulls_depois:,} restantes")
+    
+    return df_tratado
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 4. Função Principal de Execução
 
@@ -923,7 +1488,7 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
 
 def executar_calculo_matriz_merecimento_completo(categoria: str, 
                                                 data_inicio: str = "2024-07-01",
-                                                data_calculo: str = "2025-08-31") -> DataFrame:
+                                                data_calculo: str = DATA_CALCULO) -> DataFrame:
     """
     Função principal que executa todo o fluxo da matriz de merecimento.
     """
@@ -935,31 +1500,59 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         df_base = carregar_dados_base(categoria, data_inicio)
         df_base.cache()
 
-        # 2. Carregamento dos mapeamentos
+        # 2. Carregamento e aplicação do espelhamento de filiais
+        df_espelhamento = carregar_de_para_espelhamento()
+        df_base_com_espelhamento = aplicar_espelhamento_filiais(df_base, df_espelhamento)
+        df_base_com_espelhamento.cache()
+
+        # 3. Carregamento dos mapeamentos
         de_para_modelos, de_para_gemeos = carregar_mapeamentos_produtos(categoria)  
 
-        # 3. Aplicação dos mapeamentos
+        # 4. Aplicação dos mapeamentos
         df_com_mapeamentos = aplicar_mapeamentos_produtos(
-            df_base, categoria, de_para_modelos, de_para_gemeos
+            df_base_com_espelhamento, categoria, de_para_modelos, de_para_gemeos
         )
         
-        # 4. Definição do grupo_de_necessidade
+        # 5. Definição do grupo_de_necessidade
         df_com_grupo = determinar_grupo_necessidade(categoria, df_com_mapeamentos)
-        # df_com_grupo = (
-        #     df_com_grupo
-        #     .filter(
-        #         F.col("grupo_de_necessidade").isin('Telef pp', 'TV 50 ALTO P', 'TV 55 ALTO P')
-        #     )
-        # )
+    #     df_com_grupo = (
+    #         df_com_grupo
+    #         .filter(
+    #             F.col("grupo_de_necessidade").isin(
+    #         'Telef pp', 
+    #         'TV 50 ALTO P', 
+    #         'TV 55 ALTO P',
+    #         'TV 43 PP',
+    #         'TV 75 PP',
+    #         'TV 75 ALTO P',
+    #         'Telef Medio 256GB',
+    #         'Telef Medio 128GB',
+    #         'Telef Alto',
+    #         )
+    #     )
+    # )
         df_com_grupo.cache()
+
+        # 5.0. Criar tabela de de-para grupo de necessidade
+        count_registros = criar_tabela_de_para_grupo_necessidade_direto(hoje, usar_excel=USAR_DE_PARA_EXCEL)
+
+        df_agregado = (
+            df_com_grupo
+            .groupBy("grupo_de_necessidade", "CdFilial", "DtAtual", "year_month")
+            .agg(
+                F.sum("QtMercadoria").alias("QtMercadoria"),
+                F.sum("deltaRuptura").alias("deltaRuptura"),
+                F.first("tipo_agrupamento").alias("tipo_agrupamento")
+            )
+        )
         
-        # 5. Detecção de outliers
-        df_stats, df_meses_atipicos = detectar_outliers_meses_atipicos(df_com_grupo, categoria)
+        # 6. Detecção de outliers
+        df_stats, df_meses_atipicos = detectar_outliers_meses_atipicos(df_agregado, categoria)
         
-        # 6. Filtragem de meses atípicos
-        df_filtrado = filtrar_meses_atipicos(df_com_grupo, df_meses_atipicos)
+        # 7. Filtragem de meses atípicos
+        df_filtrado = filtrar_meses_atipicos(df_agregado, df_meses_atipicos, DATA_CALCULO)
         
-        # 7. Remoção de outliers das séries históricas
+        # 8. Remoção de outliers das séries históricas
         print("=" * 80)
         print("🔄 Aplicando remoção de outliers das séries históricas...")
         
@@ -974,27 +1567,30 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
             filiais_atacado=filiais_atacado
         )
         
-        # 8. Cálculo das medidas centrais
+        # 9. Cálculo das medidas centrais
         df_com_medidas = calcular_medidas_centrais_com_medias_aparadas(df_sem_outliers)
         
-        # 9. Consolidação final
+        # 10. Consolidação final
         df_final = consolidar_medidas(df_com_medidas)
         
-        # 10. Cálculo de merecimento por CD e filial
+        # ✅ 10.1 NOVO: Garantir integridade dos dados pré-merecimento
+        df_final = garantir_integridade_dados_pre_merecimento(df_final)
+        
+        # 11. Cálculo de merecimento por CD e filial
         print("=" * 80)
         print("🔄 Iniciando cálculo de merecimento...")
         
-        # 10.1 Merecimento a nível CD
+        # 11.1 Merecimento a nível CD
         df_merecimento_cd = calcular_merecimento_cd(df_final, data_calculo, categoria)
         
-        # 10.2 Merecimento interno ao CD
+        # 11.2 Merecimento interno ao CD
         df_merecimento_interno = calcular_merecimento_interno_cd(df_final, data_calculo, categoria)
         
-        # 10.3 Merecimento final
+        # 11.3 Merecimento final
         df_merecimento_final = calcular_merecimento_final(df_merecimento_cd, df_merecimento_interno)
 
         # Criar o esqueleto
-        df_esqueleto = criar_esqueleto_matriz_completa(df_com_grupo, "2025-08-31")
+        df_esqueleto = criar_esqueleto_matriz_completa(df_com_grupo, data_m_menos_1)
 
         # Primeiro, identificar todas as colunas de merecimento final
         colunas_merecimento_final = [col for col in df_merecimento_final.columns 
@@ -1039,10 +1635,10 @@ print("=" * 80)
 
 # Lista de todas as categorias disponíveis
 categorias = [
-    #"DIRETORIA DE TELAS",
+    "DIRETORIA DE TELAS",
     #"DIRETORIA TELEFONIA CELULAR", 
     #"DIRETORIA DE LINHA BRANCA",
-    "DIRETORIA LINHA LEVE",
+    #"DIRETORIA LINHA LEVE",
     # "DIRETORIA INFO/PERIFERICOS"
 ]
 
@@ -1057,7 +1653,7 @@ for categoria in categorias:
         df_matriz_final = executar_calculo_matriz_merecimento_completo(
             categoria=categoria,
             data_inicio="2024-07-01",
-            data_calculo="2025-09-18"
+            data_calculo=DATA_CALCULO
         )
         
         # Salva em tabela específica da categoria
@@ -1068,7 +1664,7 @@ for categoria in categorias:
             .upper()
         )
         
-        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste1909_liq"
+        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste0710"
         
         print(f"💾 Salvando matriz de merecimento para: {categoria}")
         print(f"📊 Tabela: {nome_tabela}")

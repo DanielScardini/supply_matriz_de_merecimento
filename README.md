@@ -1,8 +1,25 @@
 # Supply Matriz de Merecimento - Sistema Unificado
 
-## Visão Geral
+## 🎯 Visão Geral
 
-Este projeto implementa um **sistema unificado e automatizado para cálculo da matriz de merecimento SKU-loja** utilizando Databricks, substituindo o processo manual atual por uma solução robusta, governada e configurável para todas as categorias de produtos.
+Este repositório implementa um **sistema unificado e automatizado para cálculo da matriz de merecimento SKU-loja** utilizando Databricks, substituindo o processo manual atual por uma solução robusta, governada e configurável para todas as categorias de produtos.
+
+### 🏗️ Arquitetura do Sistema
+
+O sistema é composto por **três componentes principais**:
+
+1. **📊 Cálculo de Merecimento** (`src/`)
+   - **Offline**: Processamento em lote para análises históricas e validações
+   - **Online**: Processamento em tempo real para operações diárias
+
+2. **🔧 Preparação de Tabelas** (`src/`)
+   - **Offline**: Preparação de dados históricos e tabelas de referência
+   - **Online**: Atualização incremental de dados operacionais
+
+3. **📈 Análises e Monitoramento** (`src/analysis/`)
+   - Notebooks especializados para análise de efetividade
+   - Monitoramento de performance e qualidade da matriz
+   - Comparações factuais entre diferentes abordagens
 
 ## Contexto do Negócio
 
@@ -24,6 +41,58 @@ O abastecimento de lojas é definido por uma série de processos sequenciais:
    - Demanda diária baseada em concentração de vendas
    - Verificação de parâmetros (cluster, voltagem)
    - Cálculo do envio considerando múltiplos fatores
+
+## 🚀 Componentes do Sistema
+
+### 📊 **Cálculo de Merecimento**
+
+#### **🔄 Modo Offline** (`calculo_matriz_de_merecimento_unificado.py`)
+- **Propósito**: Processamento em lote para análises históricas e validações
+- **Uso**: Execução manual ou agendada para períodos específicos
+- **Características**:
+  - Processamento completo de dados históricos
+  - Validação de qualidade e consistência
+  - Geração de relatórios detalhados
+  - Análise de tendências e sazonalidade
+
+#### **⚡ Modo Online** (`calculo_matriz_de_merecimento_online.py`)
+- **Propósito**: Processamento em tempo real para operações diárias
+- **Uso**: Execução automática diária para atualização da matriz
+- **Características**:
+  - Processamento incremental de dados
+  - Atualização rápida da matriz operacional
+  - Otimizado para performance
+  - Integração com sistemas de produção
+
+### 🔧 **Preparação de Tabelas**
+
+#### **📋 Preparação Offline** (`Preparacao_tabelas_Matriz_merecimento.py`)
+- **Propósito**: Preparação de dados históricos e tabelas de referência
+- **Funcionalidades**:
+  - Carregamento e limpeza de dados históricos
+  - Criação de tabelas de mapeamento (SKU → Grupo de Necessidade)
+  - Validação de integridade dos dados
+  - Preparação de dados para análises estatísticas
+
+#### **🔄 Preparação Online** (`Preparacao_tabelas_Matriz_merecimento_online.py`)
+- **Propósito**: Atualização incremental de dados operacionais
+- **Funcionalidades**:
+  - Atualização diária de dados de vendas
+  - Sincronização com sistemas operacionais
+  - Manutenção de tabelas de referência
+  - Preparação de dados para cálculo online
+
+### 📈 **Análises e Monitoramento** (`src/analysis/`)
+
+#### **📊 Análises de Efetividade**
+- **Análise de Demanda**: Avaliação da precisão da matriz de merecimento
+- **Comparação Factual**: Comparação entre matriz antiga e nova
+- **Análise de Elasticidade**: Avaliação de impacto de eventos e promoções
+
+#### **🔍 Monitoramento**
+- **Dashboard de Estoque**: Monitoramento de estoque por CD e loja
+- **Métricas de Performance**: Cálculo de métricas de qualidade (wMAPE, SE, Cross Entropy)
+- **Alertas de Anomalias**: Detecção automática de problemas na matriz
 
 ## Sistema Unificado de Merecimento
 
@@ -258,24 +327,50 @@ As métricas são calculadas automaticamente após o cálculo da matriz de merec
 - **Identificação de gaps**: Detecção de problemas específicos por segmento
 - **Otimização contínua**: Base para melhorias iterativas da matriz
 
-## Estrutura do Projeto
+## 📁 Estrutura do Projeto
 
 ```
 supply_matriz_de_merecimento/
-├── README.md                      # Documentação principal do sistema
-├── src/                           # Código fonte Python
-│   ├── calculo_matriz_de_merecimento_unificado.py  # 🆕 Sistema unificado principal
-│   ├── Preparacao_tabelas_Matriz_merecimento.py    # Preparação de tabelas base
-│   └── analysis/                  # Notebooks de análise
-│       ├── Analise_demanda_matriz_telas.py         # Análise específica para telas
-│       └── Analise_demanda_matriz_antiga.py        # Análise do sistema anterior
-├── .cursor/                       # Regras e configurações do Cursor
-│   └── rules/
-│       ├── python.mdc            # Regras para Python
-│       ├── typescript.mdc        # Regras para TypeScript
-│       └── pyspark.mdc           # Regras para PySpark
-└── docs/                         # Documentação técnica
+├── README.md                                    # 📖 Documentação principal do sistema
+├── src/                                         # 💻 Código fonte Python
+│   ├── calculo_matriz_de_merecimento_unificado.py    # 🔄 Sistema unificado OFFLINE
+│   ├── calculo_matriz_de_merecimento_online.py        # ⚡ Sistema unificado ONLINE
+│   ├── Preparacao_tabelas_Matriz_merecimento.py      # 📋 Preparação de tabelas OFFLINE
+│   ├── Preparacao_tabelas_Matriz_merecimento_online.py # 🔄 Preparação de tabelas ONLINE
+│   ├── Salvar_matrizes_calculadas_csv.py             # 💾 Exportação de resultados
+│   └── analysis/                                # 📊 Notebooks de análise e monitoramento
+│       ├── Analise_demanda_matriz_telas.py           # 📈 Análise de efetividade - Telas
+│       ├── Analise_demanda_matriz_antiga.py          # 📈 Análise de efetividade - Sistema anterior
+│       ├── analise_factual_comparacao_matrizes.py    # 🔍 Comparação factual entre matrizes
+│       ├── analise_elasticidade_demanda.py           # 📊 Análise de elasticidade de demanda
+│       ├── analise_elasticidade_eventos.py           # 📊 Análise de elasticidade de eventos
+│       ├── dashboard_estoque_cd_loja.py             # 📊 Dashboard de estoque por CD/loja
+│       ├── monitoramento_teste_matriz.py             # 🔍 Monitoramento de testes da matriz
+│       └── README.md                                # 📖 Documentação das análises
+├── docs/                                        # 📚 Documentação técnica adicional
+├── tests/                                        # 🧪 Testes unitários
+└── README_SISTEMA_UNIFICADO.md                  # 📖 Documentação técnica detalhada
 ```
+
+### 🎯 **Arquivos Principais**
+
+#### **🔄 Cálculo de Merecimento**
+- **`calculo_matriz_de_merecimento_unificado.py`**: Sistema principal OFFLINE para análises históricas
+- **`calculo_matriz_de_merecimento_online.py`**: Sistema principal ONLINE para operações diárias
+
+#### **🔧 Preparação de Dados**
+- **`Preparacao_tabelas_Matriz_merecimento.py`**: Preparação OFFLINE de dados históricos
+- **`Preparacao_tabelas_Matriz_merecimento_online.py`**: Preparação ONLINE de dados operacionais
+
+#### **💾 Exportação**
+- **`Salvar_matrizes_calculadas_csv.py`**: Exportação de matrizes calculadas para CSV
+
+#### **📊 Análises** (`src/analysis/`)
+- **Análises de Efetividade**: Avaliação da precisão da matriz
+- **Comparações Factuais**: Comparação entre diferentes abordagens
+- **Análises de Elasticidade**: Impacto de eventos e promoções
+- **Dashboards**: Visualizações interativas de estoque e performance
+- **Monitoramento**: Alertas e métricas de qualidade
 
 ## Arquitetura do Código
 
