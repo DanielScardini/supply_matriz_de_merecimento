@@ -29,7 +29,7 @@ from datetime import datetime, timedelta, date
 import pandas as pd
 from typing import List, Optional, Dict, Any
 
-# MAGIC %pip install openpyxl
+%pip install openpyxl
 
 
 # Inicialização do Spark
@@ -226,7 +226,7 @@ DE_PARA_CONSOLIDACAO_CDS = {
 data_m_menos_1 = hoje - timedelta(days=30)
 data_m_menos_1 = data_m_menos_1.strftime("%Y-%m-%d")
 
-DATA_CALCULO = "2025-09-30"
+DATA_CALCULO = "2025-10-15"
 data_calculo_auto = False
 
 if data_calculo_auto:
@@ -439,7 +439,6 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-07-01") -> Data
     df_base = (
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4_online')
         .filter(F.col("NmAgrupamentoDiretoriaSetor") == categoria)
-        #.filter(F.col("NmSetorGerencial") == 'PORTATEIS')
         .filter(F.col("DtAtual") >= data_inicio)
         .withColumn(
             "year_month",
@@ -1538,16 +1537,7 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         
         # 5. Definição do grupo_de_necessidade
         df_com_grupo = determinar_grupo_necessidade(categoria, df_com_mapeamentos)
-        # df_com_grupo = (
-        #     df_com_grupo
-        #     .filter(
-        #         F.col("grupo_de_necessidade").isin(
-        #             #'Telef pp', 
-        #             #'TV 50 ALTO P', 
-        #             'TV 55 ALTO P'
-        #             )
-        #     )
-        # )
+
         df_com_grupo.cache()
 
         # 5.0. Criar tabela de de-para grupo de necessidade
@@ -1653,10 +1643,10 @@ print("=" * 80)
 
 # Lista de todas as categorias disponíveis
 categorias = [
-    "DIRETORIA DE TELAS",
+    #"DIRETORIA DE TELAS",
     "DIRETORIA TELEFONIA CELULAR", 
     #"DIRETORIA DE LINHA BRANCA",
-    "DIRETORIA LINHA LEVE",
+    # "DIRETORIA LINHA LEVE",
     # "DIRETORIA INFO/PERIFERICOS"
 ]
 
@@ -1682,7 +1672,7 @@ for categoria in categorias:
             .upper()
         )
         
-        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_online_teste0710"
+        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_online_teste2410"
         
         print(f"💾 Salvando matriz de merecimento para: {categoria}")
         print(f"📊 Tabela: {nome_tabela}")

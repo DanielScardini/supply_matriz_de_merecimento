@@ -115,14 +115,14 @@ df_demanda_especie.filter(F.col("NmEspecieGerencial").isin(especies_top80)).agg(
 
 # Tabelas por categoria
 TABELAS_MATRIZ_MERECIMENTO = {
-    "DIRETORIA DE TELAS": {
-        "offline": "databox.bcg_comum.supply_matriz_merecimento_de_telas_teste0710",
-        "online": "databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste0710",
-        "grupo_apelido": "telas"
-    },
+    # "DIRETORIA DE TELAS": {
+    #     "offline": "databox.bcg_comum.supply_matriz_merecimento_de_telas_teste0710",
+    #     "online": "databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste0710",
+    #     "grupo_apelido": "telas"
+    # },
     "DIRETORIA TELEFONIA CELULAR": {
-        "offline": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste0710",
-        "online": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste0710",
+        "offline": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste2410",
+        "online": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste2410",
         "grupo_apelido": "telefonia"
     },
     # "DIRETORIA LINHA LEVE": {
