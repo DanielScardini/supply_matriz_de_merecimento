@@ -578,12 +578,16 @@ def aplicar_espelhamento_filiais(df_base: DataFrame, df_espelhamento: DataFrame)
     registros_removidos = registros_antes - df_sem_espelhadas.count()
     print(f"  • Registros removidos das filiais espelhadas: {registros_removidos:,}")
     
+    # ✅ OTIMIZAÇÃO: Repartition ambos DataFrames nas chaves de join
+    df_base_opt = df_base.repartition(NUM_PARTICOES_IDEAL, "CdFilial")
+    df_espelhamento_opt = df_espelhamento.repartition(NUM_PARTICOES_IDEAL, "CdFilial_referencia")
+    
     # Criar dados espelhados (copiando da filial de referência)
     df_espelhados = (
-        df_base
+        df_base_opt
         .join(
-            df_espelhamento,
-            df_base.CdFilial == df_espelhamento.CdFilial_referencia,
+            df_espelhamento_opt,
+            df_base_opt.CdFilial == df_espelhamento_opt.CdFilial_referencia,
             "inner"
         )
         .select(
@@ -660,8 +664,12 @@ def aplicar_mapeamentos_produtos(df: DataFrame, categoria: str,
     
     df_modelos_spark = spark.createDataFrame(de_para_modelos)
     
-    df_com_modelos = df.join(
-        df_modelos_spark,
+    # ✅ OTIMIZAÇÃO: Repartition ambos DataFrames nas chaves de join
+    df_opt = df.repartition(NUM_PARTICOES_IDEAL, "CdSku")
+    df_modelos_spark_opt = df_modelos_spark.repartition(NUM_PARTICOES_IDEAL, "CdSku")
+    
+    df_com_modelos = df_opt.join(
+        df_modelos_spark_opt,
         on="CdSku",
         how="left"
     )
@@ -670,8 +678,12 @@ def aplicar_mapeamentos_produtos(df: DataFrame, categoria: str,
         REGRAS_AGRUPAMENTO[categoria]["coluna_grupo_necessidade"] == "gemeos"):
         
         df_gemeos_spark = spark.createDataFrame(de_para_gemeos)
-        df_com_mapeamentos = df_com_modelos.join(
-            df_gemeos_spark,
+        # ✅ OTIMIZAÇÃO: Repartition para o segundo join também
+        df_com_modelos_opt = df_com_modelos.repartition(NUM_PARTICOES_IDEAL, "CdSku")
+        df_gemeos_spark_opt = df_gemeos_spark.repartition(NUM_PARTICOES_IDEAL, "CdSku")
+        
+        df_com_mapeamentos = df_com_modelos_opt.join(
+            df_gemeos_spark_opt,
             on="CdSku",
             how="left"
         )
@@ -886,9 +898,14 @@ def filtrar_meses_atipicos(df: DataFrame, df_meses_atipicos: DataFrame, data_cal
     else:
         df_meses_atipicos_filtrado = df_meses_atipicos
     
+    # ✅ OTIMIZAÇÃO: Repartition ambos DataFrames nas chaves de join
+    df_opt = df.repartition(NUM_PARTICOES_IDEAL, "grupo_de_necessidade", "year_month")
+    df_meses_atipicos_opt = df_meses_atipicos_filtrado.withColumn("flag_remover", F.lit(1)).repartition(NUM_PARTICOES_IDEAL, "grupo_de_necessidade", "year_month")
+    
     df_filtrado = (
-        df.join(
-            df_meses_atipicos_filtrado.withColumn("flag_remover", F.lit(1)),
+        df_opt
+        .join(
+            df_meses_atipicos_opt,
             on=["grupo_de_necessidade", "year_month"],
             how="left"
         )
@@ -1313,10 +1330,14 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
     # 2. Adicionar cd_primario ao merecimento interno (especificando qual coluna usar)
     de_para_filial_cd = criar_de_para_filial_cd()
 
+    # ✅ OTIMIZAÇÃO: Repartition ambos DataFrames nas chaves de join
+    df_merecimento_interno_opt = df_merecimento_interno.repartition(NUM_PARTICOES_IDEAL, "CdFilial")
+    de_para_filial_cd_opt = de_para_filial_cd.repartition(NUM_PARTICOES_IDEAL, "CdFilial")
+    
     df_merecimento_interno_com_cd = (
-        df_merecimento_interno
-        .join(de_para_filial_cd, on="CdFilial", how="left")
-        .withColumn("cd_vinculo_final", F.coalesce(de_para_filial_cd["cd_vinculo"], F.lit("SEM_CD")))
+        df_merecimento_interno_opt
+        .join(de_para_filial_cd_opt, on="CdFilial", how="left")
+        .withColumn("cd_vinculo_final", F.coalesce(de_para_filial_cd_opt["cd_vinculo"], F.lit("SEM_CD")))
         .drop("cd_vinculo")  # Remove a coluna ambígua
         .withColumnRenamed("cd_vinculo_final", "cd_vinculo")  # Renomeia para o nome final
     )
@@ -1469,8 +1490,17 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
         )
         .select("CdSku")
         .distinct()
-        .join(df_gdn, on="CdSku", how="inner")
+    )
+    
+    # ✅ OTIMIZAÇÃO: Repartition ambos DataFrames nas chaves de join
+    df_skus_opt = df_skus_data.repartition(NUM_PARTICOES_IDEAL, "CdSku")
+    df_gdn_opt = df_gdn.repartition(NUM_PARTICOES_IDEAL, "CdSku")
+    
+    df_skus_data = (
+        df_skus_opt
+        .join(df_gdn_opt, on="CdSku", how="inner")
         .filter(F.col("grupo_de_necessidade").isNotNull())
+    )
     )
     
     skus_count = df_skus_data.count()
