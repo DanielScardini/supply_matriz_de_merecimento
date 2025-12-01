@@ -36,18 +36,18 @@ from typing import List, Optional, Dict, Any
 spark = SparkSession.builder.appName("calculo_matriz_merecimento_unificado").getOrCreate()
 
 # ✅ OTIMIZAÇÃO: Calcular número ideal de partições baseado no número de cores
-def calcular_num_particoes_ideal(multiplier: int = 2, max_cores: int = 24) -> int:
+def calcular_num_particoes_ideal(multiplier: float = 1.5, max_cores: int = 24) -> int:
     """
     Calcula o número ideal de partições baseado no número de cores disponíveis.
     
     Melhores práticas:
-    - Número de partições = 1.5-2x o número de cores (padrão: 2x)
+    - Número de partições = 1.5x o número de cores (padrão: 1.5x)
     - Máximo de 24 cores conforme especificação do cluster
     - Evita muitas partições pequenas (overhead) ou poucas partições grandes (gargalo)
-    - Ideal: 48 partições para 24 cores (2x) ao invés de 72 (3x)
+    - Ideal: 36 partições para 24 cores (1.5x) - balanceamento otimizado
     
     Args:
-        multiplier: Multiplicador para número de cores (padrão: 2, reduzido de 3)
+        multiplier: Multiplicador para número de cores (padrão: 1.5)
         max_cores: Número máximo de cores a considerar (padrão: 24)
         
     Returns:
@@ -59,17 +59,40 @@ def calcular_num_particoes_ideal(multiplier: int = 2, max_cores: int = 24) -> in
         # Limitar ao máximo especificado
         num_cores = min(num_cores, max_cores)
         # Calcular partições ideais (mínimo 24 para evitar partições muito pequenas)
-        # Usar 2x ao invés de 3x para evitar partições excessivas
-        num_particoes = max(24, num_cores * multiplier)
+        # Usar 1.5x para evitar partições excessivas e overhead
+        num_particoes = max(24, int(num_cores * multiplier))
         print(f"📊 Configuração de particionamento: {num_cores} cores × {multiplier} = {num_particoes} partições ideais")
-        print(f"   ℹ️  Reduzido de 3x para 2x para evitar partições pequenas por local")
+        print(f"   ℹ️  Otimizado para evitar partições pequenas por local (50+ partições)")
         return num_particoes
     except Exception as e:
         print(f"⚠️ Erro ao calcular número de partições, usando padrão: {e}")
-        # Fallback: usar 48 partições (2x 24 cores) ao invés de 72
-        return 48
+        # Fallback: usar 36 partições (1.5x 24 cores)
+        return 36
 
-NUM_PARTICOES_IDEAL = calcular_num_particoes_ideal(multiplier=2, max_cores=24)
+# ✅ OTIMIZAÇÃO: Função auxiliar para coalesce inteligente
+def coalesce_inteligente(df: DataFrame, max_particoes: int = None) -> DataFrame:
+    """
+    Aplica coalesce de forma inteligente, reduzindo partições pequenas.
+    
+    Args:
+        df: DataFrame a ser otimizado
+        max_particoes: Número máximo de partições desejado (padrão: NUM_PARTICOES_IDEAL)
+        
+    Returns:
+        DataFrame com número otimizado de partições
+    """
+    if max_particoes is None:
+        max_particoes = NUM_PARTICOES_IDEAL
+    
+    num_particoes_atual = df.rdd.getNumPartitions()
+    
+    if num_particoes_atual > max_particoes:
+        print(f"  🔧 Coalesce: {num_particoes_atual} → {max_particoes} partições")
+        return df.coalesce(max_particoes)
+    else:
+        return df
+
+NUM_PARTICOES_IDEAL = calcular_num_particoes_ideal(multiplier=1.5, max_cores=24)
 
 hoje = datetime.now() - timedelta(days=1)
 hoje_str = hoje.strftime("%Y-%m-%d")
@@ -1195,7 +1218,7 @@ def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) ->
     )
     
     # ✅ OTIMIZAÇÃO: Coalesce após groupBy para reduzir partições
-    df_merecimento_cd = df_merecimento_cd.coalesce(NUM_PARTICOES_IDEAL)
+    df_merecimento_cd = coalesce_inteligente(df_merecimento_cd)
     
     # Calcular percentual do CD dentro da Cia
     w_total_cia = Window.partitionBy("grupo_de_necessidade")
@@ -1290,7 +1313,7 @@ def calcular_merecimento_interno_cd(df: DataFrame, data_calculo: str, categoria:
     )
     
     # ✅ OTIMIZAÇÃO: Coalesce após groupBy
-    df_filial = df_filial.coalesce(NUM_PARTICOES_IDEAL)
+    df_filial = coalesce_inteligente(df_filial)
     
     # Janela no nível cd_primario × grupo_de_necessidade
     w_cd_grp = Window.partitionBy("cd_vinculo", "grupo_de_necessidade")
@@ -1365,7 +1388,7 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
     )
     
     # ✅ OTIMIZAÇÃO: Coalesce após join
-    df_merecimento_final = df_merecimento_final.coalesce(NUM_PARTICOES_IDEAL)
+    df_merecimento_final = coalesce_inteligente(df_merecimento_final)
     
     # 4. Calcular merecimento final (multiplicação)
     # Para cada medida aparada, multiplicar pelo merecimento CD (90 dias)
@@ -1650,7 +1673,7 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         )
         
         # ✅ OTIMIZAÇÃO: Coalesce após groupBy para reduzir partições pequenas
-        df_agregado = df_agregado.coalesce(NUM_PARTICOES_IDEAL)
+        df_agregado = coalesce_inteligente(df_agregado)
         
         # 6. Detecção de outliers
         df_stats, df_meses_atipicos = detectar_outliers_meses_atipicos(df_agregado, categoria)
@@ -1680,7 +1703,7 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         df_com_medidas = calcular_medidas_centrais_com_medias_aparadas(df_sem_outliers)
         
         # ✅ OTIMIZAÇÃO: Coalesce após cálculos de Window para reduzir partições
-        df_com_medidas = df_com_medidas.coalesce(NUM_PARTICOES_IDEAL)
+        df_com_medidas = coalesce_inteligente(df_com_medidas)
         
         # 10. Consolidação final
         df_final = consolidar_medidas(df_com_medidas)
@@ -1736,7 +1759,7 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         )
         
         # ✅ OTIMIZAÇÃO: Coalesce final antes de retornar
-        df_merecimento_sku_filial = df_merecimento_sku_filial.coalesce(NUM_PARTICOES_IDEAL)
+        df_merecimento_sku_filial = coalesce_inteligente(df_merecimento_sku_filial)
         
         print("=" * 80)
         print(f"✅ Cálculo da matriz de merecimento concluído para: {categoria}")
