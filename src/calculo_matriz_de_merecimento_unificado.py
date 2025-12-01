@@ -38,6 +38,39 @@ from typing import List, Optional, Dict, Any
 # Inicialização do Spark
 spark = SparkSession.builder.appName("calculo_matriz_merecimento_unificado").getOrCreate()
 
+# ✅ OTIMIZAÇÃO: Calcular número ideal de partições baseado no número de cores
+def calcular_num_particoes_ideal(multiplier: int = 3, max_cores: int = 24) -> int:
+    """
+    Calcula o número ideal de partições baseado no número de cores disponíveis.
+    
+    Melhores práticas:
+    - Número de partições = 2-3x o número de cores (padrão: 3x)
+    - Máximo de 24 cores conforme especificação do cluster
+    - Evita muitas partições pequenas ou poucas partições grandes
+    
+    Args:
+        multiplier: Multiplicador para número de cores (padrão: 3)
+        max_cores: Número máximo de cores a considerar (padrão: 24)
+        
+    Returns:
+        Número ideal de partições
+    """
+    try:
+        # Obter número de cores do Spark Context
+        num_cores = spark.sparkContext.defaultParallelism
+        # Limitar ao máximo especificado
+        num_cores = min(num_cores, max_cores)
+        # Calcular partições ideais (mínimo 32 para evitar partições muito pequenas)
+        num_particoes = max(32, num_cores * multiplier)
+        print(f"📊 Configuração de particionamento: {num_cores} cores × {multiplier} = {num_particoes} partições ideais")
+        return num_particoes
+    except Exception as e:
+        print(f"⚠️ Erro ao calcular número de partições, usando padrão: {e}")
+        # Fallback: usar 72 partições (3x 24 cores)
+        return 72
+
+NUM_PARTICOES_IDEAL = calcular_num_particoes_ideal(multiplier=3, max_cores=24)
+
 hoje = datetime.now() - timedelta(days=1)
 hoje_str = hoje.strftime("%Y-%m-%d")
 hoje_int = int(hoje.strftime("%Y%m%d"))
@@ -1138,6 +1171,9 @@ def calcular_merecimento_cd(df: DataFrame, data_calculo: str, categoria: str) ->
         )
     )
     
+    # ✅ OTIMIZAÇÃO: Coalesce após groupBy para reduzir partições
+    df_merecimento_cd = df_merecimento_cd.coalesce(NUM_PARTICOES_IDEAL)
+    
     # Calcular percentual do CD dentro da Cia
     w_total_cia = Window.partitionBy("grupo_de_necessidade")
     
@@ -1216,7 +1252,12 @@ def calcular_merecimento_interno_cd(df: DataFrame, data_calculo: str, categoria:
     
     # Join com de-para filial-CD
     de_para_filial_cd = criar_de_para_filial_cd()
-    df_com_cd = df_data_calculo.join(de_para_filial_cd, on="CdFilial", how="left")  # ✅ CamelCase
+    
+    # ✅ OTIMIZAÇÃO: Repartition ambos DataFrames nas chaves de join
+    df_data_calculo_opt = df_data_calculo.repartition(NUM_PARTICOES_IDEAL, "CdFilial")
+    de_para_filial_cd_opt = de_para_filial_cd.repartition(NUM_PARTICOES_IDEAL, "CdFilial")
+    
+    df_com_cd = df_data_calculo_opt.join(de_para_filial_cd_opt, on="CdFilial", how="left")  # ✅ CamelCase
     
     # Agregar no nível filial × grupo_de_necessidade (somando os SKUs)
     aggs = [F.sum(F.coalesce(F.col(m), F.lit(0))).alias(m) for m in medidas]
@@ -1225,6 +1266,9 @@ def calcular_merecimento_interno_cd(df: DataFrame, data_calculo: str, categoria:
         .groupBy("CdFilial", "cd_vinculo", "grupo_de_necessidade")
         .agg(*aggs)
     )
+    
+    # ✅ OTIMIZAÇÃO: Coalesce após groupBy
+    df_filial = df_filial.coalesce(NUM_PARTICOES_IDEAL)
     
     # Janela no nível cd_vinculo × grupo_de_necessidade
     w_cd_grp = Window.partitionBy("cd_vinculo", "grupo_de_necessidade")
@@ -1274,17 +1318,27 @@ def calcular_merecimento_final(df_merecimento_cd: DataFrame,
         .withColumnRenamed("cd_vinculo_final", "cd_vinculo")  # Renomeia para o nome final
     )
     
-    # 3. Join entre merecimento CD e merecimento interno
-    df_merecimento_final = (
+    # ✅ OTIMIZAÇÃO: Repartition ambos DataFrames nas chaves de join
+    df_merecimento_interno_opt = (
         df_merecimento_interno_com_cd
         .orderBy("CdFilial", "cd_vinculo", "grupo_de_necessidade")
         .dropDuplicates(subset=["CdFilial", "cd_vinculo", "grupo_de_necessidade"])
+        .repartition(NUM_PARTICOES_IDEAL, "cd_vinculo", "grupo_de_necessidade")
+    )
+    df_merecimento_cd_opt = df_merecimento_cd_limpo.repartition(NUM_PARTICOES_IDEAL, "cd_vinculo", "grupo_de_necessidade")
+    
+    # 3. Join entre merecimento CD e merecimento interno
+    df_merecimento_final = (
+        df_merecimento_interno_opt
         .join(
-            df_merecimento_cd_limpo,
+            df_merecimento_cd_opt,
             on=["cd_vinculo", "grupo_de_necessidade"],
             how="left"
         )
     )
+    
+    # ✅ OTIMIZAÇÃO: Coalesce após join
+    df_merecimento_final = df_merecimento_final.coalesce(NUM_PARTICOES_IDEAL)
     
     # 4. Calcular merecimento final (multiplicação)
     # Para cada medida aparada, multiplicar pelo merecimento CD (90 dias)
@@ -1539,8 +1593,11 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         # 5.0. Criar tabela de de-para grupo de necessidade
         count_registros = criar_tabela_de_para_grupo_necessidade_direto(hoje, usar_excel=USAR_DE_PARA_EXCEL)
 
+        # ✅ OTIMIZAÇÃO: Repartition antes de groupBy para melhor distribuição
+        df_com_grupo_opt = df_com_grupo.repartition(NUM_PARTICOES_IDEAL, "grupo_de_necessidade", "CdFilial")
+        
         df_agregado = (
-            df_com_grupo
+            df_com_grupo_opt
             .groupBy("grupo_de_necessidade", "CdFilial", "DtAtual", "year_month")
             .agg(
                 F.sum("QtMercadoria").alias("QtMercadoria"),
@@ -1549,11 +1606,17 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
             )
         )
         
+        # ✅ OTIMIZAÇÃO: Coalesce após groupBy para reduzir partições pequenas
+        df_agregado = df_agregado.coalesce(NUM_PARTICOES_IDEAL)
+        
         # 6. Detecção de outliers
         df_stats, df_meses_atipicos = detectar_outliers_meses_atipicos(df_agregado, categoria)
         
         # 7. Filtragem de meses atípicos
         df_filtrado = filtrar_meses_atipicos(df_agregado, df_meses_atipicos, DATA_CALCULO)
+        
+        # ✅ OTIMIZAÇÃO: Repartition antes de operações de Window pesadas
+        df_filtrado = df_filtrado.repartition(NUM_PARTICOES_IDEAL, "grupo_de_necessidade", "CdFilial")
         
         # 8. Remoção de outliers das séries históricas
         print("=" * 80)
@@ -1573,8 +1636,14 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         # 9. Cálculo das medidas centrais
         df_com_medidas = calcular_medidas_centrais_com_medias_aparadas(df_sem_outliers)
         
+        # ✅ OTIMIZAÇÃO: Coalesce após cálculos de Window para reduzir partições
+        df_com_medidas = df_com_medidas.coalesce(NUM_PARTICOES_IDEAL)
+        
         # 10. Consolidação final
         df_final = consolidar_medidas(df_com_medidas)
+        
+        # ✅ OTIMIZAÇÃO: Repartition antes de joins e cálculos de merecimento
+        df_final = df_final.repartition(NUM_PARTICOES_IDEAL, "grupo_de_necessidade", "CdFilial")
         
         # ✅ 10.1 NOVO: Garantir integridade dos dados pré-merecimento
         df_final = garantir_integridade_dados_pre_merecimento(df_final)
@@ -1594,11 +1663,21 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
 
         # Criar o esqueleto
         df_esqueleto = criar_esqueleto_matriz_completa(df_com_grupo, data_m_menos_1)
+        
+        # ✅ OTIMIZAÇÃO: Repartition esqueleto antes do join final
+        df_esqueleto = df_esqueleto.repartition(NUM_PARTICOES_IDEAL, "grupo_de_necessidade", "CdFilial")
 
         # Primeiro, identificar todas as colunas de merecimento final
         colunas_merecimento_final = [col for col in df_merecimento_final.columns 
                                 if col.startswith('Merecimento_Final_')]
 
+        # ✅ OTIMIZAÇÃO: Preparar e repartition merecimento final antes do join
+        df_merecimento_final_join = (
+            df_merecimento_final
+            .select('grupo_de_necessidade', 'CdFilial', *colunas_merecimento_final)
+            .dropDuplicates(subset=['grupo_de_necessidade', 'CdFilial'])
+            .repartition(NUM_PARTICOES_IDEAL, "grupo_de_necessidade", "CdFilial")
+        )
 
         # Criar dicionário de fillna
         fillna_dict = {col: 0.0 for col in colunas_merecimento_final}
@@ -1606,14 +1685,15 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         df_merecimento_sku_filial = (
             df_esqueleto
             .join(
-                df_merecimento_final
-                .select('grupo_de_necessidade', 'CdFilial', *colunas_merecimento_final)
-                .dropDuplicates(subset=['grupo_de_necessidade', 'CdFilial']), 
+                df_merecimento_final_join, 
                 on=['grupo_de_necessidade', 'CdFilial'], 
                 how='left'
             )
             .fillna(fillna_dict)
         )
+        
+        # ✅ OTIMIZAÇÃO: Coalesce final antes de retornar
+        df_merecimento_sku_filial = df_merecimento_sku_filial.coalesce(NUM_PARTICOES_IDEAL)
         
         print("=" * 80)
         print(f"✅ Cálculo da matriz de merecimento concluído para: {categoria}")
