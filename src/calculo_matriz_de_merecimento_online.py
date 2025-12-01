@@ -36,17 +36,18 @@ from typing import List, Optional, Dict, Any
 spark = SparkSession.builder.appName("calculo_matriz_merecimento_unificado").getOrCreate()
 
 # ✅ OTIMIZAÇÃO: Calcular número ideal de partições baseado no número de cores
-def calcular_num_particoes_ideal(multiplier: int = 3, max_cores: int = 24) -> int:
+def calcular_num_particoes_ideal(multiplier: int = 2, max_cores: int = 24) -> int:
     """
     Calcula o número ideal de partições baseado no número de cores disponíveis.
     
     Melhores práticas:
-    - Número de partições = 2-3x o número de cores (padrão: 3x)
+    - Número de partições = 1.5-2x o número de cores (padrão: 2x)
     - Máximo de 24 cores conforme especificação do cluster
-    - Evita muitas partições pequenas ou poucas partições grandes
+    - Evita muitas partições pequenas (overhead) ou poucas partições grandes (gargalo)
+    - Ideal: 48 partições para 24 cores (2x) ao invés de 72 (3x)
     
     Args:
-        multiplier: Multiplicador para número de cores (padrão: 3)
+        multiplier: Multiplicador para número de cores (padrão: 2, reduzido de 3)
         max_cores: Número máximo de cores a considerar (padrão: 24)
         
     Returns:
@@ -57,16 +58,18 @@ def calcular_num_particoes_ideal(multiplier: int = 3, max_cores: int = 24) -> in
         num_cores = spark.sparkContext.defaultParallelism
         # Limitar ao máximo especificado
         num_cores = min(num_cores, max_cores)
-        # Calcular partições ideais (mínimo 32 para evitar partições muito pequenas)
-        num_particoes = max(32, num_cores * multiplier)
+        # Calcular partições ideais (mínimo 24 para evitar partições muito pequenas)
+        # Usar 2x ao invés de 3x para evitar partições excessivas
+        num_particoes = max(24, num_cores * multiplier)
         print(f"📊 Configuração de particionamento: {num_cores} cores × {multiplier} = {num_particoes} partições ideais")
+        print(f"   ℹ️  Reduzido de 3x para 2x para evitar partições pequenas por local")
         return num_particoes
     except Exception as e:
         print(f"⚠️ Erro ao calcular número de partições, usando padrão: {e}")
-        # Fallback: usar 72 partições (3x 24 cores)
-        return 72
+        # Fallback: usar 48 partições (2x 24 cores) ao invés de 72
+        return 48
 
-NUM_PARTICOES_IDEAL = calcular_num_particoes_ideal(multiplier=3, max_cores=24)
+NUM_PARTICOES_IDEAL = calcular_num_particoes_ideal(multiplier=2, max_cores=24)
 
 hoje = datetime.now() - timedelta(days=1)
 hoje_str = hoje.strftime("%Y-%m-%d")
