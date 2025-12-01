@@ -53,25 +53,6 @@ DE_PARA_CONSOLIDACAO_CDS = {
 
 # COMMAND ----------
 
-tabela_old = "databox.bcg_comum.supply_base_merecimento_diario_v3_online"
-tabela_new = "databox.bcg_comum.supply_base_merecimento_diario_v4_online"
-
-# 1. Checar se a new já existe
-if spark._jsparkSession.catalog().tableExists(tabela_new):
-    print(f"⚠️ A tabela {tabela_new} já existe. Pode seguir com processo de append.")
-else:
-    # 2. Pegar schema da old
-    schema_old = spark.table(tabela_old).schema
-    
-    # 3. Criar DataFrame vazio com esse schema
-    df_empty = spark.createDataFrame([], schema_old)
-    
-    # 4. Criar tabela new
-    df_empty.write.saveAsTable(tabela_new)
-    print(f"✅ Tabela {tabela_new} criada vazia com schema de {tabela_old}.")
-
-# COMMAND ----------
-
 def get_data_inicio(hoje: datetime | date | None = None) -> datetime:
     """
     Retorna datetime no dia 1 do mês que está 3 meses antes de 'hoje'.
@@ -83,7 +64,7 @@ def get_data_inicio(hoje: datetime | date | None = None) -> datetime:
     else:
         hoje_d = hoje
 
-    total_meses = hoje_d.year * 12 + hoje_d.month - 0
+    total_meses = hoje_d.year * 12 + hoje_d.month - 1
     ano = total_meses // 12
     mes = total_meses % 12
     if mes == 0:

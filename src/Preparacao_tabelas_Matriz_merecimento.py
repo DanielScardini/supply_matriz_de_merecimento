@@ -42,7 +42,7 @@ def get_data_inicio(hoje: datetime | date | None = None) -> datetime:
     else:
         hoje_d = hoje
 
-    total_meses = hoje_d.year * 12 + hoje_d.month - 0
+    total_meses = hoje_d.year * 12 + hoje_d.month - 1
     ano = total_meses // 12
     mes = total_meses % 12
     if mes == 0:

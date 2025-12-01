@@ -23,6 +23,10 @@
 
 # COMMAND ----------
 
+
+
+# COMMAND ----------
+
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F, Window
 from datetime import datetime, timedelta, date
@@ -60,7 +64,7 @@ def criar_tabela_de_para_grupo_necessidade_direto(hoje: datetime, usar_excel: bo
             # Carregar do Excel
             print("📁 Carregando de-para do Excel (de_para_gemeos_tecnologia.xlsx)...")
             de_para_df = pd.read_excel(
-                "/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/dados_analise/de_para_gemeos_tecnologia.xlsx",
+                "/Workspace/Users/daniel.scardini-ext@viavarejo.com.br/supply/supply_matriz_de_merecimento/src/dados_analise/de_para_gemeos_tecnologia.xlsx",
                 sheet_name="de_para"
             )
         else:
@@ -133,7 +137,7 @@ def carregar_de_para_gemeos_tecnologia(flag_excel=True) -> pd.DataFrame:
         print("📋 Carregando de-para do Excel (de_para_gemeos_tecnologia.xlsx)...")
         try:
             de_para_df = pd.read_excel(
-                'dados_analise/de_para_gemeos_tecnologia.xlsx',
+                '/Workspace/Users/daniel.scardini-ext@viavarejo.com.br/supply/supply_matriz_de_merecimento/src/dados_analise/de_para_gemeos_tecnologia.xlsx',
                 sheet_name='de_para'
             )
             
@@ -231,7 +235,7 @@ DE_PARA_CONSOLIDACAO_CDS = {
 data_m_menos_1 = hoje - timedelta(days=30)
 data_m_menos_1 = data_m_menos_1.strftime("%Y-%m-%d")
 
-DATA_CALCULO = "2025-11-15"
+DATA_CALCULO = "2025-11-30"
 data_calculo_auto = False
 
 if data_calculo_auto:
@@ -279,7 +283,7 @@ REGRAS_AGRUPAMENTO = {
         "tipo_agrupamento": "gêmeos",
         "descricao": "Agrupamento por produtos similares (gêmeos)"
     },
-    "DIRETORIA LINHA BRANCA": {
+    "DIRETORIA DE LINHA BRANCA": {
         "coluna_grupo_necessidade": "NmEspecieGerencial",
         "tipo_agrupamento": "espécie_gerencial",
         "descricao": "Agrupamento por espécie gerencial + voltagem (DsVoltagem)"
@@ -289,7 +293,7 @@ REGRAS_AGRUPAMENTO = {
         "tipo_agrupamento": "espécie_gerencial", 
         "descricao": "Agrupamento por espécie gerencial + voltagem (DsVoltagem)"
     },
-    "DIRETORIA INFO/GAMES": {
+    "DIRETORIA INFO/PERIFERICOS": {
         "coluna_grupo_necessidade": "NmEspecieGerencial",
         "tipo_agrupamento": "espécie_gerencial",
         "descricao": "Agrupamento por espécie gerencial"
@@ -469,7 +473,7 @@ def carregar_de_para_espelhamento() -> DataFrame:
     try:
         # Carrega o arquivo Excel usando pandas
         df_pandas = pd.read_excel(
-            "/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/planilha_governanca/governanca_supply_inputs_matriz_merecimento.xlsx",
+            "/Workspace/Users/daniel.scardini-ext@viavarejo.com.br/supply/supply_matriz_de_merecimento/src/planilha_governanca/governanca_supply_inputs_matriz_merecimento.xlsx",
             sheet_name="espelhamento_lojas"
         )
         
@@ -588,7 +592,7 @@ def carregar_mapeamentos_produtos(categoria: str) -> tuple:
     print("🔄 Carregando mapeamentos de produtos...")
     
     de_para_modelos_tecnologia = (
-        pd.read_csv('dados_analise/MODELOS_AJUSTE (1).csv', 
+        pd.read_csv('/Workspace/Users/daniel.scardini-ext@viavarejo.com.br/supply/supply_matriz_de_merecimento/src/dados_analise/MODELOS_AJUSTE (1).csv', 
                     delimiter=';')
         .drop_duplicates()
     )
@@ -1635,10 +1639,10 @@ print("=" * 80)
 # Lista de todas as categorias disponíveis
 categorias = [
     #"DIRETORIA DE TELAS",
-    "DIRETORIA TELEFONIA CELULAR", 
-    #"DIRETORIA DE LINHA BRANCA",
+    #"DIRETORIA TELEFONIA CELULAR", 
+    "DIRETORIA DE LINHA BRANCA",
     #"DIRETORIA LINHA LEVE",
-    # "DIRETORIA INFO/PERIFERICOS"
+    "DIRETORIA INFO/PERIFERICOS"
 ]
 
 resultados_finais = {}
@@ -1663,7 +1667,7 @@ for categoria in categorias:
             .upper()
         )
         
-        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste1411"
+        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste0112"
 
         
         print(f"💾 Salvando matriz de merecimento para: {categoria}")

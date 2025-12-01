@@ -121,7 +121,7 @@ TABELAS_MATRIZ_MERECIMENTO = {
     # },
     "DIRETORIA TELEFONIA CELULAR": {
 
-        "offline": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste1411",
+        "offline": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste0112",
         "online": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste1411",
         "grupo_apelido": "telefonia"
     },
