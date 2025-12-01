@@ -127,6 +127,12 @@ df_matriz_neogrid_agg_online = (
     F.round(F.mean('PercMatrizNeogrid'), 3).alias('PercMatrizNeogrid'),
     F.round(F.median('PercMatrizNeogrid'),3).alias('PercMatrizNeogrid_median')
   )
+  .withColumn("CdFilial",
+              F.when(
+                  F.col("CdFilial") == 14, F.lit(1401)
+              ).otherwise(F.col("CdFilial"))
+            )
+              
 )
 
 df_matriz_neogrid_online.cache()
@@ -700,13 +706,13 @@ for categoria in categorias_teste:
         .agg(
             F.sum("QtDemanda").alias("QtDemanda"),
             F.sum("Percentual_QtDemanda").alias("Percentual_QtDemanda"),
-            F.sum("Merecimento_Final_Media90_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media90_Qt_venda_sem_ruptura"),
-            F.sum("Merecimento_Final_Media180_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media180_Qt_venda_sem_ruptura"),
-            F.sum("Merecimento_Final_Media270_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media270_Qt_venda_sem_ruptura"),
-            F.sum("Merecimento_Final_Media360_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media360_Qt_venda_sem_ruptura"),
+            # F.sum("Merecimento_Final_Media90_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media90_Qt_venda_sem_ruptura"),
+            # F.sum("Merecimento_Final_Media180_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media180_Qt_venda_sem_ruptura"),
+            # F.sum("Merecimento_Final_Media270_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media270_Qt_venda_sem_ruptura"),
+            # F.sum("Merecimento_Final_Media360_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media360_Qt_venda_sem_ruptura"),
             F.sum("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura"),
             F.sum("Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura"),
-            F.sum("Merecimento_Final_MediaAparada270_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada270_Qt_venda_sem_ruptura"),
+            # F.sum("Merecimento_Final_MediaAparada270_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada270_Qt_venda_sem_ruptura"),
             F.sum("Merecimento_Final_MediaAparada360_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada360_Qt_venda_sem_ruptura"),
             F.sum("PercMatrizNeogrid").alias("PercMatrizNeogrid"),
             F.sum("PercMatrizNeogrid_median").alias("PercMatrizNeogrid_median")

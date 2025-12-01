@@ -152,6 +152,11 @@ df_matriz_neogrid_agg_offline = (
     F.round(F.mean('PercMatrizNeogrid'), 3).alias('PercMatrizNeogrid'),
     F.round(F.median('PercMatrizNeogrid'),3).alias('PercMatrizNeogrid_median')
   )
+  .withColumn("CdFilial",
+              F.when(
+                  F.col("CdFilial") == 14, F.lit(1401)
+              ).otherwise(F.col("CdFilial"))
+            )
 )
 
 df_matriz_neogrid_online.cache()

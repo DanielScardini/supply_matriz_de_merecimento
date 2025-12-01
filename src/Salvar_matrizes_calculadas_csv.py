@@ -81,8 +81,7 @@ especies_top80 = (
     df_demanda_especie
     .filter(F.col("PercDemandaCumulativo") <= 80)
     .select("NmEspecieGerencial")
-    .rdd.flatMap(lambda x: x)
-    .collect()
+    .toPandas().values.tolist()
 )
 
 
@@ -121,8 +120,9 @@ TABELAS_MATRIZ_MERECIMENTO = {
     #     "grupo_apelido": "telas"
     # },
     "DIRETORIA TELEFONIA CELULAR": {
-        "offline": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste2410",
-        "online": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste2410",
+
+        "offline": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste1411",
+        "online": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste1411",
         "grupo_apelido": "telefonia"
     },
     # "DIRETORIA LINHA LEVE": {
@@ -133,7 +133,7 @@ TABELAS_MATRIZ_MERECIMENTO = {
 }
 
 # Pasta de saída
-PASTA_OUTPUT = "/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/output"
+PASTA_OUTPUT = "/Workspace/Users/daniel.scardini-ext@viavarejo.com.br/supply/supply_matriz_de_merecimento/src/output"
 
 # Colunas de merecimento por categoria
 COLUNAS_MERECIMENTO = {
@@ -169,6 +169,7 @@ FILTROS_GRUPO_REMOCAO = {
                             "TV 75 QNED MEDIO",],
     
     "DIRETORIA TELEFONIA CELULAR": ["FORA DE LINHA", "SEM_GN", ">4000", "3001 a 3500", "Chip"],
+
     "DIRETORIA LINHA LEVE": ["FORA DE LINHA", "SEM_GN", "ASPIRADOR DE PO_BIV", "APARADOR DE PELOS_110", "SECADORES DE CABELO_"],
 }
 
@@ -191,7 +192,7 @@ MAX_LINHAS_POR_ARQUIVO = 150000
 FILTROS_PRODUTOS = {
     "DIRETORIA DE TELAS": {
         "tipificacao_entrega": ["SL"],  # Apenas SL (Sai Loja)
-        "marcas_excluidas": [],  # Excluir marca APPLE
+        "marcas_excluidas": ["LG"],  # Excluir marca APPLE
         "aplicar_filtro": True
     },
     "DIRETORIA TELEFONIA CELULAR": {

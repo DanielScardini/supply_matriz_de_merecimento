@@ -231,8 +231,8 @@ DE_PARA_CONSOLIDACAO_CDS = {
 data_m_menos_1 = hoje - timedelta(days=30)
 data_m_menos_1 = data_m_menos_1.strftime("%Y-%m-%d")
 
-DATA_CALCULO = "2025-10-15"
-data_calculo_auto = True
+DATA_CALCULO = "2025-11-15"
+data_calculo_auto = False
 
 if data_calculo_auto:
     DATA_CALCULO = hoje - timedelta(days=1)
@@ -1663,7 +1663,8 @@ for categoria in categorias:
             .upper()
         )
         
-        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste2410"
+        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste1411"
+
         
         print(f"💾 Salvando matriz de merecimento para: {categoria}")
         print(f"📊 Tabela: {nome_tabela}")
