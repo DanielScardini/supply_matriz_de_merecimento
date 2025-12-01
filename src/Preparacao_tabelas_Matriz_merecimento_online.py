@@ -247,10 +247,6 @@ df_consolidado#.display()
 
 # COMMAND ----------
 
-# MAGIC %sql SELECT * FROM data_engineering_prd.
-
-# COMMAND ----------
-
 def load_mercadoria_data(spark: SparkSession) -> DataFrame:
     """
     Carrega dados de mercadorias com suas classificações gerenciais.

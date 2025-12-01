@@ -29,7 +29,7 @@ from datetime import datetime, timedelta, date
 import pandas as pd
 from typing import List, Optional, Dict, Any
 
-# MAGIC %pip install openpyxl
+%pip install openpyxl
 
 # Inicialização do Spark
 spark = SparkSession.builder.appName("calculo_matriz_merecimento_unificado").getOrCreate()
@@ -440,7 +440,6 @@ def carregar_dados_base(categoria: str, data_inicio: str = "2024-07-01") -> Data
     df_base = (
         spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
         .filter(F.col("NmAgrupamentoDiretoriaSetor") == categoria)
-        #.filter(F.col("NmSetorGerencial") == 'PORTATEIS')
         .filter(F.col("DtAtual") >= data_inicio)
         .withColumn(
             "year_month",
@@ -1635,8 +1634,8 @@ print("=" * 80)
 
 # Lista de todas as categorias disponíveis
 categorias = [
-    "DIRETORIA DE TELAS",
-    #"DIRETORIA TELEFONIA CELULAR", 
+    #"DIRETORIA DE TELAS",
+    "DIRETORIA TELEFONIA CELULAR", 
     #"DIRETORIA DE LINHA BRANCA",
     #"DIRETORIA LINHA LEVE",
     # "DIRETORIA INFO/PERIFERICOS"
@@ -1664,7 +1663,7 @@ for categoria in categorias:
             .upper()
         )
         
-        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste0710"
+        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste2410"
         
         print(f"💾 Salvando matriz de merecimento para: {categoria}")
         print(f"📊 Tabela: {nome_tabela}")
