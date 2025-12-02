@@ -325,12 +325,38 @@ DE_PARA_CONSOLIDACAO_CDS = {
 data_m_menos_1 = hoje - timedelta(days=30)
 data_m_menos_1 = data_m_menos_1.strftime("%Y-%m-%d")
 
-DATA_CALCULO = "2025-11-30"
-data_calculo_auto = False
+# ✅ PARAMETRIZAÇÃO: Widgets do Databricks para configuração
+dbutils.widgets.text("data_calculo", "2025-11-30", "📅 Data de Cálculo (YYYY-MM-DD)")
+dbutils.widgets.text("sufixo_tabela", "teste0112", "🏷️ Sufixo da Tabela (ex: teste0112)")
+dbutils.widgets.multiselect(
+    "diretorias",
+    ["DIRETORIA DE TELAS", "DIRETORIA TELEFONIA CELULAR", "DIRETORIA DE LINHA BRANCA", "DIRETORIA LINHA LEVE", "DIRETORIA INFO/PERIFERICOS"],
+    ["DIRETORIA DE LINHA BRANCA", "DIRETORIA INFO/PERIFERICOS"],
+    "📋 Diretorias para Processar"
+)
 
-if data_calculo_auto:
-    DATA_CALCULO = hoje - timedelta(days=1)
-    DATA_CALCULO = DATA_CALCULO.strftime("%Y-%m-%d")
+# Obter valores dos widgets
+DATA_CALCULO = dbutils.widgets.get("data_calculo")
+SUFIXO_TABELA = dbutils.widgets.get("sufixo_tabela")
+DIRETORIAS_SELECIONADAS = dbutils.widgets.get("diretorias").split(",") if dbutils.widgets.get("diretorias") else []
+
+# Validar data de cálculo
+try:
+    datetime.strptime(DATA_CALCULO, "%Y-%m-%d")
+    print(f"✅ Data de cálculo configurada: {DATA_CALCULO}")
+except ValueError:
+    print(f"⚠️ Data inválida '{DATA_CALCULO}', usando data padrão")
+    DATA_CALCULO = (hoje - timedelta(days=1)).strftime("%Y-%m-%d")
+
+# Validar diretorias selecionadas
+if not DIRETORIAS_SELECIONADAS:
+    print("⚠️ Nenhuma diretoria selecionada, usando padrão")
+    DIRETORIAS_SELECIONADAS = ["DIRETORIA DE LINHA BRANCA", "DIRETORIA INFO/PERIFERICOS"]
+
+print(f"✅ Configurações dos widgets:")
+print(f"  📅 Data de cálculo: {DATA_CALCULO}")
+print(f"  🏷️ Sufixo da tabela: {SUFIXO_TABELA}")
+print(f"  📋 Diretorias selecionadas: {DIRETORIAS_SELECIONADAS}")
 
 # COMMAND ----------
 
@@ -1866,14 +1892,13 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
 print("🚀 EXECUÇÃO FINAL - Calculando matriz de merecimento para todas as categorias...")
 print("=" * 80)
 
-# Lista de todas as categorias disponíveis
-categorias = [
-    #"DIRETORIA DE TELAS",
-    #"DIRETORIA TELEFONIA CELULAR", 
-    "DIRETORIA DE LINHA BRANCA",
-    #"DIRETORIA LINHA LEVE",
-    "DIRETORIA INFO/PERIFERICOS"
-]
+# ✅ PARAMETRIZAÇÃO: Usar diretorias selecionadas via widget
+categorias = [d.strip() for d in DIRETORIAS_SELECIONADAS if d.strip() in REGRAS_AGRUPAMENTO.keys()]
+
+if not categorias:
+    raise ValueError(f"❌ Nenhuma diretoria válida selecionada. Diretorias disponíveis: {list(REGRAS_AGRUPAMENTO.keys())}")
+
+print(f"📋 Processando {len(categorias)} diretorias: {categorias}")
 
 resultados_finais = {}
 
@@ -1898,7 +1923,7 @@ for categoria in categorias:
             .upper()
         )
         
-        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_teste0112"
+        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_{SUFIXO_TABELA}"
 
         
         print(f"💾 Salvando matriz de merecimento para: {categoria}")
