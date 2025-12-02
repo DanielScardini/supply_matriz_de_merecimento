@@ -317,14 +317,22 @@ data_m_menos_1 = hoje - timedelta(days=30)
 data_m_menos_1 = data_m_menos_1.strftime("%Y-%m-%d")
 
 # ✅ PARAMETRIZAÇÃO: Widgets do Databricks para configuração
+# Remover widgets existentes se houver (evita erros ao recriar)
+try:
+    dbutils.widgets.remove("data_calculo")
+    dbutils.widgets.remove("sufixo_tabela")
+    dbutils.widgets.remove("diretorias")
+except:
+    pass
+
 dbutils.widgets.text("data_calculo", "2025-10-15", "📅 Data de Cálculo (YYYY-MM-DD)")
 dbutils.widgets.text("sufixo_tabela", "online_teste2410", "🏷️ Sufixo da Tabela (ex: online_teste2410)")
 
-# Widget multiselect: name, defaultValue (lista), choices (lista), label
-# Nota: defaultValue deve ser uma lista de strings que estão em choices
+# Widget multiselect: name, defaultValue (string separada por vírgulas), choices (lista), label
+# Nota: defaultValue deve ser uma string com valores separados por vírgulas que estão em choices
 dbutils.widgets.multiselect(
     "diretorias",
-    ["DIRETORIA TELEFONIA CELULAR"],  # Valores padrão selecionados
+    "DIRETORIA TELEFONIA CELULAR",  # Valores padrão como string (ou string separada por vírgulas para múltiplos)
     ["DIRETORIA DE TELAS", "DIRETORIA TELEFONIA CELULAR", "DIRETORIA DE LINHA BRANCA", "DIRETORIA LINHA LEVE", "DIRETORIA INFO/PERIFERICOS"],  # Opções disponíveis
     "📋 Diretorias para Processar"
 )
