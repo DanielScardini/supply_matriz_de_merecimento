@@ -328,10 +328,13 @@ data_m_menos_1 = data_m_menos_1.strftime("%Y-%m-%d")
 # ✅ PARAMETRIZAÇÃO: Widgets do Databricks para configuração
 dbutils.widgets.text("data_calculo", "2025-11-30", "📅 Data de Cálculo (YYYY-MM-DD)")
 dbutils.widgets.text("sufixo_tabela", "teste0112", "🏷️ Sufixo da Tabela (ex: teste0112)")
+
+# Widget multiselect: name, defaultValue (lista), choices (lista), label
+# Nota: defaultValue deve ser uma lista de strings que estão em choices
 dbutils.widgets.multiselect(
     "diretorias",
-    ["DIRETORIA DE TELAS", "DIRETORIA TELEFONIA CELULAR", "DIRETORIA DE LINHA BRANCA", "DIRETORIA LINHA LEVE", "DIRETORIA INFO/PERIFERICOS"],
-    ["DIRETORIA DE LINHA BRANCA", "DIRETORIA INFO/PERIFERICOS"],
+    ["DIRETORIA DE LINHA BRANCA", "DIRETORIA INFO/PERIFERICOS"],  # Valores padrão selecionados
+    ["DIRETORIA DE TELAS", "DIRETORIA TELEFONIA CELULAR", "DIRETORIA DE LINHA BRANCA", "DIRETORIA LINHA LEVE", "DIRETORIA INFO/PERIFERICOS"],  # Opções disponíveis
     "📋 Diretorias para Processar"
 )
 
