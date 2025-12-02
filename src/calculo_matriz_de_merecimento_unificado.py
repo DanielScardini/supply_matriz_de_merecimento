@@ -23,10 +23,6 @@
 
 # COMMAND ----------
 
-
-
-# COMMAND ----------
-
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F, Window
 from datetime import datetime, timedelta, date
@@ -1910,6 +1906,7 @@ if not categorias:
     raise ValueError(f"❌ Nenhuma diretoria válida selecionada. Diretorias disponíveis: {list(REGRAS_AGRUPAMENTO.keys())}")
 
 print(f"📋 Processando {len(categorias)} diretorias: {categorias}")
+
 
 resultados_finais = {}
 

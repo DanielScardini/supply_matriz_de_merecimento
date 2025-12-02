@@ -37,7 +37,7 @@ from typing import List, Optional, Dict, Any
 spark = (
     SparkSession.builder
     .appName("calculo_matriz_merecimento_unificado")
-    .config("spark.sql.shuffle.partitions", "200")  # Será sobrescrito dinamicamente
+    .config("spark.sql.shuffle.partitions", "50")  # Será sobrescrito dinamicamente
     .getOrCreate()
 )
 
@@ -337,6 +337,7 @@ dbutils.widgets.multiselect(
     "📋 Diretorias para Processar"
 )
 
+
 # Obter valores dos widgets
 DATA_CALCULO = dbutils.widgets.get("data_calculo")
 SUFIXO_TABELA = dbutils.widgets.get("sufixo_tabela")
@@ -401,7 +402,7 @@ REGRAS_AGRUPAMENTO = {
         "tipo_agrupamento": "gêmeos",
         "descricao": "Agrupamento por produtos similares (gêmeos)"
     },
-    "DIRETORIA LINHA BRANCA": {
+    "DIRETORIA DE LINHA BRANCA": {
         "coluna_grupo_necessidade": "NmEspecieGerencial",
         "tipo_agrupamento": "espécie_gerencial",
         "descricao": "Agrupamento por espécie gerencial + voltagem (DsVoltagem)"
@@ -411,7 +412,7 @@ REGRAS_AGRUPAMENTO = {
         "tipo_agrupamento": "espécie_gerencial", 
         "descricao": "Agrupamento por espécie gerencial + voltagem (DsVoltagem)"
     },
-    "DIRETORIA INFO/GAMES": {
+    "DIRETORIA INFO/PERIFERICOS": {
         "coluna_grupo_necessidade": "NmEspecieGerencial",
         "tipo_agrupamento": "espécie_gerencial",
         "descricao": "Agrupamento por espécie gerencial"
@@ -1676,7 +1677,7 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
         .join(df_gdn_opt, on="CdSku", how="inner")
         .filter(F.col("grupo_de_necessidade").isNotNull())
     )
-    )
+    
     
     skus_count = df_skus_data.count()
     print(f"  ✅ {skus_count:,} SKUs únicos encontrados (obrigatórios + sugeridos)")
@@ -1934,6 +1935,7 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
 print("🚀 EXECUÇÃO FINAL - Calculando matriz de merecimento para todas as categorias...")
 print("=" * 80)
 
+
 # ✅ PARAMETRIZAÇÃO: Usar diretorias selecionadas via widget
 categorias = [d.strip() for d in DIRETORIAS_SELECIONADAS if d.strip() in REGRAS_AGRUPAMENTO.keys()]
 
@@ -1966,6 +1968,7 @@ for categoria in categorias:
         )
         
         nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria_normalizada}_{SUFIXO_TABELA}"
+
         
         print(f"💾 Salvando matriz de merecimento para: {categoria}")
         print(f"📊 Tabela: {nome_tabela}")

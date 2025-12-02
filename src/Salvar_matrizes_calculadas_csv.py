@@ -168,6 +168,7 @@ MAPEAMENTO_APELIDOS = {
     "DIRETORIA DE LINHA BRANCA": "linha_branca",
     "DIRETORIA LINHA LEVE": "linha_leve",
     "DIRETORIA INFO/PERIFERICOS": "info_perifericos",
+
 }
 
 def normalizar_categoria_para_tabela(categoria: str) -> str:
@@ -304,7 +305,9 @@ PASTA_OUTPUT = "/Workspace/Users/daniel.scardini-ext@viavarejo.com.br/supply/sup
 COLUNAS_MERECIMENTO = {
     "DIRETORIA DE TELAS": "Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura",
     "DIRETORIA TELEFONIA CELULAR": "Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura",
+    "DIRETORIA LINHA BRANCA": 
     "DIRETORIA LINHA LEVE": "Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura",
+    "DIRETORIA INFO/PERIFERICOS": 
 }
 
 # Filtros
