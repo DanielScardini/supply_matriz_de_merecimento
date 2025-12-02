@@ -120,7 +120,7 @@ def criar_tabela_de_para_grupo_necessidade_direto(hoje: datetime, usar_excel: bo
             # Carregar do Excel
             print("📁 Carregando de-para do Excel (de_para_gemeos_tecnologia.xlsx)...")
             de_para_df = pd.read_excel(
-                "/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/dados_analise/de_para_gemeos_tecnologia.xlsx",
+                "/Workspace/Users/daniel.scardini-ext@viavarejo.com.br/supply/supply_matriz_de_merecimento/src/dados_analise/de_para_gemeos_tecnologia.xlsx",
                 sheet_name="de_para"
             )
         else:
@@ -191,7 +191,7 @@ def carregar_de_para_gemeos_tecnologia(flag_excel = True) -> pd.DataFrame:
         print("📋 Carregando de-para do Excel (de_para_gemeos_tecnologia.xlsx)...")
         try:
             de_para_df = pd.read_excel(
-                'dados_analise/de_para_gemeos_tecnologia.xlsx',
+                '/Workspace/Users/daniel.scardini-ext@viavarejo.com.br/supply/supply_matriz_de_merecimento/src/dados_analise/de_para_gemeos_tecnologia.xlsx',
                 sheet_name='de_para'
             )
             
@@ -234,7 +234,7 @@ def carregar_de_para_gemeos_tecnologia(flag_excel = True) -> pd.DataFrame:
         print("📋 Carregando de-para do CSV (ITENS_GEMEOS 2.csv)...")
         try:
             de_para_df = pd.read_csv(
-                'dados_analise/ITENS_GEMEOS 2.csv',
+                '/dbfs/mnt/datalake/bcg_comum/ITENS_GEMEOS 2.csv',
                 delimiter=";",
                 encoding='iso-8859-1'
             )
@@ -528,7 +528,7 @@ def carregar_de_para_espelhamento() -> DataFrame:
     try:
         # Carrega o arquivo Excel usando pandas
         df_pandas = pd.read_excel(
-            "/Workspace/Users/lucas.arodrigues-ext@viavarejo.com.br/usuarios/scardini/supply_matriz_de_merecimento/src/planilha_governanca/governanca_supply_inputs_matriz_merecimento.xlsx",
+            "/Workspace/Users/daniel.scardini-ext@viavarejo.com.br/supply/supply_matriz_de_merecimento/src/planilha_governanca/governanca_supply_inputs_matriz_merecimento.xlsx",
             sheet_name="espelhamento_lojas"
         )
         
@@ -651,7 +651,7 @@ def carregar_mapeamentos_produtos(categoria: str) -> tuple:
     print("🔄 Carregando mapeamentos de produtos...")
     
     de_para_modelos_tecnologia = (
-        pd.read_csv('dados_analise/MODELOS_AJUSTE (1).csv', 
+        pd.read_csv('/Workspace/Users/daniel.scardini-ext@viavarejo.com.br/supply/supply_matriz_de_merecimento/src/dados_analise/MODELOS_AJUSTE (1).csv', 
                     delimiter=';')
         .drop_duplicates()
     )
