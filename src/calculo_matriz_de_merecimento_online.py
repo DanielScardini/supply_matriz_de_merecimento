@@ -1810,6 +1810,7 @@ for categoria in categorias:
             categoria
             .replace("DIRETORIA ", "")
             .replace(" ", "_")
+            .replace("/", "_")  # ✅ Corrigir: substituir / por _ para evitar erro SQL
             .upper()
         )
         
