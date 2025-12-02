@@ -489,6 +489,87 @@ def determinar_grupo_necessidade(categoria: str, df: DataFrame) -> DataFrame:
 
 # COMMAND ----------
 
+def consolidar_telas_especiais_em_tv_esp(df: DataFrame, categoria: str) -> DataFrame:
+    """
+    Consolida todos os grupos de necessidade de telas especiais em um único grupo "TV ESP".
+    
+    Agrupa gêmeos que contenham tecnologias especiais:
+    - ESP (Especial)
+    - QLED
+    - MINI LED
+    - QNED
+    - OLED
+    
+    Aplica apenas para categoria "DIRETORIA DE TELAS".
+    
+    Args:
+        df: DataFrame com coluna grupo_de_necessidade já definida
+        categoria: Categoria sendo processada
+        
+    Returns:
+        DataFrame com grupos de necessidade consolidados
+    """
+    if categoria != "DIRETORIA DE TELAS":
+        print(f"ℹ️  Consolidação de telas especiais não aplicada para categoria: {categoria}")
+        return df
+    
+    print("🔄 Consolidando telas especiais em grupo único 'TV ESP'...")
+    
+    # Lista de tecnologias especiais a serem identificadas (case-insensitive)
+    tecnologias_especiais = ["ESP", "QLED", "MINI LED", "QNED", "OLED"]
+    
+    # Criar condição para identificar grupos que contenham qualquer tecnologia especial
+    # Usar upper() para case-insensitive
+    condicao_tela_especial = F.lit(False)
+    for tecnologia in tecnologias_especiais:
+        condicao_tela_especial = condicao_tela_especial | (
+            F.upper(F.col("grupo_de_necessidade")).contains(F.upper(F.lit(tecnologia)))
+        )
+    
+    # Contar grupos antes da consolidação
+    grupos_antes = df.select("grupo_de_necessidade").distinct().count()
+    grupos_especiais = (
+        df
+        .filter(condicao_tela_especial)
+        .select("grupo_de_necessidade")
+        .distinct()
+        .count()
+    )
+    
+    print(f"  📊 Grupos antes da consolidação: {grupos_antes}")
+    print(f"  📊 Grupos especiais identificados: {grupos_especiais}")
+    
+    # Aplicar consolidação: substituir grupos especiais por "TV ESP"
+    df_consolidado = df.withColumn(
+        "grupo_de_necessidade",
+        F.when(
+            condicao_tela_especial,
+            F.lit("TV ESP")
+        ).otherwise(F.col("grupo_de_necessidade"))
+    )
+    
+    # Contar grupos depois da consolidação
+    grupos_depois = df_consolidado.select("grupo_de_necessidade").distinct().count()
+    
+    # Mostrar exemplos de grupos consolidados
+    grupos_consolidados = (
+        df
+        .filter(condicao_tela_especial)
+        .select("grupo_de_necessidade")
+        .distinct()
+        .limit(10)
+        .collect()
+    )
+    grupos_lista = [row.grupo_de_necessidade for row in grupos_consolidados]
+    
+    print(f"  ✅ Grupos após consolidação: {grupos_depois}")
+    print(f"  📉 Redução: {grupos_antes - grupos_depois} grupos consolidados em 'TV ESP'")
+    print(f"  📋 Exemplos de grupos consolidados: {grupos_lista}")
+    
+    return df_consolidado
+
+# COMMAND ----------
+
 def carregar_dados_base(categoria: str, data_inicio: str = "2024-07-01") -> DataFrame:
     """
     Carrega os dados base para a categoria especificada.
@@ -1652,6 +1733,9 @@ def executar_calculo_matriz_merecimento_completo(categoria: str,
         
         # 5. Definição do grupo_de_necessidade
         df_com_grupo = determinar_grupo_necessidade(categoria, df_com_mapeamentos)
+        
+        # 5.1. Consolidação de telas especiais em "TV ESP" (apenas para DIRETORIA DE TELAS)
+        df_com_grupo = consolidar_telas_especiais_em_tv_esp(df_com_grupo, categoria)
 
         df_com_grupo.cache()
 
