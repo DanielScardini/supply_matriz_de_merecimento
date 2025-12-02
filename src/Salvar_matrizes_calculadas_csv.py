@@ -27,13 +27,60 @@ from typing import List, Dict, Tuple
 # Inicialização
 spark = SparkSession.builder.appName("salvar_matrizes_csv_sistema").getOrCreate()
 
-# Datas
-DATA_ATUAL = datetime.now()
-DATA_FIM = DATA_ATUAL + timedelta(days=60)
+# ✅ PARAMETRIZAÇÃO: Widgets do Databricks para configuração segura
+# Remover widgets existentes se houver
+try:
+    dbutils.widgets.removeAll()
+except:
+    pass
+
+# 1. Data e Tempo
+dbutils.widgets.text("data_exportacao", datetime.now().strftime("%Y-%m-%d"), "📅 Data de Exportação (YYYY-MM-DD)")
+dbutils.widgets.dropdown("dias_data_fim", "60", ["30", "60", "90", "120"], "📆 Dias para DATA FIM")
+
+# 2. Seleção de Categorias
+dbutils.widgets.multiselect(
+    "categorias",
+    "DIRETORIA TELEFONIA CELULAR",
+    ["DIRETORIA DE TELAS", "DIRETORIA TELEFONIA CELULAR", "DIRETORIA DE LINHA BRANCA", "DIRETORIA LINHA LEVE", "DIRETORIA INFO/PERIFERICOS"],
+    "📋 Diretorias para Exportar"
+)
+
+# 3. Sufixos de Tabelas
+dbutils.widgets.text("sufixo_offline", "teste0112", "🏷️ Sufixo Tabela Offline")
+dbutils.widgets.text("sufixo_online", "online_teste1411", "🏷️ Sufixo Tabela Online")
+
+# 4. Formato e Limites
+dbutils.widgets.dropdown("formato", "xlsx", ["csv", "xlsx"], "📄 Formato de Exportação")
+dbutils.widgets.dropdown("max_linhas_arquivo", "150000", ["100000", "150000", "200000", "500000"], "📊 Máx. Linhas por Arquivo")
+
+# 5. Validação
+dbutils.widgets.dropdown("exportar_validacao", "Sim", ["Sim", "Não"], "✅ Exportar Excel de Validação")
+
+# Obter valores dos widgets
+DATA_EXPORTACAO = dbutils.widgets.get("data_exportacao")
+DIAS_DATA_FIM = int(dbutils.widgets.get("dias_data_fim"))
+CATEGORIAS_SELECIONADAS = [c.strip() for c in dbutils.widgets.get("categorias").split(",") if c.strip()] if dbutils.widgets.get("categorias") else []
+SUFIXO_OFFLINE = dbutils.widgets.get("sufixo_offline")
+SUFIXO_ONLINE = dbutils.widgets.get("sufixo_online")
+FORMATO = dbutils.widgets.get("formato")
+MAX_LINHAS = int(dbutils.widgets.get("max_linhas_arquivo"))
+EXPORTAR_VALIDACAO = dbutils.widgets.get("exportar_validacao") == "Sim"
+
+# Validar data de exportação
+try:
+    DATA_ATUAL = datetime.strptime(DATA_EXPORTACAO, "%Y-%m-%d")
+    print(f"✅ Data de exportação configurada: {DATA_EXPORTACAO}")
+except ValueError:
+    print(f"⚠️ Data inválida '{DATA_EXPORTACAO}', usando data atual")
+    DATA_ATUAL = datetime.now()
+
+# Calcular DATA_FIM
+DATA_FIM = DATA_ATUAL + timedelta(days=DIAS_DATA_FIM)
 DATA_FIM_INT = int(DATA_FIM.strftime("%Y%m%d"))
 
 print(f"📅 Data atual: {DATA_ATUAL.strftime('%Y-%m-%d')}")
-print(f"📅 Data fim (+60 dias): {DATA_FIM.strftime('%Y-%m-%d')} → {DATA_FIM_INT}")
+print(f"📅 Data fim (+{DIAS_DATA_FIM} dias): {DATA_FIM.strftime('%Y-%m-%d')} → {DATA_FIM_INT}")
 
 # COMMAND ----------
 
@@ -112,25 +159,143 @@ df_demanda_especie.filter(F.col("NmEspecieGerencial").isin(especies_top80)).agg(
 
 # COMMAND ----------
 
-# Tabelas por categoria
-TABELAS_MATRIZ_MERECIMENTO = {
-    # "DIRETORIA DE TELAS": {
-    #     "offline": "databox.bcg_comum.supply_matriz_merecimento_de_telas_teste0710",
-    #     "online": "databox.bcg_comum.supply_matriz_merecimento_de_telas_online_teste0710",
-    #     "grupo_apelido": "telas"
-    # },
-    "DIRETORIA TELEFONIA CELULAR": {
+# ✅ PARAMETRIZAÇÃO SEGURA: Construção e validação de tabelas
 
-        "offline": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_teste0112",
-        "online": "databox.bcg_comum.supply_matriz_merecimento_telefonia_celular_online_teste1411",
-        "grupo_apelido": "telefonia"
-    },
-    # "DIRETORIA LINHA LEVE": {
-    #     "offline": "databox.bcg_comum.supply_matriz_merecimento_LINHA_LEVE_teste0710",
-    #     "online": "databox.bcg_comum.supply_matriz_merecimento_LINHA_LEVE_online_teste0710",
-    #     "grupo_apelido": "linha_leve"
-    # },
+# Mapeamento de apelidos para categorias (exceções ao padrão)
+MAPEAMENTO_APELIDOS = {
+    "DIRETORIA DE TELAS": "de_telas",
+    "DIRETORIA TELEFONIA CELULAR": "telefonia_celular",
+    "DIRETORIA DE LINHA BRANCA": "linha_branca",
+    "DIRETORIA LINHA LEVE": "linha_leve",
+    "DIRETORIA INFO/PERIFERICOS": "info_perifericos",
 }
+
+def normalizar_categoria_para_tabela(categoria: str) -> str:
+    """
+    Normaliza nome de categoria para formato de tabela.
+    
+    Exemplos:
+    - "DIRETORIA DE TELAS" → "de_telas"
+    - "DIRETORIA TELEFONIA CELULAR" → "telefonia_celular"
+    """
+    return (
+        categoria
+        .replace("DIRETORIA ", "")
+        .replace(" ", "_")
+        .replace("/", "_")
+        .lower()
+    )
+
+def obter_apelido_categoria(categoria: str) -> str:
+    """Obtém apelido da categoria (com fallback para normalização)."""
+    return MAPEAMENTO_APELIDOS.get(categoria, normalizar_categoria_para_tabela(categoria))
+
+def construir_nome_tabela(categoria: str, canal: str, sufixo_offline: str, sufixo_online: str) -> str:
+    """
+    Constrói nome completo de tabela seguindo padrão.
+    
+    Args:
+        categoria: Nome da categoria (ex: "DIRETORIA DE TELAS")
+        canal: "offline" ou "online"
+        sufixo_offline: Sufixo para tabela offline
+        sufixo_online: Sufixo para tabela online
+        
+    Returns:
+        Nome completo da tabela
+    """
+    apelido = obter_apelido_categoria(categoria)
+    
+    if canal == "online":
+        # Online: adiciona "_online" antes do sufixo
+        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{apelido}_online_{sufixo_online}"
+    else:
+        # Offline: sufixo direto
+        nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{apelido}_{sufixo_offline}"
+    
+    return nome_tabela
+
+def validar_tabela_existe(nome_tabela: str) -> bool:
+    """
+    Valida se tabela existe no Databricks.
+    
+    Args:
+        nome_tabela: Nome completo da tabela
+        
+    Returns:
+        True se tabela existe, False caso contrário
+    """
+    try:
+        spark.table(nome_tabela).limit(1).collect()
+        return True
+    except Exception:
+        return False
+
+# Construir dicionário de tabelas com validação
+print("\n" + "=" * 80)
+print("🔍 VALIDAÇÃO DE TABELAS")
+print("=" * 80)
+
+TABELAS_MATRIZ_MERECIMENTO = {}
+TABELAS_INVALIDAS = []
+
+if not CATEGORIAS_SELECIONADAS:
+    print("⚠️ Nenhuma categoria selecionada!")
+    raise ValueError("Selecione pelo menos uma categoria para processar.")
+
+for categoria in CATEGORIAS_SELECIONADAS:
+    categoria = categoria.strip()
+    
+    # Construir nomes de tabelas
+    tabela_offline = construir_nome_tabela(categoria, "offline", SUFIXO_OFFLINE, SUFIXO_ONLINE)
+    tabela_online = construir_nome_tabela(categoria, "online", SUFIXO_OFFLINE, SUFIXO_ONLINE)
+    
+    # Validar existência
+    offline_existe = validar_tabela_existe(tabela_offline)
+    online_existe = validar_tabela_existe(tabela_online)
+    
+    if offline_existe and online_existe:
+        apelido = obter_apelido_categoria(categoria)
+        TABELAS_MATRIZ_MERECIMENTO[categoria] = {
+            "offline": tabela_offline,
+            "online": tabela_online,
+            "grupo_apelido": apelido
+        }
+        print(f"✅ {categoria}:")
+        print(f"   • Offline: {tabela_offline}")
+        print(f"   • Online:  {tabela_online}")
+    else:
+        TABELAS_INVALIDAS.append({
+            "categoria": categoria,
+            "offline": tabela_offline,
+            "online": tabela_online,
+            "offline_existe": offline_existe,
+            "online_existe": online_existe
+        })
+        print(f"❌ {categoria}: Tabelas não encontradas")
+        if not offline_existe:
+            print(f"   • Offline: {tabela_offline}")
+        if not online_existe:
+            print(f"   • Online:  {tabela_online}")
+
+# Relatório de validação
+if TABELAS_INVALIDAS:
+    print("\n" + "=" * 80)
+    print("⚠️ TABELAS NÃO ENCONTRADAS:")
+    print("=" * 80)
+    for invalida in TABELAS_INVALIDAS:
+        print(f"\n📋 {invalida['categoria']}:")
+        if not invalida['offline_existe']:
+            print(f"  ❌ Offline: {invalida['offline']}")
+        if not invalida['online_existe']:
+            print(f"  ❌ Online: {invalida['online']}")
+    print("\n💡 Verifique os sufixos ou ajuste o mapeamento de apelidos.")
+else:
+    print("\n✅ Todas as tabelas foram validadas com sucesso!")
+
+if not TABELAS_MATRIZ_MERECIMENTO:
+    raise ValueError("❌ Nenhuma tabela válida encontrada. Verifique os sufixos e categorias selecionadas.")
+
+print("=" * 80)
 
 # Pasta de saída
 PASTA_OUTPUT = "/Workspace/Users/daniel.scardini-ext@viavarejo.com.br/supply/supply_matriz_de_merecimento/src/output"
@@ -185,8 +350,8 @@ FILTROS_GRUPO_SELECAO = {
     "DIRETORIA LINHA LEVE": [],
 }
 
-# Limite de linhas por arquivo
-MAX_LINHAS_POR_ARQUIVO = 150000
+# Limite de linhas por arquivo (usar valor do widget)
+MAX_LINHAS_POR_ARQUIVO = MAX_LINHAS
 
 # Configurações de filtros de produtos por categoria
 FILTROS_PRODUTOS = {
@@ -219,7 +384,11 @@ FILTROS_PRODUTOS_GLOBAL = {
     "aplicar_filtro": True
 }
 
-print("✅ Configurações carregadas")
+print("\n✅ Configurações carregadas")
+print(f"📋 Categorias selecionadas: {len(CATEGORIAS_SELECIONADAS)}")
+print(f"📄 Formato: {FORMATO}")
+print(f"📊 Máx. linhas por arquivo: {MAX_LINHAS:,}")
+print(f"✅ Exportar validação: {EXPORTAR_VALIDACAO}")
 
 # COMMAND ----------
 
@@ -1378,7 +1547,7 @@ def validar_pares_canais_arquivo(df_arquivo: DataFrame, num_arquivo: int) -> Non
 
 # COMMAND ----------
 
-def exportar_matriz_csv(categoria: str, data_exportacao: str = None, formato: str = "xlsx") -> List[str]:
+def exportar_matriz_csv(categoria: str, data_exportacao: str = None, formato: str = None) -> List[str]:
     """
     Exporta matriz de merecimento em formato CSV ou XLSX para uma categoria.
     
@@ -1480,17 +1649,23 @@ def exportar_matriz_csv(categoria: str, data_exportacao: str = None, formato: st
 
 # COMMAND ----------
 
-def exportar_todas_categorias(data_exportacao: str = None, formato: str = "xlsx") -> Dict[str, List[str]]:
+def exportar_todas_categorias(data_exportacao: str = None, formato: str = None) -> Dict[str, List[str]]:
     """
     Exporta matrizes para todas as categorias no formato escolhido.
     
     Args:
         data_exportacao: Data de exportação (padrão: hoje)
-        formato: Formato de exportação - "csv" ou "xlsx" (padrão: "xlsx")
+        formato: Formato de exportação - "csv" ou "xlsx" (padrão: widget)
         
     Returns:
         Dicionário com listas de arquivos por categoria
     """
+    if data_exportacao is None:
+        data_exportacao = DATA_ATUAL.strftime("%Y-%m-%d")
+    
+    if formato is None:
+        formato = FORMATO
+    
     print("🚀 Iniciando exportação para TODAS as categorias")
     print("=" * 80)
     
@@ -1728,8 +1903,11 @@ resultados = exportar_todas_categorias()
 
 # COMMAND ----------
 
-# Exportar Excel de validação para todas as categorias
-resultados_validacao = exportar_excel_validacao_todas_categorias()
+# Exportar Excel de validação (se habilitado)
+if EXPORTAR_VALIDACAO:
+    resultados_validacao = exportar_excel_validacao_todas_categorias()
+else:
+    print("ℹ️ Exportação de validação desabilitada via widget")
 
 # COMMAND ----------
 
