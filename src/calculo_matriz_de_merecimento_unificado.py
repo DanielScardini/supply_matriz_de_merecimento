@@ -36,9 +36,40 @@ from typing import List, Optional, Dict, Any
 %pip install openpyxl
 
 # Inicialização do Spark
-spark = SparkSession.builder.appName("calculo_matriz_merecimento_unificado").getOrCreate()
+# ✅ OTIMIZAÇÃO: Configurar número padrão de partições baseado em cores
+spark = (
+    SparkSession.builder
+    .appName("calculo_matriz_merecimento_unificado")
+    .config("spark.sql.shuffle.partitions", "200")  # Será sobrescrito dinamicamente
+    .getOrCreate()
+)
+
+# ✅ OTIMIZAÇÃO: Ajustar número padrão de partições do Spark dinamicamente
+# Isso evita que o Spark use 200 partições hardcoded em operações automáticas
+def configurar_particoes_padrao_spark():
+    """
+    Configura o número padrão de partições do Spark para usar o valor ideal calculado.
+    Isso evita que o Spark use 200 partições hardcoded em operações automáticas.
+    """
+    try:
+        # Calcular número ideal de partições
+        num_cores = spark.sparkContext.defaultParallelism
+        num_cores = min(num_cores, 24)  # Limitar a 24 cores
+        num_particoes_ideal = max(24, int(num_cores * 1.5))
+        
+        # Configurar spark.sql.shuffle.partitions
+        spark.conf.set("spark.sql.shuffle.partitions", str(num_particoes_ideal))
+        
+        print(f"✅ Configuração Spark: spark.sql.shuffle.partitions = {num_particoes_ideal}")
+        print(f"   ℹ️  Isso evita uso de 200 partições hardcoded pelo Spark")
+    except Exception as e:
+        print(f"⚠️ Erro ao configurar partições padrão do Spark: {e}")
+
+# Configurar antes de calcular NUM_PARTICOES_IDEAL
+configurar_particoes_padrao_spark()
 
 # ✅ OTIMIZAÇÃO: Calcular número ideal de partições baseado no número de cores
+# Nota: spark.sql.shuffle.partitions já foi configurado acima
 def calcular_num_particoes_ideal(multiplier: float = 1.5, max_cores: int = 24) -> int:
     """
     Calcula o número ideal de partições baseado no número de cores disponíveis.
