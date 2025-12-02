@@ -119,9 +119,7 @@ Avaliar e propor alternativas para parametrizar o script `Salvar_matrizes_calcul
 1. Todos da Alternativa 1 +
 2. `max_linhas_arquivo` (dropdown) - Limite de linhas (100k, 150k, 200k, 500k)
 3. `pasta_output` (text) - Pasta de saída customizada
-4. `dt_inicio_top80` (text) - Data início para cálculo top 80%
-5. `dt_fim_top80` (text) - Data fim para cálculo top 80%
-6. `aplicar_filtros_produtos` (dropdown) - Aplicar filtros de produtos (Sim/Não)
+4. `aplicar_filtros_produtos` (dropdown) - Aplicar filtros de produtos (Sim/Não)
 
 **Vantagens:**
 - ✅ Mais flexibilidade
