@@ -48,7 +48,7 @@ dbutils.widgets.multiselect(
 
 # 3. Sufixos de Tabelas
 dbutils.widgets.text("sufixo_offline", "teste0112", "🏷️ Sufixo Tabela Offline")
-dbutils.widgets.text("sufixo_online", "online_teste1411", "🏷️ Sufixo Tabela Online")
+dbutils.widgets.text("sufixo_online", "teste1411", "🏷️ Sufixo Tabela Online")
 
 # 4. Formato e Limites
 dbutils.widgets.dropdown("formato", "xlsx", ["csv", "xlsx"], "📄 Formato de Exportação")
@@ -86,77 +86,6 @@ print(f"📅 Data fim (+{DIAS_DATA_FIM} dias): {DATA_FIM.strftime('%Y-%m-%d')} �
 
 # MAGIC %md
 # MAGIC ## 1. Configurações
-
-# COMMAND ----------
-
-dt_inicio = "2025-08-01"
-dt_fim = "2025-10-01"
-
-# Calcular top 80% por ESPÉCIE (SKUs) - apenas PORTATEIS
-df_demanda_especie = (
-  spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
-  .filter(F.col("NmSetorGerencial") == "PORTATEIS")
-  #.filter(F.col("NmSetorGerencial") == "BELEZA & SAUDE")
-  .filter(F.col("DtAtual") >= dt_inicio)
-  .filter(F.col("DtAtual") < dt_fim)
-  .groupBy("NmEspecieGerencial")
-  .agg(
-    F.sum(F.col("QtMercadoria")).alias("QtDemanda"),
-    F.sum(F.col("Receita")).alias("Receita")
-  )
-)
-
-# calcular totais com window
-w_total = W.rowsBetween(W.unboundedPreceding, W.unboundedFollowing)
-
-# window para cumulativo
-w_cum = W.orderBy(F.col("PercDemanda").desc()).rowsBetween(W.unboundedPreceding, 0)
-
-# TOP 80% POR ESPÉCIE (SKUs) - apenas PORTATEIS
-df_demanda_especie = (
-    df_demanda_especie
-    .withColumn("TotalDemanda", F.sum("QtDemanda").over(w_total))
-    .withColumn("TotalReceita", F.sum("Receita").over(w_total))
-    .withColumn("PercDemanda", F.round((F.col("QtDemanda") / F.col("TotalDemanda")) * 100, 0))
-    .withColumn("PercReceita", F.round((F.col("Receita") / F.col("TotalReceita")) * 100, 0))
-    .drop("TotalDemanda", "TotalReceita")
-    .withColumn("PercDemandaCumulativo", F.sum("PercDemanda").over(w_cum))
-    .withColumn("PercReceitaCumulativo", F.sum("PercReceita").over(w_cum))
-)
-
-especies_top80 = (
-    df_demanda_especie
-    .filter(F.col("PercDemandaCumulativo") <= 80)
-    .select("NmEspecieGerencial")
-    .toPandas().values.tolist()
-)
-
-
-print("🔝 ESPÉCIES TOP 80% PORTATEIS:")
-print(especies_top80)
-print(f"Total de espécies: {len(especies_top80)}")
-
-# SKUs das espécies top 80%
-skus_especies_top80 = (
-    spark.table('data_engineering_prd.app_venda.mercadoria')
-    .select(
-        F.col("CdSkuLoja").alias("CdSku"),
-        F.col("NmEspecieGerencial")
-    )
-    .filter(F.col("NmEspecieGerencial").isin(especies_top80))
-    .filter(F.col("CdSku") != -1)
-    .select("CdSku")
-    .distinct()
-    .toPandas()["CdSku"]
-    .tolist()
-)
-
-print(f"\n📊 SKUs das espécies top 80%: {len(skus_especies_top80)} SKUs")
-
-# Validação dos percentuais
-print("\n📈 VALIDAÇÃO PERCENTUAIS:")
-print("ESPÉCIES TOP 80%:")
-df_demanda_especie.filter(F.col("NmEspecieGerencial").isin(especies_top80)).agg(F.sum("PercDemanda")).show()
 
 # COMMAND ----------
 
@@ -306,9 +235,9 @@ PASTA_OUTPUT = "/Workspace/Users/daniel.scardini-ext@viavarejo.com.br/supply/sup
 COLUNAS_MERECIMENTO = {
     "DIRETORIA DE TELAS": "Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura",
     "DIRETORIA TELEFONIA CELULAR": "Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura",
-    "DIRETORIA LINHA BRANCA": 
+    "DIRETORIA LINHA BRANCA": "Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura" ,
     "DIRETORIA LINHA LEVE": "Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura",
-    "DIRETORIA INFO/PERIFERICOS": 
+    "DIRETORIA INFO/PERIFERICOS": "Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura"
 }
 
 # Filtros
@@ -361,7 +290,7 @@ MAX_LINHAS_POR_ARQUIVO = MAX_LINHAS
 FILTROS_PRODUTOS = {
     "DIRETORIA DE TELAS": {
         "tipificacao_entrega": ["SL"],  # Apenas SL (Sai Loja)
-        "marcas_excluidas": ["LG"],  # Excluir marca APPLE
+        "marcas_excluidas": [],  # Excluir marca APPLE
         "aplicar_filtro": True
     },
     "DIRETORIA TELEFONIA CELULAR": {
@@ -660,8 +589,8 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
                 df_produtos_filtrados
                 .select("StTipificacaoEntrega")
                 .distinct()
-                .toPandas()["StTipificacaoEntrega"]
-                .tolist()
+                .rdd.flatMap(lambda x: x)
+                .collect()
             )
             print(f"  🔍 Tipificações restantes: {sorted(tipificacoes_restantes)}")
         
@@ -679,8 +608,8 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
                 df_produtos_filtrados
                 .select("NmMarca")
                 .distinct()
-                .toPandas()["NmMarca"]
-                .tolist()
+                .rdd.flatMap(lambda x: x)
+                .collect()
             )
             marcas_excluidas_encontradas = [m for m in filtros_produtos["marcas_excluidas"] if m in marcas_restantes]
             if marcas_excluidas_encontradas:
@@ -717,7 +646,7 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
         print(f"  • Filtro de produtos não aplicado - usando dados originais")
     
     # Mostrar grupos disponíveis antes do filtro
-    grupos_disponiveis = df_base.select("grupo_de_necessidade").distinct().toPandas()["grupo_de_necessidade"].tolist()
+    grupos_disponiveis = df_base.select("grupo_de_necessidade").distinct().rdd.flatMap(lambda x: x).collect()
     print(f"\n📋 GRUPOS DISPONÍVEIS:")
     print(f"  • Total: {len(grupos_disponiveis)} grupos")
     print(f"  • Lista: {sorted(grupos_disponiveis)}")
@@ -751,7 +680,7 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
     print(f"  • Registros após filtro: {registros_pos_grupo:,} ({registros_pos_grupo - registros_inicial:+,})")
     
     # Verificar grupos restantes após filtro
-    grupos_restantes = df_filtrado.select("grupo_de_necessidade").distinct().toPandas()["grupo_de_necessidade"].tolist()
+    grupos_restantes = df_filtrado.select("grupo_de_necessidade").distinct().rdd.flatMap(lambda x: x).collect()
     print(f"  • Grupos restantes após filtro: {len(grupos_restantes)}")
     print(f"  • Lista dos grupos restantes: {sorted(grupos_restantes)}")
     
@@ -877,8 +806,8 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
                 .select("CdFilial")
                 .distinct()
                 .orderBy("CdFilial")
-                .toPandas()["CdFilial"]
-                .tolist()
+                .rdd.flatMap(lambda x: x)
+                .collect()
             )
             print(f"📋 CDs Inválidos encontrados: {cds_invalidos_lista}")
             
@@ -1432,7 +1361,7 @@ def validar_integridade_dados(df: DataFrame) -> bool:
     
     # 4. Validar que ambos os canais são ONLINE e OFFLINE
     print("  📋 Validando tipos de canais...")
-    canais_unicos = df.select("CANAL").distinct().toPandas()["CANAL"].tolist()
+    canais_unicos = df.select("CANAL").distinct().rdd.flatMap(lambda x: x).collect()
     canais_esperados = ["ONLINE", "OFFLINE"]
     
     if set(canais_unicos) != set(canais_esperados):
@@ -1536,7 +1465,7 @@ def validar_pares_canais_arquivo(df_arquivo: DataFrame, num_arquivo: int) -> Non
         print(f"    ✅ Arquivo {num_arquivo + 1}: Todos os SKUs têm registros completos")
     
     # Verificar se os canais são ONLINE e OFFLINE
-    canais_arquivo = df_arquivo.select("CANAL").distinct().toPandas()["CANAL"].tolist()
+    canais_arquivo = df_arquivo.select("CANAL").distinct().rdd.flatMap(lambda x: x).collect()
     canais_esperados = ["ONLINE", "OFFLINE"]
     
     if not all(canal in canais_arquivo for canal in canais_esperados):

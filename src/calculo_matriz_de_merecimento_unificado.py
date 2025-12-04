@@ -335,12 +335,14 @@ dbutils.widgets.text("sufixo_tabela", "teste0112", "🏷️ Sufixo da Tabela (ex
 
 # Widget multiselect: name, defaultValue (string separada por vírgulas), choices (lista), label
 # Nota: defaultValue deve ser uma string com valores separados por vírgulas que estão em choices
+# Nota: defaultValue deve ser uma string com valores separados por vírgulas que estão em choices
 dbutils.widgets.multiselect(
     "diretorias",
-    "DIRETORIA DE LINHA BRANCA,DIRETORIA INFO/PERIFERICOS",  # Valores padrão como string separada por vírgulas
+    "DIRETORIA TELEFONIA CELULAR",  # Valores padrão como string (ou string separada por vírgulas para múltiplos)
     ["DIRETORIA DE TELAS", "DIRETORIA TELEFONIA CELULAR", "DIRETORIA DE LINHA BRANCA", "DIRETORIA LINHA LEVE", "DIRETORIA INFO/PERIFERICOS"],  # Opções disponíveis
     "📋 Diretorias para Processar"
 )
+
 
 # Obter valores dos widgets
 DATA_CALCULO = dbutils.widgets.get("data_calculo")

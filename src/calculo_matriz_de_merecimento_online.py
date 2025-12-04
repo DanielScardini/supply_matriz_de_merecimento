@@ -1,4 +1,10 @@
 # Databricks notebook source
+# MAGIC %sql SELECT * FROM databox.bcg_comum.supply_base_merecimento_diario_v4_online
+# MAGIC
+# MAGIC ORDER BY DtAtual DESC
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC # Cálculo da Matriz de Merecimento - Solução Unificada para Todas as Categorias
 # MAGIC

@@ -30,28 +30,33 @@ hoje = datetime.now() - timedelta(days=1)
 hoje_str = hoje.strftime("%Y-%m-%d")
 hoje_int = int(hoje.strftime("%Y%m%d"))
 
-GRUPOS_TESTE = ['LIQUIDIFICADORES ACIMA 1001 W._110',
-                'LIQUIDIFICADORES ACIMA 1001 W._220']
+# GRUPOS_TESTE = [
+#    'REFRIGERADOR 2P FF MAIOR 410L_110',
+#    'REFRIGERADOR 2P FF MAIOR 410L_220',
+#    'REFRIGERADOR 2P FF MAIOR 410L_BIV',
+#    'REFRIGERADOR 2P FF MENOR 410L._110',
+#    'REFRIGERADOR 2P FF MENOR 410L._220',
+#]
                 
-print(GRUPOS_TESTE)
+#print(GRUPOS_TESTE)
 
-data_inicio = "2025-08-29"
-fim_baseline = "2025-09-05"
+data_inicio = "2025-11-23"
+fim_baseline = "2025-11-30"
 
-inicio_teste = "2025-10-20"
+inicio_teste = "2025-12-01"
 
-categorias_teste = ['LINHA_LEVE']
+categorias_teste = ['LINHA_BRANCA']
 
 
 # COMMAND ----------
 
-dt_inicio = "2025-08-01"
-dt_fim = "2025-10-01"
+dt_inicio = "2025-09-01"
+dt_fim = "2025-12-01"
 
 df_demanda = (
   spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
   .filter(F.col("NmSetorGerencial")
-          .isin("BELEZA & SAUDE", "PORTATEIS"))
+        .isin("REFRIGERACAO"))
   .filter(F.col("DtAtual") >= dt_inicio)
   .filter(F.col("DtAtual") < dt_fim)
   .groupBy("NmEspecieGerencial")
@@ -80,50 +85,50 @@ df_demanda = (
 
 )
 
-especies_top80 = [
-    row["NmEspecieGerencial"] 
-    for row in (
-        df_demanda
-        .filter(F.col("PercDemandaCumulativo") <= 80)
-        #.filter(F.col("NmEspecieGerencial") != 'SANDUICHEIRAS')
-        .select("NmEspecieGerencial")
-        .distinct()
-        .collect()
-    )
-]
+# especies_top80 = [
+#   row["NmEspecieGerencial"] 
+#    for row in (
+#        df_demanda
+#        .filter(F.col("PercDemandaCumulativo") <= 80)
+#        .select("NmEspecieGerencial")
+#        .distinct()
+#        .collect()
+#    )
+#]
 
 
-print(especies_top80)
+#print(especies_top80)
 #print(skus_especies_top80)
 
 
-especies_boas = [
-    "LIQUIDIFICADORES 350 A 1000 W",
-    "FERROS DE PASSAR A SECO",
-    "LIQUIDIFICADORES ACIMA 1001 W.",
-    "PANELAS ELETRICAS DE ARROZ",
-    "FRITADEIRA ELETRICA (CAPSULA)",
-    "FERROS PAS. ROUPA VAPOR/SPRAY",
-    "CAFETEIRA ELETRICA (FILTRO)"
-]
+# especies_boas = [
+#    "LIQUIDIFICADORES 350 A 1000 W",
+#    "FERROS DE PASSAR A SECO",
+#    "LIQUIDIFICADORES ACIMA 1001 W.",
+#    "PANELAS ELETRICAS DE ARROZ",
+#    "FRITADEIRA ELETRICA (CAPSULA)",
+#    "FERROS PAS. ROUPA VAPOR/SPRAY",
+#    "CAFETEIRA ELETRICA (FILTRO)"
+#]
 
-skus_especies_top80 = [
-    row["CdSku"] 
-    for row in (
-        spark.table('data_engineering_prd.app_venda.mercadoria')
-        .select(
-            F.col("CdSkuLoja").alias("CdSku"),
-            F.col("NmEspecieGerencial")
-        )
-        .filter(F.col("NmEspecieGerencial").isin(especies_top80))
-        .filter(F.col("CdSku") != -1)
-        .select("CdSku")
-        .distinct()
-        .collect()
-    )
-]
+#skus_especies_top80 = [
+#    row["CdSku"] 
+#    for row in (
+#        spark.table('data_engineering_prd.app_venda.mercadoria')
+#        .select(
+#            F.col("CdSkuLoja").alias("CdSku"),
+#            F.col("NmEspecieGerencial")
+#        )
+#        .filter(F.col("NmEspecieGerencial").isin(especies_top80))
+#        .filter(F.col("CdSku") != -1)
+#        .select("CdSku")
+#        .distinct()
+#        .collect()
+#    )
+#]
 
-df_demanda.filter(F.col("NmEspecieGerencial").isin(especies_top80)).agg(F.sum("PercDemanda")).display()
+# df_demanda.filter(F.col("NmEspecieGerencial").isin(especies_top80)).agg(F.sum("PercDemanda")).display()
+df_demanda.display()
 
 # COMMAND ----------
 
@@ -144,8 +149,8 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     categorias = [
         #"DE_TELAS",
         #"TELEFONIA_CELULAR", 
-        #"LINHA_BRANCA",
-        "LINHA_LEVE",
+        "LINHA_BRANCA",
+        #"LINHA_LEVE",
         #"INFO_GAMES"
     ]
     
@@ -153,7 +158,7 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     
     for categoria in categorias:
         try:
-            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_linha_leve_teste0710"
+            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_de_linha_branca_teste0112"
             df_matriz = spark.table(nome_tabela)
             
             matrizes[categoria] = df_matriz
@@ -167,27 +172,28 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     return matrizes
 
 df_merecimento_offline = {}
-df_merecimento_offline['LINHA_LEVE'] = carregar_matrizes_merecimento_calculadas()['LINHA_LEVE'].filter(F.col("CdSku").isin(skus_especies_top80))
+df_merecimento_offline['LINHA_BRANCA'] = carregar_matrizes_merecimento_calculadas()['LINHA_BRANCA']
 
-df_merecimento_offline['LINHA_LEVE'].limit(1).display()
+df_merecimento_offline['LINHA_BRANCA'].limit(1).display()
 
 # COMMAND ----------
 
-df_grupo_de_necessidade_leves = (
-    df_merecimento_offline['LINHA_LEVE']
+df_grupo_de_necessidade_linha_branca = (
+    df_merecimento_offline['LINHA_BRANCA']
         .select("CdSku", 
                 F.col("grupo_de_necessidade").alias("grupo_de_necessidade")
         )
         .distinct()
 )
 
-df_grupo_de_necessidade_leves.write.mode("overwrite").saveAsTable("databox.bcg_comum.supply_grupo_de_necessidade_linha_leve")
+df_grupo_de_necessidade_linha_branca.write.mode("overwrite").saveAsTable("databox.bcg_comum.supply_grupo_de_necessidade_linha_branca")
+df_grupo_de_necessidade_linha_branca.limit(50).display()
 
 # COMMAND ----------
 
 df_de_para_SKU_cadastro_mercadoria = (
     spark.table('data_engineering_prd.app_venda.mercadoria')
-    .filter(F.col("NmAgrupamentoDiretoriaSetor") == 'DIRETORIA LINHA LEVE')
+    .filter(F.col("NmAgrupamentoDiretoriaSetor") == 'DIRETORIA DE LINHA BRANCA')
     .select(
         F.col("CdSkuLoja").alias("CdSku"),
         "NmAgrupamentoDiretoriaSetor",
@@ -196,6 +202,8 @@ df_de_para_SKU_cadastro_mercadoria = (
         "NmEspecieGerencial",
     )
 )
+
+df_de_para_SKU_cadastro_mercadoria.limit(1).display()
 
 # COMMAND ----------
 
@@ -207,7 +215,7 @@ df_de_para_SKU_cadastro_mercadoria = (
 df_matriz_neogrid_offline = (
     spark.createDataFrame(
         pd.read_csv(
-            "/Workspace/Users/daniel.scardini-ext@viavarejo.com.br/supply/supply_matriz_de_merecimento/src/dados_analise/(DRP)_MATRIZ_20250902160333.csv",
+            "/Workspace/Users/daniel.scardini-ext@viavarejo.com.br/supply/supply_matriz_de_merecimento/src/dados_analise/(DRP)_MATRIZ_20251202165716_LB_INFO_offline.csv",
             delimiter=";",
         )
     )
@@ -219,14 +227,13 @@ df_matriz_neogrid_offline = (
         F.col("TIPO_ENTREGA").cast("string").alias("TipoEntrega"),
     )
     .dropDuplicates()
-    #.filter(F.col('TIPO_ENTREGA') == 'SL')
+    .filter(F.upper(F.trim(F.col("TipoEntrega"))) == "SL")
     .join(
-        spark.table("databox.bcg_comum.supply_grupo_de_necessidade_linha_leve"),
+        spark.table("databox.bcg_comum.supply_grupo_de_necessidade_linha_branca"),
         on="CdSku",
         how="left"
     )
     .filter(F.col("grupo_de_necessidade").isNotNull())
-    .filter(F.col("CdSku").isin(skus_especies_top80))
 )
 
 df_matriz_neogrid_agg_offline = (
@@ -238,9 +245,9 @@ df_matriz_neogrid_agg_offline = (
   )
 )
 
-df_matriz_neogrid_offline.cache()
-#df_matriz_neogrid_offline.display()
-df_matriz_neogrid_agg_offline.limit(1).display()
+#df_matriz_neogrid_offline.cache()
+df_matriz_neogrid_offline.limit(10).display()
+df_matriz_neogrid_agg_offline.limit(10).display()
 
 
 # COMMAND ----------
@@ -252,30 +259,27 @@ df_matriz_neogrid_agg_offline.limit(1).display()
 
 # === Janela dinâmica: últimos 30 dias até ontem ===
 fim_janela = F.date_sub(F.current_date(), 1)
-inicio_janela = F.date_sub(fim_janela, 47)
-
-print(inicio_janela, fim_janela)
+inicio_janela = F.date_sub(fim_janela, 29)
 
 # partindo do df_proporcao_factual já agregado por CdFilial × grupo_de_necessidade
 w_grp = Window.partitionBy("grupo_de_necessidade")
 
 df_proporcao_factual = (
     spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
+    .withColumn("DtAtual", F.to_date("DtAtual", "yyyy-MM-dd"))
+    .withColumn("CdSku", F.col("CdSku").cast("string"))
     .filter(F.col('DtAtual') >= inicio_janela)
     .filter(F.col('DtAtual') <= fim_janela)      
-    .filter(F.col("NmAgrupamentoDiretoriaSetor").isin('DIRETORIA LINHA LEVE'))
+    .filter(F.col("NmAgrupamentoDiretoriaSetor").isin('DIRETORIA DE LINHA BRANCA'))
     .fillna(0, subset=['deltaRuptura', 'QtMercadoria'])
     .withColumn("QtDemanda", F.col("QtMercadoria") + F.col("deltaRuptura"))
     .join(
-        spark.table("databox.bcg_comum.supply_grupo_de_necessidade_linha_leve"),
+        spark.table("databox.bcg_comum.supply_grupo_de_necessidade_linha_branca"),
         on="CdSku",
         how="left"
     )
     .dropna(subset='grupo_de_necessidade')
-    .filter(F.col("NmSetorGerencial")
-          .isin("BELEZA & SAUDE", "PORTATEIS"))
     .filter(~F.col("grupo_de_necessidade").isin('SEM_GN', 'FORA DE LINHA'))
-    .filter(F.col("CdSku").isin(skus_especies_top80))
     .groupBy('CdFilial', 'grupo_de_necessidade')
     .agg(
         F.round(F.sum('QtDemanda'), 0).alias('QtDemanda'),
@@ -317,8 +321,13 @@ for categoria in categorias_teste:
       )
       .join(df_matriz_neogrid_agg_offline,
             on=['CdFilial', 'grupo_de_necessidade'],
-            how="left")
-
+            how="inner")
+      #.fillna(
+      #      {
+      #          "PercMatrizNeogrid": 0.0,
+      #          "PercMatrizNeogrid_median": 0.0
+      #      }
+      #      )
       .fillna(0.0, subset=[
             'Percentual_QtDemanda',
             # 'Merecimento_Final_Media90_Qt_venda_sem_ruptura',
@@ -338,7 +347,7 @@ for categoria in categorias_teste:
       )
   )
 
-  df_acuracia[categoria].limit(1).display()
+  df_acuracia[categoria].limit(10).display()
 
 # COMMAND ----------
 
@@ -368,7 +377,7 @@ def add_smape_components(df, pred_col, real_col=COL_REAL, peso_col=COL_PESO, lab
 
 # === Lista de colunas de predição alvo ===
 pred_cols_base = list(colunas)  # ["Merecimento_Final_Media90_...", ...]
-extras = ["PercMatrizNeogrid"]  # , "PercMatrizNeogrid_median"]
+extras = ["PercMatrizNeogrid", "PercMatrizNeogrid_median"]
 
 def existing_pred_cols(df, base_cols, maybe_cols):
     present = [c for c in maybe_cols if c in df.columns]
@@ -497,7 +506,7 @@ if modelos_existentes_cat:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Análise de demanda por espécie de portáteis
+# MAGIC ## Análise de demanda por espécie
 
 # COMMAND ----------
 
