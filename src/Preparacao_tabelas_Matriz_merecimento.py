@@ -976,10 +976,8 @@ def process_incremental_from_start_date(
                 
                 print(f"✅ Lote {i} processado e salvo com sucesso!")
                 
-                # Forçar garbage collection entre lotes
-                if i % 1 == 0:  # A cada 1 lotes
-                    print("🔄 Forçando limpeza de memória entre lotes...")
-                    spark.catalog.clearCache()
+                # Nota: Limpeza de memória já é feita via unpersist() nos DataFrames específicos
+                # spark.catalog.clearCache() não é permitido no Databricks por questões de segurança
                 
             except Exception as e:
                 print(f"❌ ERRO no lote {i}: {e}")
@@ -993,7 +991,8 @@ def process_incremental_from_start_date(
         # Sempre limpar cache ao finalizar
         print("🧹 Limpeza final de memória...")
         cleanup_batch_memory()
-        spark.catalog.clearCache()
+        # Nota: spark.catalog.clearCache() não é permitido no Databricks por questões de segurança
+        # A limpeza já é feita via cleanup_batch_memory() que chama unpersist() nos DataFrames
         print("✅ Memória limpa e otimizada!")
 
 def monitor_memory_usage(spark: SparkSession) -> None:
