@@ -589,8 +589,8 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
                 df_produtos_filtrados
                 .select("StTipificacaoEntrega")
                 .distinct()
-                .rdd.flatMap(lambda x: x)
-                .collect()
+                .toPandas()["StTipificacaoEntrega"]
+                .tolist()
             )
             print(f"  🔍 Tipificações restantes: {sorted(tipificacoes_restantes)}")
         
@@ -608,8 +608,8 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
                 df_produtos_filtrados
                 .select("NmMarca")
                 .distinct()
-                .rdd.flatMap(lambda x: x)
-                .collect()
+                .toPandas()["NmMarca"]
+                .tolist()
             )
             marcas_excluidas_encontradas = [m for m in filtros_produtos["marcas_excluidas"] if m in marcas_restantes]
             if marcas_excluidas_encontradas:
@@ -646,7 +646,7 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
         print(f"  • Filtro de produtos não aplicado - usando dados originais")
     
     # Mostrar grupos disponíveis antes do filtro
-    grupos_disponiveis = df_base.select("grupo_de_necessidade").distinct().rdd.flatMap(lambda x: x).collect()
+    grupos_disponiveis = df_base.select("grupo_de_necessidade").distinct().toPandas()["grupo_de_necessidade"].tolist()
     print(f"\n📋 GRUPOS DISPONÍVEIS:")
     print(f"  • Total: {len(grupos_disponiveis)} grupos")
     print(f"  • Lista: {sorted(grupos_disponiveis)}")
@@ -680,7 +680,7 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
     print(f"  • Registros após filtro: {registros_pos_grupo:,} ({registros_pos_grupo - registros_inicial:+,})")
     
     # Verificar grupos restantes após filtro
-    grupos_restantes = df_filtrado.select("grupo_de_necessidade").distinct().rdd.flatMap(lambda x: x).collect()
+    grupos_restantes = df_filtrado.select("grupo_de_necessidade").distinct().toPandas()["grupo_de_necessidade"].tolist()
     print(f"  • Grupos restantes após filtro: {len(grupos_restantes)}")
     print(f"  • Lista dos grupos restantes: {sorted(grupos_restantes)}")
     
@@ -806,8 +806,8 @@ def carregar_e_filtrar_matriz(categoria: str, canal: str) -> DataFrame:
                 .select("CdFilial")
                 .distinct()
                 .orderBy("CdFilial")
-                .rdd.flatMap(lambda x: x)
-                .collect()
+                .toPandas()["CdFilial"]
+                .tolist()
             )
             print(f"📋 CDs Inválidos encontrados: {cds_invalidos_lista}")
             
@@ -1361,7 +1361,7 @@ def validar_integridade_dados(df: DataFrame) -> bool:
     
     # 4. Validar que ambos os canais são ONLINE e OFFLINE
     print("  📋 Validando tipos de canais...")
-    canais_unicos = df.select("CANAL").distinct().rdd.flatMap(lambda x: x).collect()
+    canais_unicos = df.select("CANAL").distinct().toPandas()["CANAL"].tolist()
     canais_esperados = ["ONLINE", "OFFLINE"]
     
     if set(canais_unicos) != set(canais_esperados):
@@ -1465,7 +1465,7 @@ def validar_pares_canais_arquivo(df_arquivo: DataFrame, num_arquivo: int) -> Non
         print(f"    ✅ Arquivo {num_arquivo + 1}: Todos os SKUs têm registros completos")
     
     # Verificar se os canais são ONLINE e OFFLINE
-    canais_arquivo = df_arquivo.select("CANAL").distinct().rdd.flatMap(lambda x: x).collect()
+    canais_arquivo = df_arquivo.select("CANAL").distinct().toPandas()["CANAL"].tolist()
     canais_esperados = ["ONLINE", "OFFLINE"]
     
     if not all(canal in canais_arquivo for canal in canais_esperados):
