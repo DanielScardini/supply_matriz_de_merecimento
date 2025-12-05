@@ -121,13 +121,11 @@ def coalesce_inteligente(df: DataFrame, max_particoes: int = None) -> DataFrame:
     if max_particoes is None:
         max_particoes = NUM_PARTICOES_IDEAL
     
-    num_particoes_atual = df.rdd.getNumPartitions()
-    
-    if num_particoes_atual > max_particoes:
-        print(f"  🔧 Coalesce: {num_particoes_atual} → {max_particoes} partições")
-        return df.coalesce(max_particoes)
-    else:
-        return df
+    # Nota: df.rdd.getNumPartitions() não é permitido no Databricks por questões de segurança
+    # Aplicamos coalesce diretamente, o Spark otimiza internamente se não houver necessidade
+    # de reduzir partições
+    print(f"  🔧 Aplicando coalesce para máximo de {max_particoes} partições")
+    return df.coalesce(max_particoes)
 
 NUM_PARTICOES_IDEAL = calcular_num_particoes_ideal(multiplier=1.5, max_cores=24)
 
