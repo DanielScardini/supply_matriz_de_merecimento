@@ -560,14 +560,15 @@ def determinar_grupo_necessidade(categoria: str, df: DataFrame) -> DataFrame:
 
 def consolidar_telas_especiais_em_tv_esp(df: DataFrame, categoria: str) -> DataFrame:
     """
-    Consolida todos os grupos de necessidade de telas especiais em um único grupo "TV ESP".
+    Consolida grupos de necessidade de telas ESP diferenciando por polegadas.
     
-    Agrupa gêmeos que contenham tecnologias especiais:
-    - ESP (Especial)
-    - QLED
-    - MINI LED
-    - QNED
-    - OLED
+    Para grupos que contenham "ESP" (Especial):
+    - Extrai o número de polegadas do nome do grupo
+    - Classifica em:
+      * "TV ESP SL" para TVs <= 65 polegadas
+      * "TV ESP SD" para TVs > 65 polegadas
+    
+    Outras tecnologias especiais (QLED, MINI LED, QNED, OLED) não são afetadas.
     
     Aplica apenas para categoria "DIRETORIA DE TELAS".
     
@@ -582,58 +583,81 @@ def consolidar_telas_especiais_em_tv_esp(df: DataFrame, categoria: str) -> DataF
         print(f"ℹ️  Consolidação de telas especiais não aplicada para categoria: {categoria}")
         return df
     
-    print("🔄 Consolidando telas especiais em grupo único 'TV ESP'...")
+    print("🔄 Consolidando telas ESP diferenciando por polegadas (<=65: SL, >65: SD)...")
     
-    # Lista de tecnologias especiais a serem identificadas (case-insensitive)
-    tecnologias_especiais = ["ESP", "QLED", "MINI LED", "QNED", "OLED"]
-    
-    # Criar condição para identificar grupos que contenham qualquer tecnologia especial
-    # Usar upper() para case-insensitive
-    condicao_tela_especial = F.lit(False)
-    for tecnologia in tecnologias_especiais:
-        condicao_tela_especial = condicao_tela_especial | (
-            F.upper(F.col("grupo_de_necessidade")).contains(F.upper(F.lit(tecnologia)))
-        )
+    # Condição para identificar grupos que contenham "ESP" (case-insensitive)
+    condicao_tela_esp = F.upper(F.col("grupo_de_necessidade")).contains("ESP")
     
     # Contar grupos antes da consolidação
     grupos_antes = df.select("grupo_de_necessidade").distinct().count()
-    grupos_especiais = (
+    grupos_esp = (
         df
-        .filter(condicao_tela_especial)
+        .filter(condicao_tela_esp)
         .select("grupo_de_necessidade")
         .distinct()
         .count()
     )
     
     print(f"  📊 Grupos antes da consolidação: {grupos_antes}")
-    print(f"  📊 Grupos especiais identificados: {grupos_especiais}")
+    print(f"  📊 Grupos ESP identificados: {grupos_esp}")
     
-    # Aplicar consolidação: substituir grupos especiais por "TV ESP"
-    df_consolidado = df.withColumn(
+    # Extrair número de polegadas do grupo usando regex
+    # Padrão: captura número que vem logo após "TV " (ex: "TV 50 ESP" -> 50, "TV 65 ESP MEDIO" -> 65)
+    # Regex: captura sequência de dígitos após "TV " (com ou sem espaço)
+    df_com_polegadas = df.withColumn(
+        "polegadas_extraidas",
+        F.regexp_extract(
+            F.col("grupo_de_necessidade"),
+            r"TV\s*(\d+)",
+            1
+        )
+    ).withColumn(
+        "polegadas_num",
+        F.when(
+            (F.col("polegadas_extraidas") != "") & (F.col("polegadas_extraidas").isNotNull()),
+            F.col("polegadas_extraidas").cast("int")
+        ).otherwise(F.lit(None))
+    )
+    
+    # Aplicar consolidação: substituir grupos ESP por "TV ESP SL" ou "TV ESP SD" baseado em polegadas
+    df_consolidado = df_com_polegadas.withColumn(
         "grupo_de_necessidade",
         F.when(
-            condicao_tela_especial,
-            F.lit("TV ESP")
+            condicao_tela_esp,
+            F.when(
+                (F.col("polegadas_num").isNotNull()) & (F.col("polegadas_num") <= 65),
+                F.lit("TV ESP SL")
+            ).when(
+                (F.col("polegadas_num").isNotNull()) & (F.col("polegadas_num") > 65),
+                F.lit("TV ESP SD")
+            ).otherwise(
+                # Se não conseguir extrair polegadas, mantém o grupo original
+                F.col("grupo_de_necessidade")
+            )
         ).otherwise(F.col("grupo_de_necessidade"))
-    )
+    ).drop("polegadas_extraidas", "polegadas_num")
     
     # Contar grupos depois da consolidação
     grupos_depois = df_consolidado.select("grupo_de_necessidade").distinct().count()
     
     # Mostrar exemplos de grupos consolidados
     grupos_consolidados = (
-        df
-        .filter(condicao_tela_especial)
+        df_consolidado
+        .filter(F.col("grupo_de_necessidade").isin(["TV ESP SL", "TV ESP SD"]))
         .select("grupo_de_necessidade")
         .distinct()
-        .limit(10)
         .collect()
     )
     grupos_lista = [row.grupo_de_necessidade for row in grupos_consolidados]
     
+    # Contar quantos grupos foram para cada categoria
+    grupos_sl = df_consolidado.filter(F.col("grupo_de_necessidade") == "TV ESP SL").select("grupo_de_necessidade").distinct().count()
+    grupos_sd = df_consolidado.filter(F.col("grupo_de_necessidade") == "TV ESP SD").select("grupo_de_necessidade").distinct().count()
+    
     print(f"  ✅ Grupos após consolidação: {grupos_depois}")
-    print(f"  📉 Redução: {grupos_antes - grupos_depois} grupos consolidados em 'TV ESP'")
-    print(f"  📋 Exemplos de grupos consolidados: {grupos_lista}")
+    print(f"  📊 Grupos consolidados em 'TV ESP SL' (<=65): {grupos_sl}")
+    print(f"  📊 Grupos consolidados em 'TV ESP SD' (>65): {grupos_sd}")
+    print(f"  📋 Grupos ESP criados: {grupos_lista}")
     
     return df_consolidado
 
