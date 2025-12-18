@@ -70,7 +70,7 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     
     for categoria in categorias:
         try:
-            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_online_teste0310"
+            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_{categoria}_online_teste0512"
             df_matriz = spark.table(nome_tabela)
             
             matrizes[categoria] = df_matriz

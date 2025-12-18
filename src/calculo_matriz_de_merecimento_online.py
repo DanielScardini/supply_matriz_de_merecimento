@@ -1,10 +1,4 @@
 # Databricks notebook source
-# MAGIC %sql SELECT * FROM databox.bcg_comum.supply_base_merecimento_diario_v4_online
-# MAGIC
-# MAGIC ORDER BY DtAtual DESC
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC # Cálculo da Matriz de Merecimento - Solução Unificada para Todas as Categorias
 # MAGIC
@@ -298,7 +292,8 @@ def carregar_de_para_gemeos_tecnologia(flag_excel = True) -> pd.DataFrame:
 DE_PARA_CONSOLIDACAO_CDS = {
   "14"  : "1401",
   "1635": "1200",
-  "1500": "1200",
+  #"1500": "1200",
+  "2500": "1500",
   "1640": "1401",
   "1088": "1200",
   "4760": "1760",
@@ -433,10 +428,10 @@ PARAMETROS_OUTLIERS = {
 }
 
 # Configuração das janelas móveis para médias aparadas
-JANELAS_MOVEIS_APARADAS = [90, 180, 270, 360]
+JANELAS_MOVEIS_APARADAS = [30, 90, 180, 270, 360]
 
 # Configuração específica para merecimento CD (sempre 180 dias)
-JANELA_CD_MERECIMENTO = 180
+JANELA_CD_MERECIMENTO = 30
 
 
 FILIAIS_ATACADO = [
@@ -1671,8 +1666,8 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
     # 2. Carregar todos os SKUs que existem na data especificada
     # ✅ Buscar a data mais recente disponível na tabela
     max_dt_estoque = (
-        spark.table('dev_logistica_ds.estoquegerencial')
-        .select(F.max("dtatual").alias("max_dt"))
+        spark.table('app_logistica.gi_boss_qualidade_estoque')
+        .select(F.max("DtAtual").alias("max_dt"))
         .collect()[0]["max_dt"]
     )
     
@@ -1683,19 +1678,18 @@ def criar_esqueleto_matriz_completa(df_com_grupo: DataFrame, data_calculo: str =
     
     # ✅ FILTRO CRÍTICO: Apenas SKUs obrigatórios ou sugeridos (igual ao OFFLINE)
     df_skus_data = (
-        spark.table('dev_logistica_ds.estoquegerencial')
+        spark.table('app_logistica.gi_boss_qualidade_estoque')
         .select(
-            F.col("cdfilial").cast("int").alias("CdFilial"),
+            F.col("CdFilial").cast("int").alias("CdFilial"),
             F.col("CdSku").cast("string").alias("CdSku"),
-            F.col("dtatual").cast("date").alias("DtAtual"),
-            F.col("DsObrigatorio").alias("DsObrigatorio"),
-            F.col("Cluster_Sugestao").alias('Cluster_Sugestao')
+            F.col("DtAtual").cast("date").alias("DtAtual"),
+            F.col("DsObrigatorio").alias("DsObrigatorio")
         )
         .filter(F.col("DtAtual") == max_dt_estoque)  # ✅ Usar data mais recente
         .filter(F.col("CdSku").isNotNull())
         .filter(
-            (F.col("DsObrigatorio") == 'S') | 
-            (F.col("Cluster_Sugestao") == 1)
+               (F.col("DsObrigatorio") == 'S') | 
+               (F.col("DsObrigatorio") == 'N')
         )
         .select("CdSku")
         .distinct()
@@ -2049,29 +2043,3 @@ print("\n" + "=" * 80)
 print("🎯 SCRIPT DE CÁLCULO CONCLUÍDO!")
 print("📋 Próximo passo: Executar script de análise de factual e comparações")
 print("=" * 80)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 📋 RESUMO FINAL DO SCRIPT DE CÁLCULO
-# MAGIC
-# MAGIC ### **O que este script faz:**
-# MAGIC 1. **Calcula matriz de merecimento** para todas as categorias
-# MAGIC 2. **Salva em tabelas específicas** por categoria
-# MAGIC 3. **PARA AQUI** - Não faz análise de factual nem comparações
-# MAGIC
-# MAGIC ### **Tabelas criadas:**
-# MAGIC - `supply_matriz_merecimento_TELAS`
-# MAGIC - `supply_matriz_merecimento_TELEFONIA_CELULAR`
-# MAGIC - `supply_matriz_merecimento_LINHA_BRANCA`
-# MAGIC - `supply_matriz_merecimento_LINHA_LEVE`
-# MAGIC - `supply_matriz_merecimento_INFO_GAMES`
-# MAGIC
-# MAGIC ### **Próximo passo:**
-# MAGIC Executar o script `analise_factual_comparacao_matrizes.py` para:
-# MAGIC - Análise de factual
-# MAGIC - Cálculo de sMAPE e WMAPE
-# MAGIC - Comparação com matriz DRP geral
-# MAGIC - Identificação de distorções
-# MAGIC
-# MAGIC **Este script está completo e finalizado!** 🎉

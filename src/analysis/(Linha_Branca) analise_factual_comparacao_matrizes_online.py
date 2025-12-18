@@ -76,7 +76,7 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
     
     for categoria in categorias:
         try:
-            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_de_linha_branca_online_teste0112"
+            nome_tabela = f"databox.bcg_comum.supply_matriz_merecimento_de_linha_branca_online_teste1512"
             df_matriz = spark.table(nome_tabela)
             
             matrizes[categoria] = df_matriz
@@ -92,7 +92,7 @@ def carregar_matrizes_merecimento_calculadas() -> Dict[str, DataFrame]:
 df_merecimento_online = {}
 df_merecimento_online['LINHA_BRANCA'] = carregar_matrizes_merecimento_calculadas()['LINHA_BRANCA']
 
-df_merecimento_online['LINHA_BRANCA'].limit(1).display()
+df_merecimento_online['LINHA_BRANCA'].orderBy("Merecimento_Final_MediaAparada30_Qt_venda_sem_ruptura", ascending=False).limit(100).display()
 
 # COMMAND ----------
 
@@ -162,8 +162,8 @@ df_matriz_neogrid_agg_online = (
 )
 
 #df_matriz_neogrid_online.cache()
-df_matriz_neogrid_online.limit(10).display()
-df_matriz_neogrid_agg_online.limit(10).display()
+df_matriz_neogrid_online.orderBy("PercMatrizNeogrid", ascending=False).limit(20).display()
+df_matriz_neogrid_agg_online.orderBy("PercMatrizNeogrid", ascending=False).limit(20).display()
 
 
 # COMMAND ----------
@@ -181,7 +181,7 @@ inicio_janela = F.date_sub(fim_janela, 29)
 w_grp = Window.partitionBy("grupo_de_necessidade")
 
 df_proporcao_factual = (
-    spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
+    spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4_online')
     .withColumn("DtAtual", F.to_date("DtAtual", "yyyy-MM-dd"))
     .withColumn("CdSku", F.col("CdSku").cast("string"))
     .filter(F.col('DtAtual') >= inicio_janela)
@@ -213,10 +213,12 @@ df_proporcao_factual = (
 #df_proporcao_factual.limit(1).display()
 
 colunas = [
+    # "Merecimento_Final_Media30_Qt_venda_sem_ruptura",
     # "Merecimento_Final_Media90_Qt_venda_sem_ruptura",
     # "Merecimento_Final_Media180_Qt_venda_sem_ruptura",
     # "Merecimento_Final_Media270_Qt_venda_sem_ruptura",
     # "Merecimento_Final_Media360_Qt_venda_sem_ruptura",
+    "Merecimento_Final_MediaAparada30_Qt_venda_sem_ruptura",
     "Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura",
     "Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura",
     # "Merecimento_Final_MediaAparada270_Qt_venda_sem_ruptura",
@@ -263,15 +265,7 @@ for categoria in categorias_teste:
       )
   )
 
-  df_acuracia[categoria].limit(10).display()
-
-# COMMAND ----------
-
-media = df_acuracia[categoria].agg(
-    F.avg("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura")
-).first()[0]
-
-print(media)
+  df_acuracia[categoria].orderBy("Percentual_QtDemanda", ascending=False).limit(100).display()
 
 
 # COMMAND ----------
@@ -358,7 +352,7 @@ metrics_all.orderBy("categoria", "modelo").display()
 
 # Modelos a exibir no pivot (fácil de alterar)
 MODELOS_EXIBIR = [
-    "Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura",
+    "Merecimento_Final_MediaAparada30_Qt_venda_sem_ruptura",
     "PercMatrizNeogrid"
 ]
 
@@ -404,7 +398,7 @@ if modelos_existentes_cat:
     # Renomear colunas
     for modelo in modelos_existentes_cat:
         if modelo in df_metrics_pivot.columns:
-            nome_simples = modelo.replace("Merecimento_Final_", "").replace("MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada90")
+            nome_simples = modelo.replace("Merecimento_Final_", "").replace("MediaAparada30_Qt_venda_sem_ruptura", "MediaAparada30")
             nome_simples = nome_simples.replace("PercMatrizNeogrid", "Neogrid")
             df_metrics_pivot = df_metrics_pivot.withColumnRenamed(modelo, f"wSMAPE_{nome_simples}")
     
@@ -550,7 +544,7 @@ if modelos_existentes:
     # Renomear colunas para facilitar leitura (remover partes longas do nome)
     for modelo in modelos_existentes:
         if modelo in df_wmape_pivot.columns:
-            nome_simples = modelo.replace("Merecimento_Final_", "").replace("MediaAparada90_Qt_venda_sem_ruptura", "MediaAparada90")
+            nome_simples = modelo.replace("Merecimento_Final_", "").replace("MediaAparada30_Qt_venda_sem_ruptura", "MediaAparada30")
             nome_simples = nome_simples.replace("PercMatrizNeogrid", "Neogrid")
             df_wmape_pivot = df_wmape_pivot.withColumnRenamed(modelo, f"wSMAPE_{nome_simples}")
     
@@ -569,6 +563,271 @@ else:
     print(f"⚠️ Nenhum dos modelos selecionados foi encontrado!")
     print(f"   Modelos disponíveis: {modelos_disponiveis}")
     print(f"   Modelos solicitados: {MODELOS_EXIBIR}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Diagnóstico
+
+# COMMAND ----------
+
+from pyspark.sql import functions as F
+from pyspark.sql import Window
+
+categoria = "LINHA_BRANCA"  # ou "INFO_GAMES"
+
+COL_REAL   = "Percentual_QtDemanda"
+COL_PESO   = "QtDemanda"
+COL_BCG    = "Merecimento_Final_MediaAparada30_Qt_venda_sem_ruptura"
+COL_NEO    = "PercMatrizNeogrid"
+
+# ============================================================
+# 1) BASE COM ERRO POR LINHA (BCG x NEOGRID)
+# ============================================================
+
+df0 = (
+    df_acuracia[categoria]
+    .fillna(0.0, subset=[COL_REAL, COL_PESO, COL_BCG, COL_NEO])
+    .withColumn("real", F.col(COL_REAL))
+    .withColumn("prev_bcg", F.col(COL_BCG))
+    .withColumn("prev_neo", F.col(COL_NEO))
+)
+
+# sMAPE BCG
+den_bcg = F.abs(F.col("prev_bcg")) + F.abs(F.col("real"))
+df_err = (
+    df0
+    .withColumn(
+        "sMAPE_bcg",
+        F.when(den_bcg == 0, 0.0)
+         .otherwise(200.0 * F.abs(F.col("prev_bcg") - F.col("real")) / den_bcg)
+    )
+)
+
+# sMAPE Neogrid
+den_neo = F.abs(F.col("prev_neo")) + F.abs(F.col("real"))
+df_err = (
+    df_err
+    .withColumn(
+        "sMAPE_neo",
+        F.when(den_neo == 0, 0.0)
+         .otherwise(200.0 * F.abs(F.col("prev_neo") - F.col("real")) / den_neo)
+    )
+    # contribuição no WSMAPE (sMAPE * peso)
+    .withColumn("WSMAPE_comp_bcg", F.col("sMAPE_bcg") * F.col(COL_PESO))
+    .withColumn("WSMAPE_comp_neo", F.col("sMAPE_neo") * F.col(COL_PESO))
+)
+
+# ============================================================
+# 2) TABELAS EXECUTIVAS POR GRUPO DE NECESSIDADE
+#    (quais GNs mais puxam o WSMAPE)
+# ============================================================
+
+w_all = Window.rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing)
+
+df_gn = (
+    df_err
+    .groupBy("grupo_de_necessidade")
+    .agg(
+        F.sum("WSMAPE_comp_bcg").alias("ErroBCG"),
+        F.sum("WSMAPE_comp_neo").alias("ErroNeogrid"),
+        F.sum(COL_PESO).alias("Volume"),
+        F.avg("sMAPE_bcg").alias("sMAPE_medio_BCG"),
+        F.avg("sMAPE_neo").alias("sMAPE_medio_Neogrid")
+    )
+    # share de erro de cada GN no WSMAPE total de cada modelo
+    .withColumn("TotalErroBCG",     F.sum("ErroBCG").over(w_all))
+    .withColumn("TotalErroNeogrid", F.sum("ErroNeogrid").over(w_all))
+    .withColumn("ShareErroBCG_pct",     100.0 * F.col("ErroBCG")     / F.col("TotalErroBCG"))
+    .withColumn("ShareErroNeogrid_pct", 100.0 * F.col("ErroNeogrid") / F.col("TotalErroNeogrid"))
+)
+
+# Tabela 1: GNs que mais contribuem para o WSMAPE da MATRIZ BCG
+df_top_gn_bcg = (
+    df_gn
+    .orderBy(F.col("ShareErroBCG_pct").desc())
+)
+
+df_top_gn_bcg.display()
+
+# Tabela 2: GNs que mais contribuem para o WSMAPE da NEOGRID
+df_top_gn_neo = (
+    df_gn
+    .orderBy(F.col("ShareErroNeogrid_pct").desc())
+)
+
+df_top_gn_neo.display()
+
+# ============================================================
+# 3) LOJAS MAIS CRÍTICAS NA MATRIZ BCG
+#    (impacto no WSMAPE + explicação por GN)
+# ============================================================
+
+# 3.1. Impacto por LOJA (quanto cada loja puxa o WSMAPE da BCG)
+df_filial = (
+    df_err
+    .groupBy("CdFilial")
+    .agg(
+        F.sum("WSMAPE_comp_bcg").alias("ErroBCG_filial"),
+        F.sum(COL_PESO).alias("Volume_filial")
+    )
+    .withColumn("WSMAPE_filial_BCG", F.col("ErroBCG_filial") / F.col("Volume_filial"))
+    .withColumn("TotalErroBCG", F.sum("ErroBCG_filial").over(w_all))
+    .withColumn("ShareErroBCG_filial_pct", 100.0 * F.col("ErroBCG_filial") / F.col("TotalErroBCG"))
+    .orderBy(F.col("ErroBCG_filial").desc())  # impacto absoluto no WSMAPE
+)
+
+# Top N lojas mais relevantes para explicar o gráfico
+N_TOP_LOJAS = 20
+df_top_lojas = df_filial.limit(N_TOP_LOJAS)
+
+df_top_lojas.display()
+
+# 3.2. Dentro das TOP LOJAS, quais GNs explicam o erro? (por que o ponto está tão errado)
+
+top_lojas_ids = [r["CdFilial"] for r in df_top_lojas.select("CdFilial").collect()]
+df_top_lojas_ids = spark.createDataFrame([(i,) for i in top_lojas_ids], ["CdFilial"])
+
+df_lojas_gn = (
+    df_err
+    .join(F.broadcast(df_top_lojas_ids), on="CdFilial", how="inner")
+    .groupBy("CdFilial", "grupo_de_necessidade")
+    .agg(
+        F.sum(COL_PESO).alias("Volume_gn_filial"),
+        F.sum("WSMAPE_comp_bcg").alias("ErroBCG_gn_filial"),
+        F.avg("real").alias("Real_medio"),
+        F.avg("prev_bcg").alias("PrevBCG_media"),
+        F.avg(F.abs(F.col("prev_bcg") - F.col("real"))).alias("ErroAbs_medio")
+    )
+)
+
+w_filial = Window.partitionBy("CdFilial").rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing)
+
+df_lojas_gn_expl = (
+    df_lojas_gn
+    .withColumn("ErroBCG_filial_total", F.sum("ErroBCG_gn_filial").over(w_filial))
+    .withColumn("ShareErro_gn_na_filial_pct",
+                100.0 * F.col("ErroBCG_gn_filial") / F.col("ErroBCG_filial_total"))
+    .orderBy("CdFilial", F.col("ShareErro_gn_na_filial_pct").desc())
+)
+
+df_lojas_gn_expl.display()
+
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Tabela de Resultados (Porte e Região)
+
+# COMMAND ----------
+
+from pyspark.sql import functions as F
+from pyspark.sql import Window
+
+categoria = "LINHA_BRANCA"
+
+# 1) De-para de filial -> porte + região
+df_filiais = (
+    spark.table("data_engineering_prd.app_operacoesloja.roteirizacaolojaativa")
+    .select(
+        "CdFilial",
+        "NmPorteLoja",
+        "NmRegiaoGeografica"
+    )
+    .dropDuplicates(["CdFilial"])
+)
+
+# 2) Junta com df_acuracia (Neogrid + nossa matriz + demanda)
+df_acuracia_regiao_porte = (
+    df_acuracia[categoria]
+    .join(df_filiais, on="CdFilial", how="left")
+)
+
+# ============================================================
+# TABELA 1 — SHARE DE MERECIMENTO POR REGIÃO
+# ============================================================
+
+df_regiao_raw = (
+    df_acuracia_regiao_porte
+    .groupBy("NmRegiaoGeografica")
+    .agg(
+        F.sum("PercMatrizNeogrid").alias("Soma_Merecimento_Neogrid"),
+        F.sum("Merecimento_Final_MediaAparada30_Qt_venda_sem_ruptura").alias("Soma_Merecimento_BCG")
+    )
+)
+
+# normaliza para virar % da categoria (soma = 100)
+w_all_reg = Window.rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing)
+
+df_delta_regiao = (
+    df_regiao_raw
+    .withColumn(
+        "Total_Merecimento_Neogrid",
+        F.sum("Soma_Merecimento_Neogrid").over(w_all_reg)
+    )
+    .withColumn(
+        "Total_Merecimento_BCG",
+        F.sum("Soma_Merecimento_BCG").over(w_all_reg)
+    )
+    .withColumn(
+        "Share_Merecimento_Neogrid_pct",
+        100.0 * F.col("Soma_Merecimento_Neogrid") / F.col("Total_Merecimento_Neogrid")
+    )
+    .withColumn(
+        "Share_Merecimento_BCG_pct",
+        100.0 * F.col("Soma_Merecimento_BCG") / F.col("Total_Merecimento_BCG")
+    )
+    .withColumn(
+        "Delta_Share_p.p.",
+        F.col("Share_Merecimento_BCG_pct") - F.col("Share_Merecimento_Neogrid_pct")
+    )
+    .orderBy("NmRegiaoGeografica")
+)
+
+df_delta_regiao.display()
+
+# ============================================================
+# TABELA 2 — SHARE DE MERECIMENTO POR PORTE
+# ============================================================
+
+df_porte_raw = (
+    df_acuracia_regiao_porte
+    .groupBy("NmPorteLoja")
+    .agg(
+        F.sum("PercMatrizNeogrid").alias("Soma_Merecimento_Neogrid"),
+        F.sum("Merecimento_Final_MediaAparada30_Qt_venda_sem_ruptura").alias("Soma_Merecimento_BCG")
+    )
+)
+
+w_all_porte = Window.rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing)
+
+df_delta_porte = (
+    df_porte_raw
+    .withColumn(
+        "Total_Merecimento_Neogrid",
+        F.sum("Soma_Merecimento_Neogrid").over(w_all_porte)
+    )
+    .withColumn(
+        "Total_Merecimento_BCG",
+        F.sum("Soma_Merecimento_BCG").over(w_all_porte)
+    )
+    .withColumn(
+        "Share_Merecimento_Neogrid_pct",
+        100.0 * F.col("Soma_Merecimento_Neogrid") / F.col("Total_Merecimento_Neogrid")
+    )
+    .withColumn(
+        "Share_Merecimento_BCG_pct",
+        100.0 * F.col("Soma_Merecimento_BCG") / F.col("Total_Merecimento_BCG")
+    )
+    .withColumn(
+        "Delta_Share_p.p.",
+        F.col("Share_Merecimento_BCG_pct") - F.col("Share_Merecimento_Neogrid_pct")
+    )
+    .orderBy("NmPorteLoja")
+)
+
+df_delta_porte.display()
+
 
 # COMMAND ----------
 
@@ -593,7 +852,7 @@ for categoria in categorias_teste:
     df_tmp = (
         df_base
         .withColumn("merecimento_percentual",
-                    F.col("Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura"))
+                    F.col("Merecimento_Final_MediaAparada30_Qt_venda_sem_ruptura"))
         .join(
             spark.table('data_engineering_prd.app_operacoesloja.roteirizacaolojaativa')
             .select("CdFilial", "NmFilial", "NmPorteLoja", "NmRegiaoGeografica"),
@@ -696,6 +955,7 @@ for categoria in categorias_teste:
     else:
         print(f"[{categoria}] Coluna PercMatrizNeogrid não disponível para plot.")
 
+
 # COMMAND ----------
 
 # MAGIC %md
@@ -710,7 +970,7 @@ def criar_de_para_filial_cd() -> DataFrame:
     print("🔄 Criando de-para filial → CD...")
     
     df_base = (
-        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4')
+        spark.table('databox.bcg_comum.supply_base_merecimento_diario_v4_online')
         .filter(F.col("DtAtual") == "2025-08-01")
         .filter(F.col("CdSku").isNotNull())
     )
@@ -744,10 +1004,12 @@ for categoria in categorias_teste:
         .agg(
             F.sum("QtDemanda").alias("QtDemanda"),
             F.sum("Percentual_QtDemanda").alias("Percentual_QtDemanda"),
+            # F.sum("Merecimento_Final_Media30_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media30_Qt_venda_sem_ruptura"),
             # F.sum("Merecimento_Final_Media90_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media90_Qt_venda_sem_ruptura"),
             # F.sum("Merecimento_Final_Media180_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media180_Qt_venda_sem_ruptura"),
             # F.sum("Merecimento_Final_Media270_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media270_Qt_venda_sem_ruptura"),
             # F.sum("Merecimento_Final_Media360_Qt_venda_sem_ruptura").alias("Merecimento_Final_Media360_Qt_venda_sem_ruptura"),
+            F.sum("Merecimento_Final_MediaAparada30_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada30_Qt_venda_sem_ruptura"),
             F.sum("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura"),
             F.sum("Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura"),
             # F.sum("Merecimento_Final_MediaAparada270_Qt_venda_sem_ruptura").alias("Merecimento_Final_MediaAparada270_Qt_venda_sem_ruptura"),
@@ -882,7 +1144,7 @@ from pyspark.sql import functions as F
 
 COL_REAL = "Percentual_QtDemanda"
 COL_PESO = "QtDemanda"
-METRICA_Y = "Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura"  # ajuste aqui
+METRICA_Y = "Merecimento_Final_MediaAparada30_Qt_venda_sem_ruptura"  # ajuste aqui
 
 def _axis_range(arr, pad=0.04, min0=True):
     arr = np.asarray(arr, dtype=float)

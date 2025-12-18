@@ -36,7 +36,7 @@ except:
 
 # 1. Data e Tempo
 dbutils.widgets.text("data_exportacao", datetime.now().strftime("%Y-%m-%d"), "📅 Data de Exportação (YYYY-MM-DD)")
-dbutils.widgets.dropdown("dias_data_fim", "60", ["30", "60", "90", "120"], "📆 Dias para DATA FIM")
+#dbutils.widgets.dropdown("dias_data_fim", "60", ["30", "60", "90", "120"], "📆 Dias para DATA FIM")
 
 # 2. Seleção de Categorias
 dbutils.widgets.multiselect(
@@ -59,7 +59,7 @@ dbutils.widgets.dropdown("exportar_validacao", "Sim", ["Sim", "Não"], "✅ Expo
 
 # Obter valores dos widgets
 DATA_EXPORTACAO = dbutils.widgets.get("data_exportacao")
-DIAS_DATA_FIM = int(dbutils.widgets.get("dias_data_fim"))
+#DIAS_DATA_FIM = int(dbutils.widgets.get("dias_data_fim"))
 CATEGORIAS_SELECIONADAS = [c.strip() for c in dbutils.widgets.get("categorias").split(",") if c.strip()] if dbutils.widgets.get("categorias") else []
 SUFIXO_OFFLINE = dbutils.widgets.get("sufixo_offline")
 SUFIXO_ONLINE = dbutils.widgets.get("sufixo_online")
@@ -95,7 +95,7 @@ print(f"📅 Data fim (+{DIAS_DATA_FIM} dias): {DATA_FIM.strftime('%Y-%m-%d')} �
 MAPEAMENTO_APELIDOS = {
     "DIRETORIA DE TELAS": "de_telas",
     "DIRETORIA TELEFONIA CELULAR": "telefonia_celular",
-    "DIRETORIA DE LINHA BRANCA": "linha_branca",
+    "DIRETORIA DE LINHA BRANCA": "de_linha_branca",
     "DIRETORIA LINHA LEVE": "linha_leve",
     "DIRETORIA INFO/PERIFERICOS": "info_perifericos",
 
@@ -234,10 +234,10 @@ PASTA_OUTPUT = "/Workspace/Users/daniel.scardini-ext@viavarejo.com.br/supply/sup
 # Colunas de merecimento por categoria
 COLUNAS_MERECIMENTO = {
     "DIRETORIA DE TELAS": "Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura",
-    "DIRETORIA TELEFONIA CELULAR": "Merecimento_Final_MediaAparada90_Qt_venda_sem_ruptura",
-    "DIRETORIA LINHA BRANCA": "Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura" ,
+    "DIRETORIA TELEFONIA CELULAR": "Merecimento_Final_MediaAparada_Qt_venda_sem_ruptura",
+    "DIRETORIA DE LINHA BRANCA": "Merecimento_Final_MediaAparada30_Qt_venda_sem_ruptura" ,
     "DIRETORIA LINHA LEVE": "Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura",
-    "DIRETORIA INFO/PERIFERICOS": "Merecimento_Final_MediaAparada180_Qt_venda_sem_ruptura"
+    "DIRETORIA INFO/PERIFERICOS": "Merecimento_Final_MediaAparada30_Qt_venda_sem_ruptura"
 }
 
 # Filtros
@@ -264,23 +264,45 @@ FILTROS_GRUPO_REMOCAO = {
                             "TV 75 QLED / OLED ALTO",
                             "TV 75 QLED PP",
                             "TV 75 QNED ALTO",
-                            "TV 75 QNED MEDIO",],
+                            "TV 75 QNED MEDIO",
+                            "TV ESP SL",
+                            "TV ESP SD"],
     
-    "DIRETORIA TELEFONIA CELULAR": ["FORA DE LINHA", "SEM_GN", ">4000", "3001 a 3500", "Chip"],
+    "DIRETORIA TELEFONIA CELULAR": [
+                                    "FORA DE LINHA",
+                                    "Chip",
+                                    "SEM_GN",
+                                    "3001 a 3500",
+                                    "2501 a 3000",
+                                    "2001 a 2500",
+                                    "1601 a 2000",
+                                    "1200 a 1600",
+                                    ">4000",
+                                    "<799",
+                                    "<1099"
+                                    ],
 
-    "DIRETORIA LINHA LEVE": ["FORA DE LINHA", "SEM_GN", "ASPIRADOR DE PO_BIV", "APARADOR DE PELOS_110", "SECADORES DE CABELO_"],
+    "DIRETORIA LINHA LEVE": 
+        ["FORA DE LINHA", "SEM_GN", "ASPIRADOR DE PO_BIV", "APARADOR DE PELOS_110", "SECADORES  DE CABELO_"],
+        
+    "DIRETORIA INFO/PERIFERICOS": [],
+    "DIRETORIA DE LINHA BRANCA": [],
 }
 
 FLAG_SELECAO_REMOCAO = {
     "DIRETORIA DE TELAS": "REMOÇÃO",
     "DIRETORIA TELEFONIA CELULAR": "REMOÇÃO",
     "DIRETORIA LINHA LEVE": "REMOÇÃO",
+    "DIRETORIA INFO/PERIFERICOS": "REMOÇÃO",
+    "DIRETORIA DE LINHA BRANCA": "REMOÇÃO"
 }
 
 FILTROS_GRUPO_SELECAO = {
     "DIRETORIA DE TELAS": [],
     "DIRETORIA TELEFONIA CELULAR": [],
     "DIRETORIA LINHA LEVE": [],
+    "DIRETORIA INFO/PERIFERICOS": [],
+    "DIRETORIA DE LINHA BRANCA": []
 }
 
 # Limite de linhas por arquivo (usar valor do widget)
@@ -290,22 +312,22 @@ MAX_LINHAS_POR_ARQUIVO = MAX_LINHAS
 FILTROS_PRODUTOS = {
     "DIRETORIA DE TELAS": {
         "tipificacao_entrega": ["SL"],  # Apenas SL (Sai Loja)
-        "marcas_excluidas": [],  # Excluir marca APPLE
+        "marcas_excluidas": [],  # Excluir marca
         "aplicar_filtro": True
     },
     "DIRETORIA TELEFONIA CELULAR": {
         "tipificacao_entrega": ["SL"],  # Apenas SL (Sai Loja)
-        "marcas_excluidas": ["APPLE"],  # Excluir marca APPLE
+        "marcas_excluidas": [],  # Excluir marca
         "aplicar_filtro": True
     },
     "DIRETORIA LINHA LEVE": {
         "tipificacao_entrega": ["SL"],  # Apenas SL (Sai Loja)
-        "marcas_excluidas": ["APPLE"],  # Excluir marca APPLE
+        "marcas_excluidas": [],  # Excluir marca
         "aplicar_filtro": True
     },
     "DIRETORIA LINHA BRANCA": {
         "tipificacao_entrega": ["SL"],  # Apenas SL (Sai Loja)
-        "marcas_excluidas": ["APPLE"],  # Excluir marca APPLE
+        "marcas_excluidas": [],  # Excluir marca
         "aplicar_filtro": True
     }
 }
@@ -313,7 +335,7 @@ FILTROS_PRODUTOS = {
 # Configuração global de filtros de produtos (fallback)
 FILTROS_PRODUTOS_GLOBAL = {
     "tipificacao_entrega": ["SL"],  # Apenas SL (Sai Loja)
-    "marcas_excluidas": ["APPLE"],  # Excluir marca APPLE
+    "marcas_excluidas": [],  # Excluir marca
     "aplicar_filtro": True
 }
 
@@ -381,7 +403,7 @@ if "DIRETORIA LINHA LEVE" in CATEGORIAS_SELECIONADAS:
     # Filtrar grupos top 80% por demanda
     grupos_top80 = (
         df_demanda_grupos
-        .filter(F.col("PercDemandaCumulativo") <= 80)
+        .filter(F.col("PercDemandaCumulativo") <= 90)
         .select("grupo_de_necessidade")
         .toPandas()["grupo_de_necessidade"]
         .tolist()
@@ -389,7 +411,7 @@ if "DIRETORIA LINHA LEVE" in CATEGORIAS_SELECIONADAS:
     
     print(f"\n📊 GRUPOS TOP 80% IDENTIFICADOS:")
     print(f"  • Total de grupos top 80%: {len(grupos_top80)}")
-    print(f"  • Grupos: {grupos_top80[:10]}..." if len(grupos_top80) > 10 else f"  • Grupos: {grupos_top80}")
+    print(f"  • Grupos: {grupos_top80[:50]}..." if len(grupos_top80) > 10 else f"  • Grupos: {grupos_top80}")
     
     # Validar percentual
     perc_total = df_demanda_grupos.filter(F.col("grupo_de_necessidade").isin(grupos_top80)).agg(F.sum("PercDemanda")).collect()[0][0]
@@ -1432,7 +1454,7 @@ def validar_integridade_dados(df: DataFrame) -> bool:
     
     # 3. Validar que para cada SKU, ambos os canais estão presentes
     print("  🔄 Validando presença de ambos os canais por SKU...")
-    
+   
     df_canais_por_sku = (
         df
         .groupBy("SKU")
@@ -1560,7 +1582,7 @@ def validar_pares_canais_arquivo(df_arquivo: DataFrame, num_arquivo: int) -> Non
     # Verificar se os canais são ONLINE e OFFLINE
     canais_arquivo = df_arquivo.select("CANAL").distinct().toPandas()["CANAL"].tolist()
     canais_esperados = ["ONLINE", "OFFLINE"]
-    
+   
     if not all(canal in canais_arquivo for canal in canais_esperados):
         print(f"    ⚠️  AVISO: Arquivo {num_arquivo + 1} não tem ambos os canais: {canais_arquivo}")
     else:
