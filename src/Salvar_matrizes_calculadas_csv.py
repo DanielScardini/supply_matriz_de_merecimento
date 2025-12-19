@@ -36,7 +36,7 @@ except:
 
 # 1. Data e Tempo
 dbutils.widgets.text("data_exportacao", datetime.now().strftime("%Y-%m-%d"), "📅 Data de Exportação (YYYY-MM-DD)")
-#dbutils.widgets.dropdown("dias_data_fim", "60", ["30", "60", "90", "120"], "📆 Dias para DATA FIM")
+dbutils.widgets.dropdown("dias_data_fim", "60", ["30", "60", "90", "120"], "📆 Dias para DATA FIM")
 
 # 2. Seleção de Categorias
 dbutils.widgets.multiselect(
@@ -58,9 +58,9 @@ dbutils.widgets.dropdown("max_linhas_arquivo", "150000", ["100000", "150000", "2
 dbutils.widgets.dropdown("exportar_validacao", "Sim", ["Sim", "Não"], "✅ Exportar Excel de Validação")
 
 # Obter valores dos widgets
-DATA_EXPORTACAO = dbutils.widgets.get("data_exportacao")
-#DIAS_DATA_FIM = int(dbutils.widgets.get("dias_data_fim"))
 CATEGORIAS_SELECIONADAS = [c.strip() for c in dbutils.widgets.get("categorias").split(",") if c.strip()] if dbutils.widgets.get("categorias") else []
+DATA_EXPORTACAO = dbutils.widgets.get("data_exportacao")
+DIAS_DATA_FIM = int(dbutils.widgets.get("dias_data_fim"))
 SUFIXO_OFFLINE = dbutils.widgets.get("sufixo_offline")
 SUFIXO_ONLINE = dbutils.widgets.get("sufixo_online")
 FORMATO = dbutils.widgets.get("formato")
@@ -81,6 +81,8 @@ DATA_FIM_INT = int(DATA_FIM.strftime("%Y%m%d"))
 
 print(f"📅 Data atual: {DATA_ATUAL.strftime('%Y-%m-%d')}")
 print(f"📅 Data fim (+{DIAS_DATA_FIM} dias): {DATA_FIM.strftime('%Y-%m-%d')} → {DATA_FIM_INT}")
+
+
 
 # COMMAND ----------
 
@@ -1956,11 +1958,3 @@ if EXPORTAR_VALIDACAO:
     resultados_validacao = exportar_excel_validacao_todas_categorias()
 else:
     print("ℹ️ Exportação de validação desabilitada via widget")
-
-# COMMAND ----------
-
-# Exemplo: exportar apenas uma categoria
-# arquivos = exportar_matriz_csv("DIRETORIA TELEFONIA CELULAR")
-
-# Exemplo: exportar apenas validação de uma categoria
-# arquivo_validacao = exportar_excel_validacao_grupo_necessidade("DIRETORIA TELEFONIA CELULAR")
